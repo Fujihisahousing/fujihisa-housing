@@ -1,4 +1,4 @@
-// レントロール（画面）。Excel出力は M4。
+// レントロール（画面）。Excel出力は M4、
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
 import { unitsRepo } from '../../lib/repositories'
@@ -71,12 +71,18 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                 <Th>号室</Th>
                 <Th>間取</Th>
                 <Th className="text-right">面積</Th>
+                <Th>用途</Th>
+                <Th>入居者属性</Th>
                 <Th className="text-right">賃料</Th>
                 <Th className="text-right">共益費</Th>
                 <Th className="text-right">合計</Th>
                 <Th className="text-right">敷金</Th>
+                <Th className="text-right">礼金</Th>
+                <Th className="text-right">返還金</Th>
+                <Th>駐輪・駐車</Th>
                 <Th>契約満了</Th>
                 <Th>状況</Th>
+                <Th>備考</Th>
               </tr>
             </thead>
             <tbody>
@@ -85,10 +91,15 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                   <Td className="font-medium">{u.room}</Td>
                   <Td>{u.layout}</Td>
                   <Td className="text-right">{u.area ? `${u.area}㎡` : '—'}</Td>
+                  <Td>{u.use_type || '—'}</Td>
+                  <Td>{u.tenant_type || '—'}</Td>
                   <Td className="text-right tabular-nums">{yen(u.rent)}</Td>
                   <Td className="text-right tabular-nums">{yen(u.kyoeki)}</Td>
                   <Td className="text-right tabular-nums font-medium">{yen(total)}</Td>
                   <Td className="text-right tabular-nums">{yen(u.deposit)}</Td>
+                  <Td className="text-right tabular-nums">{yen(u.key_money)}</Td>
+                  <Td className="text-right tabular-nums">{u.refund != null ? yen(u.refund) : '—'}</Td>
+                  <Td>{u.parking || '—'}</Td>
                   <Td>{u.contract_end ? formatDate(u.contract_end) : '—'}</Td>
                   <Td>
                     <span
@@ -100,6 +111,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                       {u.status}
                     </span>
                   </Td>
+                  <Td className="max-w-[12rem] truncate" >{u.notes || '—'}</Td>
                 </tr>
               ))}
             </tbody>
