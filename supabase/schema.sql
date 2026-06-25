@@ -90,6 +90,15 @@ alter table profiles     enable row level security;
 alter table leases       enable row level security;
 
 -- ポリシー：物件・部屋・入出金・設定はログイン済みなら可（個人情報は含まない）
+-- ※ create policy は IF NOT EXISTS が使えないため、再実行に備え drop policy if exists を前置する。
+drop policy if exists "auth all properties"   on properties;
+drop policy if exists "auth all units"         on units;
+drop policy if exists "auth all transactions"  on transactions;
+drop policy if exists "auth all settings"      on settings;
+drop policy if exists "profiles self read"     on profiles;
+drop policy if exists "profiles admin write"   on profiles;
+drop policy if exists "leases admin only"      on leases;
+
 create policy "auth all properties"   on properties   for all to authenticated using (true) with check (true);
 create policy "auth all units"         on units         for all to authenticated using (true) with check (true);
 create policy "auth all transactions"  on transactions  for all to authenticated using (true) with check (true);
