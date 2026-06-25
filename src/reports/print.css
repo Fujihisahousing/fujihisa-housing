@@ -1,0 +1,32 @@
+/* 物件概要書のA4印刷レイアウト（SOW 6.7）。Prospectus から読み込む。 */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  /* 画面を全部隠し、概要書だけ印刷する */
+  body * {
+    visibility: hidden;
+  }
+  #print-root,
+  #print-root * {
+    visibility: visible;
+  }
+  #print-root {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /* 印刷時は背景色・枠を簡素化 */
+  #print-root .sheet {
+    box-shadow: none !important;
+    border: none !important;
+  }
+}
