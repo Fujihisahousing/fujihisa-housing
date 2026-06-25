@@ -35,7 +35,7 @@ export function LoginView() {
             <Building2 className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold leading-tight text-slate-800">RentBook</h1>
+            <h1 className="text-lg font-bold leading-tight text-slate-800">フジヒサハウジング管理台帳</h1>
             <p className="text-xs text-slate-500">収益物件管理システム</p>
           </div>
         </div>
