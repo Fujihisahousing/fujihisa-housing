@@ -21,11 +21,19 @@ create table if not exists units (
   id uuid primary key default gen_random_uuid(),
   property_id uuid references properties(id) on delete cascade,
   room text, layout text, area numeric,
+  use_type text, tenant_type text,
   rent numeric default 0, kyoeki numeric default 0,
   deposit numeric default 0, key_money numeric default 0,
+  refund numeric, parking text,
   status text default '空室', tenant text, guarantor text, payment_method text,
   contract_start date, contract_end date, notes text, created_at timestamptz default now()
 );
+
+-- 既存環境向け（冪等）：上記4列を後付けする場合
+alter table units add column if not exists use_type text;
+alter table units add column if not exists tenant_type text;
+alter table units add column if not exists refund numeric;
+alter table units add column if not exists parking text;
 
 -- 入出金
 create table if not exists transactions (
@@ -228,7 +236,7 @@ begin
     pii_encrypt(p->>'guarantor_address'), pii_encrypt(p->>'guarantor_phone'),
     p->>'guarantor_company', p->>'guarantor_contract_no', p->>'guarantor_period',
     nullif(p->>'rent', '')::numeric, nullif(p->>'kyoeki', '')::numeric,
-    nullif(p->>'deposit', '')::numeric, nullif(p->>'key_money', '')::numeric,
+    nullif(p->>'deposit', '')::numeric, nullif(p->?'key_money', '')::numeric,
     nullif(p->>'move_in', '')::date, nullif(p->>'move_out', '')::date, p->>'move_out_reason',
     pii_encrypt(p->>'forwarding_address'),
     nullif(p->>'deposit_settlement', '')::numeric, nullif(p->>'restoration_cost', '')::numeric,
