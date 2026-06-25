@@ -60,7 +60,7 @@ select cron.schedule('rentbook-purge-pii', '0 3 * * *', $$ select purge_expired_
 - [x] **M2 入力＋台帳**：会計風入力UI（カテゴリ→入力シート→記帳）、台帳（一覧・絞り込み・編集・削除）、物件・部屋マスタ管理、物件タブ、下部ナビ
 - [x] **M3 物件軸＋集計＋入居履歴**：レントロール・収支表・入金状況（calc.ts）、入居者/保証人の登録と退去処理（leases、暗号化RPC・admin限定）、資料グループ
 - [x] **M4 出力＋保持ポリシー**：物件概要書PDF（印刷）、3資料のExcel（SheetJS・遅延ロード）、CSV/JSON書出し、個人情報の自動削除関数＋pg_cronジョブ
-- [ ] M5 デプロイ（GitHub Pages）
+- [x] **M5 デプロイ**：GitHub Pages 公開（https://jhcrossactor-lgtm.github.io/fujihisa-housing/ ）
 - [ ] M6 (Phase2) スキャン取込・自動消込・操作ログ
 
 ## デプロイ
@@ -68,6 +68,6 @@ select cron.schedule('rentbook-purge-pii', '0 3 * * *', $$ select purge_expired_
 `main` への push で `.github/workflows/deploy.yml` が GitHub Pages へ自動デプロイする。
 リポジトリの Settings > Secrets に `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` を登録すること。
 
-- GitHub リポジトリ名：`fujihisa-housing`（説明文＝「フジヒサハウジング物件管理台帳」）
-- 公開URL：`https://<USERNAME>.github.io/fujihisa-housing/`
+- GitHub リポジトリ：`jhcrossactor-lgtm/fujihisa-housing`（説明文＝「フジヒサハウジング物件管理台帳」）
+- 公開URL：**https://jhcrossactor-lgtm.github.io/fujihisa-housing/**
 - リポジトリ名を変える場合は `vite.config.ts` の `base` を `/<リポジトリ名>/` に合わせる。
