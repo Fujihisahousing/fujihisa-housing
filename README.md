@@ -67,4 +67,7 @@ select cron.schedule('rentbook-purge-pii', '0 3 * * *', $$ select purge_expired_
 
 `main` への push で `.github/workflows/deploy.yml` が GitHub Pages へ自動デプロイする。
 リポジトリの Settings > Secrets に `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` を登録すること。
-リポジトリ名が `rentbook` 以外の場合は `vite.config.ts` の `base` を合わせる。
+
+- GitHub リポジトリ名：`fujihisa-housing`（説明文＝「フジヒサハウジング物件管理台帳」）
+- 公開URL：`https://<USERNAME>.github.io/fujihisa-housing/`
+- リポジトリ名を変える場合は `vite.config.ts` の `base` を `/<リポジトリ名>/` に合わせる。
