@@ -127,7 +127,7 @@ function UnitsPanel({ property }: { property: Property }) {
   }, [load])
 
   async function removeUnit(u: Unit) {
-    if (!window.confirm(`部屋「${u.room}‍を削除しますか？`)) return
+    if (!window.confirm(`部屋「${u.room}」を削除しますか？`)) return
     await unitsRepo.remove(u.id)
     await load()
   }
