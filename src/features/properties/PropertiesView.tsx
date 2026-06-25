@@ -127,7 +127,7 @@ function UnitsPanel({ property }: { property: Property }) {
   }, [load])
 
   async function removeUnit(u: Unit) {
-    if (!window.confirm(`部屋「${u.room}」を削除しますか？`)) return
+    if (!window.confirm(`部屋「${u.room}‍を削除しますか？`)) return
     await unitsRepo.remove(u.id)
     await load()
   }
@@ -357,10 +357,14 @@ function UnitModal({
       room: value.room ?? '',
       layout: value.layout ?? '',
       area: value.area != null ? String(value.area) : '',
+      use_type: value.use_type ?? '',
+      tenant_type: value.tenant_type ?? '',
       rent: value.rent != null ? String(value.rent) : '',
       kyoeki: value.kyoeki != null ? String(value.kyoeki) : '',
       deposit: value.deposit != null ? String(value.deposit) : '',
       key_money: value.key_money != null ? String(value.key_money) : '',
+      refund: value.refund != null ? String(value.refund) : '',
+      parking: value.parking ?? '',
       status: value.status ?? '空室',
       payment_method: value.payment_method ?? '',
       contract_end: value.contract_end ?? '',
@@ -379,10 +383,14 @@ function UnitModal({
         room: f.room.trim(),
         layout: f.layout || null,
         area: numOrNull(f.area),
+        use_type: f.use_type || null,
+        tenant_type: f.tenant_type || null,
         rent: numOrNull(f.rent) ?? 0,
         kyoeki: numOrNull(f.kyoeki) ?? 0,
         deposit: numOrNull(f.deposit) ?? 0,
         key_money: numOrNull(f.key_money) ?? 0,
+        refund: numOrNull(f.refund),
+        parking: f.parking || null,
         status: f.status || '空室',
         payment_method: f.payment_method || null,
         contract_end: f.contract_end || null,
@@ -418,6 +426,22 @@ function UnitModal({
           <TextField label="間取り" value={f.layout ?? ''} onChange={set('layout')} />
         </div>
         <div className="grid grid-cols-2 gap-3">
+          <TextField label="用途" value={f.use_type ?? ''} onChange={set('use_type')} />
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">入居者属性</label>
+            <select
+              value={f.tenant_type ?? ''}
+              onChange={(e) => set('tenant_type')(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+            >
+              <option value="">未設定</option>
+              <option value="個人">個人</option>
+              <option value="法人">法人</option>
+              <option value="企業">企業</option>
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
           <TextField label="面積（㎡）" value={f.area ?? ''} onChange={set('area')} type="number" />
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">状況</label>
@@ -438,6 +462,10 @@ function UnitModal({
         <div className="grid grid-cols-2 gap-3">
           <TextField label="敷金（円）" value={f.deposit ?? ''} onChange={set('deposit')} type="number" />
           <TextField label="礼金（円）" value={f.key_money ?? ''} onChange={set('key_money')} type="number" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="返還金（円）" value={f.refund ?? ''} onChange={set('refund')} type="number" />
+          <TextField label="駐輪場・駐車場" value={f.parking ?? ''} onChange={set('parking')} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <TextField label="支払方法" value={f.payment_method ?? ''} onChange={set('payment_method')} />
