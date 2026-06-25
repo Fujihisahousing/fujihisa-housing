@@ -36,10 +36,14 @@ export interface Unit {
   room?: string | null
   layout?: string | null
   area?: number | null
+  use_type?: string | null // 用途（住居/事務所/テナント/倉庫/駐車場 等）
+  tenant_type?: string | null // 入居者属性（個人/法人）
   rent?: number | null
   kyoeki?: number | null
   deposit?: number | null
   key_money?: number | null
+  refund?: number | null // 返還金
+  parking?: string | null // 駐輪場・駐車場
   status?: UnitStatus | null
   tenant?: string | null
   guarantor?: string | null
