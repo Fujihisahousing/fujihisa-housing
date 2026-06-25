@@ -71,8 +71,8 @@ create table if not exists leases (
 
 -- 役割判定ヘルパー
 create or replace function is_admin() returns boolean
-language sql security definer stable as $$
-  select exists (select 1 from profiles where id = auth.uid() and role = 'admin');
+language sql security definer stable set search_path = '' as $$
+  select exists (select 1 from public.profiles where id = auth.uid() and role = 'admin');
 $$;
 
 -- インデックス
@@ -129,9 +129,9 @@ on conflict (key) do nothing;
 --        update profiles set role='admin' where email='owner@example.com';
 -- ---------------------------------------------------------------------
 create or replace function handle_new_user() returns trigger
-language plpgsql security definer as $$
+language plpgsql security definer set search_path = '' as $$
 begin
-  insert into profiles (id, email, role)
+  insert into public.profiles (id, email, role)
   values (new.id, new.email, 'staff')
   on conflict (id) do nothing;
   return new;
