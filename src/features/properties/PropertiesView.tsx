@@ -368,6 +368,7 @@ function UnitModal({
       refund: value.refund != null ? String(value.refund) : '',
       parking: value.parking ?? '',
       status: value.status ?? '空室',
+      guarantor: value.guarantor ?? '',
       payment_method: value.payment_method ?? '',
       contract_end: value.contract_end ?? '',
     })
@@ -398,6 +399,7 @@ function UnitModal({
         refund: numOrNull(f.refund),
         parking: f.parking || null,
         status: f.status || '空室',
+        guarantor: f.guarantor || null,
         payment_method: f.payment_method || null,
         contract_end: f.contract_end || null,
       }
@@ -504,9 +506,10 @@ function UnitModal({
           <TextField label="駐輪場・駐車場" value={f.parking ?? ''} onChange={set('parking')} />
         </div>
         <div className="grid grid-cols-2 gap-3">
+          <TextField label="保証会社" value={f.guarantor ?? ''} onChange={set('guarantor')} />
           <TextField label="支払方法" value={f.payment_method ?? ''} onChange={set('payment_method')} />
-          <TextField label="契約満了" value={f.contract_end ?? ''} onChange={set('contract_end')} type="date" />
         </div>
+        <TextField label="契約満了" value={f.contract_end ?? ''} onChange={set('contract_end')} type="date" />
         {error && (
           <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm p-3">{error}</div>
         )}

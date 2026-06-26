@@ -175,6 +175,7 @@ export function PaymentStatus({
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
                 <Th>号室</Th>
+                <Th>個人/法人</Th>
                 <Th>契約者名</Th>
                 <Th>読み方</Th>
                 <Th className="text-right">請求額</Th>
@@ -182,6 +183,7 @@ export function PaymentStatus({
                 <Th>入金日</Th>
                 <Th className="text-right">不足額</Th>
                 <Th>判定</Th>
+                <Th>保証会社</Th>
                 <Th>滞納</Th>
                 <Th>備考</Th>
               </tr>
@@ -191,7 +193,7 @@ export function PaymentStatus({
                 ? groups.map(([pid, rows]) => (
                     <Fragment key={pid}>
                       <tr>
-                        <td colSpan={10} className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white">
+                        <td colSpan={12} className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white">
                           {propName(pid)}
                           <span className="ml-2 text-xs font-normal text-slate-300">{rows.length}室</span>
                         </td>
@@ -232,6 +234,7 @@ function PayRow({
   return (
     <tr className="border-b border-slate-100 last:border-0">
       <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{u.room}</td>
+      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{u.tenant_type || '—'}</td>
       <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{u.tenant || '—'}</td>
       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{u.tenant_kana || '—'}</td>
       <td className="px-3 py-2 text-right tabular-nums text-slate-600">{vacant ? '—' : yen(row.billed)}</td>
@@ -245,6 +248,7 @@ function PayRow({
           {row.judgement}
         </span>
       </td>
+      <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{u.guarantor || '—'}</td>
       <td className="px-3 py-2">
         {row.arrearsMonths >= 1 && (
           <span className="text-xs rounded-full px-2 py-0.5 bg-rose-600 text-white font-medium">
