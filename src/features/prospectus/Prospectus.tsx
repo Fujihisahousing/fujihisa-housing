@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Printer, Loader2 } from 'lucide-react'
 import { unitsRepo } from '../../lib/repositories'
 import { calcRentRoll, calcProfitIndicators } from '../../lib/calc'
+import { unitCompare } from '../../lib/sortUnits'
 import { yen, percent, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import type { Property, Unit } from '../../types'
@@ -37,7 +38,9 @@ export function Prospectus({ properties }: { properties: Property[] }) {
     void load()
   }, [load])
 
-  const rr = useMemo(() => calcRentRoll(units, property), [units, property])
+  // 階数の高い順（駐車場は下・屋上地下は最下段）に並べてから集計
+  const sortedUnits = useMemo(() => [...units].sort(unitCompare), [units])
+  const rr = useMemo(() => calcRentRoll(sortedUnits, property), [sortedUnits, property])
   const ind = useMemo(
     () => calcProfitIndicators(rr, property, Number(opex) || 0, (Number(vacancy) || 0) / 100),
     [rr, property, opex, vacancy],
