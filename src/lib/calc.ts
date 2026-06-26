@@ -180,19 +180,31 @@ export function calcPaymentStatus(
   year: number,
   month: number, // 1-12
 ): PaymentStatusResult {
-  const monthTxs = transactions.filter((t) => {
-    const d = new Date(t.date)
-    return d.getFullYear() === year && d.getMonth() + 1 === month && t.type === 'income'
-  })
-
-  // 選択月のインデックス（年×12＋月）。滞納月数の計算に使う。
+  // 前家賃ルール：翌月分は前月末日までに入金、当月10日を過ぎても未着なら滞納。
+  // 入金の「帰属月」＝ 11日以降の入金は翌月分の前払い、10日までの入金は当月分とみなす。
+  const attrIdx = (d: Date) => d.getFullYear() * 12 + d.getMonth() + (d.getDate() > 10 ? 1 : 0)
   const selIdx = year * 12 + (month - 1)
+
+  // 締め切り経過（猶予判定）：過去月、または当月で本日が11日以降なら true
+  const today = new Date()
+  const nowIdx = today.getFullYear() * 12 + today.getMonth()
+  const gracePassed = (i: number) => (i < nowIdx ? true : i > nowIdx ? false : today.getDate() >= 11)
 
   const rows: PaymentRow[] = units.map((u) => {
     const billed = n(u.rent) + n(u.kyoeki)
-    const unitTxs = monthTxs.filter((t) => t.unit_id === u.id && RENT_CATEGORIES.has(t.category))
-    const paid = unitTxs.reduce((s, t) => s + n(t.amount), 0)
-    const guarantorUnit = isGuarantor(u.payment_method) || unitTxs.some((t) => isGuarantor(t.method))
+
+    // この号室の賃料系入金を帰属月ごとに集計（選択月まで）
+    const paidByMonth = new Map<number, number>()
+    const selPayments: Transaction[] = []
+    for (const t of transactions) {
+      if (t.type !== 'income' || t.unit_id !== u.id || !RENT_CATEGORIES.has(t.category)) continue
+      const idx = attrIdx(new Date(t.date))
+      if (idx > selIdx) continue
+      paidByMonth.set(idx, (paidByMonth.get(idx) ?? 0) + n(t.amount))
+      if (idx === selIdx) selPayments.push(t)
+    }
+    const paid = paidByMonth.get(selIdx) ?? 0
+    const guarantorUnit = isGuarantor(u.payment_method) || selPayments.some((t) => isGuarantor(t.method))
 
     let judgement: PaymentJudgement
     if (!isOccupied(u)) judgement = '空室'
@@ -201,22 +213,12 @@ export function calcPaymentStatus(
     else if (paid === 0 && guarantorUnit) judgement = '保証会社請求中'
     else judgement = '未入金'
 
-    // 滞納月数：この号室の賃料系入金を月ごとに集計し、初回入金月〜選択月で満額未達の月を数える
+    // 滞納月数：初回入金月〜選択月で、締め切り（当月10日）を過ぎても満額未達の月を数える
     let arrearsMonths = 0
-    if (isOccupied(u) && billed > 0) {
-      const paidByMonth = new Map<number, number>()
-      for (const t of transactions) {
-        if (t.type !== 'income' || t.unit_id !== u.id || !RENT_CATEGORIES.has(t.category)) continue
-        const d = new Date(t.date)
-        const idx = d.getFullYear() * 12 + d.getMonth()
-        if (idx > selIdx) continue
-        paidByMonth.set(idx, (paidByMonth.get(idx) ?? 0) + n(t.amount))
-      }
-      if (paidByMonth.size > 0) {
-        const startIdx = Math.min(...paidByMonth.keys())
-        for (let i = startIdx; i <= selIdx; i++) {
-          if ((paidByMonth.get(i) ?? 0) < billed) arrearsMonths++
-        }
+    if (isOccupied(u) && billed > 0 && paidByMonth.size > 0) {
+      const startIdx = Math.min(...paidByMonth.keys())
+      for (let i = startIdx; i <= selIdx; i++) {
+        if (gracePassed(i) && (paidByMonth.get(i) ?? 0) < billed) arrearsMonths++
       }
     }
 
