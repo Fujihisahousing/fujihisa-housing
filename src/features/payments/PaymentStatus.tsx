@@ -3,10 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
 import { transactionsRepo, unitsRepo } from '../../lib/repositories'
 import { calcPaymentStatus, type PaymentJudgement } from '../../lib/calc'
+import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
 import { yen, percent } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import type { Transaction, Unit } from '../../types'
+import type { Property, Transaction, Unit } from '../../types'
 
 const JUDGE_STYLE: Record<PaymentJudgement, string> = {
   入金済: 'bg-emerald-50 text-emerald-700',
@@ -19,7 +20,13 @@ const JUDGE_STYLE: Record<PaymentJudgement, string> = {
 
 const now = new Date()
 
-export function PaymentStatus({ propertyName }: { propertyName: string }) {
+export function PaymentStatus({
+  properties,
+  propertyName,
+}: {
+  properties: Property[]
+  propertyName: string
+}) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
@@ -45,7 +52,30 @@ export function PaymentStatus({ propertyName }: { propertyName: string }) {
     void load()
   }, [load])
 
-  const r = useMemo(() => calcPaymentStatus(units, txs, year, month), [units, txs, year, month])
+  const propOrder = useMemo(() => {
+    const m = new Map<string, number>()
+    properties.forEach((p, i) => m.set(p.id, i))
+    return m
+  }, [properties])
+  const propName = useMemo(() => {
+    const m = new Map(properties.map((p) => [p.id, p.name]))
+    return (id?: string | null) => (id ? m.get(id) ?? '—' : '—')
+  }, [properties])
+
+  // 物件→号室順に並べ替え（レントロールと同じ並び）
+  const sortedUnits = useMemo(() => {
+    return [...units].sort((a, b) => {
+      const pa = propOrder.get(a.property_id) ?? 9999
+      const pb = propOrder.get(b.property_id) ?? 9999
+      if (pa !== pb) return pa - pb
+      return unitCompare(a, b)
+    })
+  }, [units, propOrder])
+
+  const r = useMemo(
+    () => calcPaymentStatus(sortedUnits, txs, year, month),
+    [sortedUnits, txs, year, month],
+  )
 
   return (
     <div className="space-y-4">
@@ -99,6 +129,7 @@ export function PaymentStatus({ propertyName }: { propertyName: string }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+                <th className="px-3 py-2 font-medium">マンション</th>
                 <th className="px-3 py-2 font-medium">号室</th>
                 <th className="px-3 py-2 font-medium text-right">請求額</th>
                 <th className="px-3 py-2 font-medium text-right">入金額</th>
@@ -108,6 +139,7 @@ export function PaymentStatus({ propertyName }: { propertyName: string }) {
             <tbody>
               {r.rows.map((row) => (
                 <tr key={row.unit.id} className="border-b border-slate-100 last:border-0">
+                  <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{propName(row.unit.property_id)}</td>
                   <td className="px-3 py-2.5 font-medium text-slate-700">{row.unit.room}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
                     {row.judgement === '空室' ? '—' : yen(row.billed)}

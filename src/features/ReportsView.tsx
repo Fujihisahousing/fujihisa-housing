@@ -42,7 +42,7 @@ export function ReportsView({ properties }: { properties: Property[] }) {
 
       {activeView === 'rentroll' && <RentRoll properties={properties} propertyName={propertyName} />}
       {activeView === 'summary' && <IncomeStatement propertyName={propertyName} />}
-      {activeView === 'payments' && <PaymentStatus propertyName={propertyName} />}
+      {activeView === 'payments' && <PaymentStatus properties={properties} propertyName={propertyName} />}
       {activeView === 'prospectus' && <Prospectus properties={properties} />}
     </div>
   )
