@@ -50,7 +50,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
       const pa = propOrder.get(a.property_id) ?? 9999
       const pb = propOrder.get(b.property_id) ?? 9999
       if (pa !== pb) return pa - pb
-      return roomCompare(a.room, b.room)
+      return unitCompare(a, b)
     })
   }, [units, propOrder])
 
@@ -138,7 +138,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                           key={r.unit.id}
                           unit={r.unit}
                           total={r.total}
-                          floorBreak={i > 0 && isFloorBreak(rows[i - 1].unit.room, r.unit.room)}
+                          floorBreak={i > 0 && isGroupBreak(rows[i - 1].unit, r.unit)}
                         />
                       ))}
                     </Fragment>
@@ -148,7 +148,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                       key={r.unit.id}
                       unit={r.unit}
                       total={r.total}
-                      floorBreak={i > 0 && isFloorBreak(rr.rows[i - 1].unit.room, r.unit.room)}
+                      floorBreak={i > 0 && isGroupBreak(rr.rows[i - 1].unit, r.unit)}
                     />
                   ))}
             </tbody>
@@ -194,31 +194,44 @@ function UnitRow({ unit: u, total, floorBreak }: { unit: Unit; total: number; fl
   )
 }
 
-// 号室の並び替えキー。「101」→1階01号、「1203」→12階03号 のように下2桁を部屋番号、
-// それより上位を階として扱う。1〜2桁のみの号室は階そのものとして解釈。数字なしは末尾。
-function roomKey(room?: string | null) {
-  const m = String(room ?? '').match(/\d+/)
-  if (!m) return { hasNum: false, floor: 0, sub: 0, raw: String(room ?? '') }
-  const num = parseInt(m[0], 10)
-  if (num >= 100) return { hasNum: true, floor: Math.floor(num / 100), sub: num % 100, raw: String(room) }
-  return { hasNum: true, floor: num, sub: 0, raw: String(room) }
+// 全角数字を半角へ（号室が「７F」等の全角で入っているため）
+function toHalf(s: string): string {
+  return s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
 }
 
-// 隣り合う号室で階が変わったか（変わり目に太線を引くため）
-function isFloorBreak(prev?: string | null, cur?: string | null): boolean {
-  return roomKey(prev).floor !== roomKey(cur).floor
+// 号室の並び替えキー。
+//  rank 0 = 通常のフロア（階数の高い順・同じ階は号室の小さい順）
+//  rank 1 = 駐車場（用途=駐車場）→ フロアの下にまとめる
+//  rank 2 = 屋上・地下室など数字で表せない区画 → 一番下
+// 「101」→1階01号、「1203」→12階03号 のように下2桁を部屋番号、上位を階として扱う。
+function unitKey(u: Unit) {
+  const raw = toHalf(String(u.room ?? ''))
+  const isParking = (u.use_type ?? '').includes('駐車')
+  const m = raw.match(/\d+/)
+  const num = m ? parseInt(m[0], 10) : NaN
+  if (isParking) return { rank: 1, floor: 0, sub: Number.isNaN(num) ? 0 : num, raw }
+  if (Number.isNaN(num)) return { rank: 2, floor: 0, sub: 0, raw }
+  if (num >= 100) return { rank: 0, floor: Math.floor(num / 100), sub: num % 100, raw }
+  return { rank: 0, floor: num, sub: 0, raw }
 }
 
-// 階数の高い順（降順）、同じ階は号室の小さい順（昇順）。数字なしは末尾。
-function roomCompare(a?: string | null, b?: string | null): number {
-  const ka = roomKey(a)
-  const kb = roomKey(b)
-  if (ka.hasNum !== kb.hasNum) return ka.hasNum ? -1 : 1
-  if (ka.hasNum && kb.hasNum) {
-    if (ka.floor !== kb.floor) return kb.floor - ka.floor
-    if (ka.sub !== kb.sub) return ka.sub - kb.sub
-  }
+// フロア降順・同階は号室昇順。駐車場はフロアの下、屋上/地下は最下段。
+function unitCompare(a: Unit, b: Unit): number {
+  const ka = unitKey(a)
+  const kb = unitKey(b)
+  if (ka.rank !== kb.rank) return ka.rank - kb.rank
+  if (ka.rank === 0 && ka.floor !== kb.floor) return kb.floor - ka.floor
+  if (ka.sub !== kb.sub) return ka.sub - kb.sub
   return ka.raw.localeCompare(kb.raw, 'ja')
+}
+
+// 隣り合う行で「まとまり」（同一フロア／駐車場ブロック／その他ブロック）が変わったか
+function groupId(u: Unit): string {
+  const k = unitKey(u)
+  return k.rank === 0 ? 'F' + k.floor : k.rank === 1 ? 'P' : 'O'
+}
+function isGroupBreak(prev: Unit, cur: Unit): boolean {
+  return groupId(prev) !== groupId(cur)
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
