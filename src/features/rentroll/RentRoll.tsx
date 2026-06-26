@@ -107,8 +107,6 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
     return Array.from(map.entries())
   }, [activeProperty, rr.rows])
 
-  const grand = useMemo(() => sumTotals(rr.rows), [rr.rows])
-
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-slate-500 text-sm py-8 justify-center">
@@ -178,23 +176,22 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                           floorBreak={i > 0 && isGroupBreak(rows[i - 1].unit, r.unit)}
                         />
                       ))}
-                      <TotalBlock t={sumTotals(rows)} breakdownLabel="計" totalLabel="合計" />
+                      {rows.length > 1 && <TotalBlock t={sumTotals(rows)} />}
                     </Fragment>
                   ))
-                : rr.rows.map((r, i) => (
-                    <UnitRow
-                      key={r.unit.id}
-                      unit={r.unit}
-                      onPatch={patchUnit}
-                      floorBreak={i > 0 && isGroupBreak(rr.rows[i - 1].unit, r.unit)}
-                    />
-                  ))}
-              <TotalBlock
-                t={grand}
-                breakdownLabel={groups ? '総計' : '計'}
-                totalLabel={groups ? '総合計' : '合計'}
-                grand
-              />
+                : (
+                    <>
+                      {rr.rows.map((r, i) => (
+                        <UnitRow
+                          key={r.unit.id}
+                          unit={r.unit}
+                          onPatch={patchUnit}
+                          floorBreak={i > 0 && isGroupBreak(rr.rows[i - 1].unit, r.unit)}
+                        />
+                      ))}
+                      {rr.rows.length > 1 && <TotalBlock t={sumTotals(rr.rows)} />}
+                    </>
+                  )}
             </tbody>
           </table>
         </div>
@@ -252,25 +249,14 @@ function UnitRow({
   )
 }
 
-// 内訳（賃料・共益費・駐輪駐車）の「計」行と、その下に総額の「合計」行を出す
-function TotalBlock({
-  t,
-  breakdownLabel,
-  totalLabel,
-  grand,
-}: {
-  t: Totals
-  breakdownLabel: string
-  totalLabel: string
-  grand?: boolean
-}) {
+// 内訳（賃料・共益費・駐輪駐車）の「計」行と、その下に総額の「合計」行（駐輪・駐車の列位置）を出す
+function TotalBlock({ t }: { t: Totals }) {
   const total = t.rent + t.kyoeki + t.parking
-  const base = grand ? 'bg-slate-100 font-semibold' : 'bg-slate-50 font-medium'
   return (
     <>
-      <tr className={base + ' border-t border-slate-300'}>
+      <tr className="bg-slate-50 font-medium border-t border-slate-300">
         <td colSpan={5} className="px-3 py-1.5 text-slate-600">
-          {breakdownLabel}
+          計
         </td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.rent)}</td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.kyoeki)}</td>
@@ -278,13 +264,12 @@ function TotalBlock({
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.parking)}</td>
         <td colSpan={2} />
       </tr>
-      <tr className={base + (grand ? ' border-b-2 border-slate-300' : '')}>
-        <td colSpan={5} className="px-3 py-1.5 text-slate-600">
-          {totalLabel}
+      <tr className="bg-slate-50 font-semibold">
+        <td colSpan={10} className="px-3 py-1.5 text-slate-700">
+          合計
         </td>
-        <td colSpan={8} className="px-3 py-1.5 text-right tabular-nums">
-          {yen(total)}
-        </td>
+        <td className="px-3 py-1.5 text-right tabular-nums">{yen(total)}</td>
+        <td colSpan={2} />
       </tr>
     </>
   )
