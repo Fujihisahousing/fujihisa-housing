@@ -371,6 +371,7 @@ function UnitModal({
       guarantor: value.guarantor ?? '',
       payment_method: value.payment_method ?? '',
       contract_end: value.contract_end ?? '',
+      notes: value.notes ?? '',
     })
     setError(null)
   }, [value])
@@ -402,6 +403,7 @@ function UnitModal({
         guarantor: f.guarantor || null,
         payment_method: f.payment_method || null,
         contract_end: f.contract_end || null,
+        notes: f.notes || null,
       }
       if (isEdit && value?.id) await unitsRepo.update(value.id, payload)
       else await unitsRepo.create(payload)
@@ -510,6 +512,7 @@ function UnitModal({
           <TextField label="支払方法" value={f.payment_method ?? ''} onChange={set('payment_method')} />
         </div>
         <TextField label="契約満了" value={f.contract_end ?? ''} onChange={set('contract_end')} type="date" />
+        <TextField label="メモ（備考）" value={f.notes ?? ''} onChange={set('notes')} />
         {error && (
           <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm p-3">{error}</div>
         )}
