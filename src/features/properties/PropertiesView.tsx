@@ -5,8 +5,10 @@ import { Modal } from '../../components/common/Modal'
 import { LeaseManager } from '../leases/LeaseManager'
 import { useAuth } from '../../auth/AuthProvider'
 import { propertiesRepo, unitsRepo } from '../../lib/repositories'
+import { unitCompare } from '../../lib/sortUnits'
+import { statusBadgeClass } from '../../lib/status'
 import { yen } from '../../lib/format'
-import type { Property, Unit } from '../../types'
+import { UNIT_STATUSES, USE_TYPES, type Property, type Unit } from '../../types'
 
 export function PropertiesView({ onChanged }: { onChanged: () => void }) {
   const [properties, setProperties] = useState<Property[]>([])
@@ -116,7 +118,8 @@ function UnitsPanel({ property }: { property: Property }) {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setUnits(await unitsRepo.listByProperty(property.id))
+      const list = await unitsRepo.listByProperty(property.id)
+      setUnits(list.sort(unitCompare)) // レントロールと同じ並び順
     } finally {
       setLoading(false)
     }
@@ -156,12 +159,7 @@ function UnitsPanel({ property }: { property: Property }) {
               <span className="text-xs text-slate-500">
                 {u.layout} ／ 賃料 {yen(u.rent)}＋共益 {yen(u.kyoeki)}
               </span>
-              <span
-                className={
-                  'text-xs rounded-full px-2 py-0.5 ' +
-                  (u.status === '入居' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-600')
-                }
-              >
+              <span className={'text-xs rounded-full px-2 py-0.5 ' + statusBadgeClass(u.status)}>
                 {u.status}
               </span>
               <span className="flex-1" />
@@ -426,7 +424,21 @@ function UnitModal({
           <TextField label="間取り" value={f.layout ?? ''} onChange={set('layout')} />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <TextField label="用途" value={f.use_type ?? ''} onChange={set('use_type')} />
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">用途</label>
+            <select
+              value={f.use_type ?? ''}
+              onChange={(e) => set('use_type')(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+            >
+              <option value="">未設定</option>
+              {USE_TYPES.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">入居者属性</label>
             <select
@@ -450,8 +462,11 @@ function UnitModal({
               onChange={(e) => set('status')(e.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
             >
-              <option value="空室">空室</option>
-              <option value="入居">入居</option>
+              {UNIT_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
             </select>
           </div>
         </div>

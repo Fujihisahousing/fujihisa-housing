@@ -3,6 +3,7 @@ import type { Property, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
 const isOccupied = (u: Unit) => u.status === '入居'
+const isStopped = (u: Unit) => u.status === '停止' // 募集停止：空室率の総数に含めない
 
 // =====================================================================
 // レントロール（SOW 6.4）
@@ -25,7 +26,7 @@ export interface RentRollResult {
 
 export function calcRentRoll(units: Unit[], property?: Property | null): RentRollResult {
   const rows = units.map((u) => ({ unit: u, total: n(u.rent) + n(u.kyoeki) }))
-  const totalUnits = units.length
+  const totalUnits = units.filter((u) => !isStopped(u)).length // 停止は総数に含めない
   const occupiedUnits = units.filter(isOccupied).length
   const fullMonthly = rows.reduce((s, r) => s + r.total, 0)
   const currentMonthly = rows.filter((r) => isOccupied(r.unit)).reduce((s, r) => s + r.total, 0)
