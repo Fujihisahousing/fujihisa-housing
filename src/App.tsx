@@ -4,7 +4,6 @@ import { AuthProvider, useAuth } from './auth/AuthProvider'
 import { LoginView } from './auth/LoginView'
 import { Header } from './components/layout/Header'
 import { PropertyTabs } from './components/layout/PropertyTabs'
-import { BottomNav } from './components/layout/BottomNav'
 import { RoomEntry } from './components/entry/RoomEntry'
 import { BuildingEntry } from './components/entry/BuildingEntry'
 import { LedgerView } from './features/ledger/LedgerView'
@@ -59,7 +58,7 @@ function Shell() {
     activeView === 'prospectus'
 
   return (
-    <div className="min-h-full bg-slate-50 text-slate-800 pb-20">
+    <div className="min-h-full bg-slate-50 text-slate-800 pb-8">
       <Header />
       <PropertyTabs properties={properties} />
       <main className={(wide ? 'max-w-7xl' : 'max-w-3xl') + ' mx-auto px-5 py-5'}>
@@ -71,7 +70,6 @@ function Shell() {
           activeView === 'payments' ||
           activeView === 'prospectus') && <ReportsView properties={properties} />}
       </main>
-      <BottomNav />
     </div>
   )
 }
