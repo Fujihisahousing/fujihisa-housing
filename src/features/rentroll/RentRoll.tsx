@@ -1,5 +1,5 @@
 // レントロール（画面）。Excel出力は M4、
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
 import { unitsRepo } from '../../lib/repositories'
 import { calcRentRoll } from '../../lib/calc'
@@ -33,7 +33,40 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
     return sum > 0 ? ({ id: 'all', name: '全体', acquired_price: sum } as Property) : null
   }, [activeProperty, properties])
 
-  const rr = useMemo(() => calcRentRoll(units, propertyForCalc), [units, propertyForCalc])
+  // 物件の並び順（properties の順）と物件名の解決
+  const propOrder = useMemo(() => {
+    const m = new Map<string, number>()
+    properties.forEach((p, i) => m.set(p.id, i))
+    return m
+  }, [properties])
+  const propName = useMemo(() => {
+    const m = new Map(properties.map((p) => [p.id, p.name]))
+    return (id?: string | null) => (id ? m.get(id) ?? '—' : '—')
+  }, [properties])
+
+  // 物件→（階数の高い順・同じ階は号室の小さい順）に並べ替え。Excel出力にも反映される。
+  const sortedUnits = useMemo(() => {
+    return [...units].sort((a, b) => {
+      const pa = propOrder.get(a.property_id) ?? 9999
+      const pb = propOrder.get(b.property_id) ?? 9999
+      if (pa !== pb) return pa - pb
+      return roomCompare(a.room, b.room)
+    })
+  }, [units, propOrder])
+
+  const rr = useMemo(() => calcRentRoll(sortedUnits, propertyForCalc), [sortedUnits, propertyForCalc])
+
+  // 全体表示のときだけ物件ごとにグループ化（[物件ID, 行配列] の配列。rr.rows は既にソート済み）
+  const groups = useMemo(() => {
+    if (activeProperty) return null
+    const map = new Map<string, typeof rr.rows>()
+    for (const row of rr.rows) {
+      const k = row.unit.property_id
+      if (!map.has(k)) map.set(k, [])
+      map.get(k)!.push(row)
+    }
+    return Array.from(map.entries())
+  }, [activeProperty, rr.rows])
 
   if (loading) {
     return (
@@ -86,40 +119,85 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
               </tr>
             </thead>
             <tbody>
-              {rr.rows.map(({ unit: u, total }) => (
-                <tr key={u.id} className="border-b border-slate-100 last:border-0">
-                  <Td className="font-medium">{u.room}</Td>
-                  <Td>{u.layout}</Td>
-                  <Td className="text-right">{u.area ? `${u.area}㎡` : '—'}</Td>
-                  <Td>{u.use_type || '—'}</Td>
-                  <Td>{u.tenant_type || '—'}</Td>
-                  <Td className="text-right tabular-nums">{yen(u.rent)}</Td>
-                  <Td className="text-right tabular-nums">{yen(u.kyoeki)}</Td>
-                  <Td className="text-right tabular-nums font-medium">{yen(total)}</Td>
-                  <Td className="text-right tabular-nums">{yen(u.deposit)}</Td>
-                  <Td className="text-right tabular-nums">{yen(u.key_money)}</Td>
-                  <Td className="text-right tabular-nums">{u.refund != null ? yen(u.refund) : '—'}</Td>
-                  <Td>{u.parking || '—'}</Td>
-                  <Td>{u.contract_end ? formatDate(u.contract_end) : '—'}</Td>
-                  <Td>
-                    <span
-                      className={
-                        'text-xs rounded-full px-2 py-0.5 ' +
-                        (u.status === '入居' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-600')
-                      }
-                    >
-                      {u.status}
-                    </span>
-                  </Td>
-                  <Td className="max-w-[12rem] truncate" >{u.notes || '—'}</Td>
-                </tr>
-              ))}
+              {groups
+                ? groups.map(([pid, rows]) => (
+                    <Fragment key={pid}>
+                      <tr className="bg-slate-100">
+                        <td
+                          colSpan={15}
+                          className="px-3 py-2 text-sm font-semibold text-slate-700 border-y border-slate-200"
+                        >
+                          {propName(pid)}
+                          <span className="ml-2 text-xs font-normal text-slate-500">
+                            {rows.length}室／満室想定(月) {yen(rows.reduce((s, r) => s + r.total, 0))}
+                          </span>
+                        </td>
+                      </tr>
+                      {rows.map((r) => (
+                        <UnitRow key={r.unit.id} unit={r.unit} total={r.total} />
+                      ))}
+                    </Fragment>
+                  ))
+                : rr.rows.map((r) => <UnitRow key={r.unit.id} unit={r.unit} total={r.total} />)}
             </tbody>
           </table>
         </div>
       )}
     </div>
   )
+}
+
+function UnitRow({ unit: u, total }: { unit: Unit; total: number }) {
+  return (
+    <tr className="border-b border-slate-100 last:border-0">
+      <Td className="font-medium">{u.room}</Td>
+      <Td>{u.layout}</Td>
+      <Td className="text-right">{u.area ? `${u.area}㎡` : '—'}</Td>
+      <Td>{u.use_type || '—'}</Td>
+      <Td>{u.tenant_type || '—'}</Td>
+      <Td className="text-right tabular-nums">{yen(u.rent)}</Td>
+      <Td className="text-right tabular-nums">{yen(u.kyoeki)}</Td>
+      <Td className="text-right tabular-nums font-medium">{yen(total)}</Td>
+      <Td className="text-right tabular-nums">{yen(u.deposit)}</Td>
+      <Td className="text-right tabular-nums">{yen(u.key_money)}</Td>
+      <Td className="text-right tabular-nums">{u.refund != null ? yen(u.refund) : '—'}</Td>
+      <Td>{u.parking || '—'}</Td>
+      <Td>{u.contract_end ? formatDate(u.contract_end) : '—'}</Td>
+      <Td>
+        <span
+          className={
+            'text-xs rounded-full px-2 py-0.5 ' +
+            (u.status === '入居' ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-200 text-slate-600')
+          }
+        >
+          {u.status}
+        </span>
+      </Td>
+      <Td className="max-w-[12rem] truncate">{u.notes || '—'}</Td>
+    </tr>
+  )
+}
+
+// 号室の並び替えキー。「101」→1階01号、「1203」→12階03号 のように下2桁を部屋番号、
+// それより上位を階として扱う。1〜2桁のみの号室は階そのものとして解釈。数字なしは末尾。
+function roomKey(room?: string | null) {
+  const m = String(room ?? '').match(/\d+/)
+  if (!m) return { hasNum: false, floor: 0, sub: 0, raw: String(room ?? '') }
+  const num = parseInt(m[0], 10)
+  if (num >= 100) return { hasNum: true, floor: Math.floor(num / 100), sub: num % 100, raw: String(room) }
+  return { hasNum: true, floor: num, sub: 0, raw: String(room) }
+}
+
+// 階数の高い順（降順）、同じ階は号室の小さい順（昇順）。数字なしは末尾。
+function roomCompare(a?: string | null, b?: string | null): number {
+  const ka = roomKey(a)
+  const kb = roomKey(b)
+  if (ka.hasNum !== kb.hasNum) return ka.hasNum ? -1 : 1
+  if (ka.hasNum && kb.hasNum) {
+    if (ka.floor !== kb.floor) return kb.floor - ka.floor
+    if (ka.sub !== kb.sub) return ka.sub - kb.sub
+  }
+  return ka.raw.localeCompare(kb.raw, 'ja')
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
