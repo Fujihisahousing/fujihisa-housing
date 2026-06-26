@@ -12,6 +12,14 @@ import { UNIT_STATUSES, type Property, type Unit } from '../../types'
 
 const money = (v?: number | null) => (v != null ? yen(v) : '—')
 
+// 敷金（保証金）/ 礼金（解約引）を1段で表示。第2引数（保証金・解約引）は ( ) 付き。
+function pairCell(primary?: number | null, paren?: number | null): string {
+  const p: string[] = []
+  if (primary != null && primary > 0) p.push(yen(primary))
+  if (paren != null && paren > 0) p.push(`（${yen(paren)}）`)
+  return p.length ? p.join(' ') : '—'
+}
+
 // 駐輪・駐車欄（'￥18,700' 等の文字列）から金額を取り出して合算用に数値化
 function parkingYen(s?: string | null): number {
   if (!s) return 0
@@ -147,8 +155,8 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                 <Th>入居者属性</Th>
                 <Th className="text-right">賃料</Th>
                 <Th className="text-right">共益費</Th>
-                <Th className="text-right">敷金／保証金</Th>
-                <Th className="text-right">礼金／解約引</Th>
+                <Th className="text-right">敷金（保証金）</Th>
+                <Th className="text-right">礼金（解約引）</Th>
                 <Th className="text-right">返還金</Th>
                 <Th className="text-right">駐輪・駐車</Th>
                 <Th>状況</Th>
@@ -222,26 +230,8 @@ function UnitRow({
       <Td>{u.tenant_type || '—'}</Td>
       <Td className="text-right tabular-nums">{money(u.rent)}</Td>
       <Td className="text-right tabular-nums">{money(u.kyoeki)}</Td>
-      <Td className="text-right tabular-nums leading-tight whitespace-nowrap">
-        <div>
-          <span className="text-xs text-slate-400 mr-1">敷</span>
-          {money(u.deposit)}
-        </div>
-        <div>
-          <span className="text-xs text-slate-400 mr-1">保</span>
-          {money(u.hoshokin)}
-        </div>
-      </Td>
-      <Td className="text-right tabular-nums leading-tight whitespace-nowrap">
-        <div>
-          <span className="text-xs text-slate-400 mr-1">礼</span>
-          {money(u.key_money)}
-        </div>
-        <div>
-          <span className="text-xs text-slate-400 mr-1">解</span>
-          {money(u.kaiyakubiki)}
-        </div>
-      </Td>
+      <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.deposit, u.hoshokin)}</Td>
+      <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.key_money, u.kaiyakubiki)}</Td>
       <Td className="text-right tabular-nums">{money(u.refund)}</Td>
       <Td className="text-right tabular-nums">{u.parking || '—'}</Td>
       <td className="px-1.5 py-1">
