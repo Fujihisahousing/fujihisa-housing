@@ -98,7 +98,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
         <div className="text-center text-slate-400 text-sm py-12">部屋が登録されていません。</div>
       ) : (
         <div className="overflow-auto max-h-[70vh] rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-max text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
                 <Th>号室</Th>
@@ -133,12 +133,24 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                           </span>
                         </td>
                       </tr>
-                      {rows.map((r) => (
-                        <UnitRow key={r.unit.id} unit={r.unit} total={r.total} />
+                      {rows.map((r, i) => (
+                        <UnitRow
+                          key={r.unit.id}
+                          unit={r.unit}
+                          total={r.total}
+                          floorBreak={i > 0 && isFloorBreak(rows[i - 1].unit.room, r.unit.room)}
+                        />
                       ))}
                     </Fragment>
                   ))
-                : rr.rows.map((r) => <UnitRow key={r.unit.id} unit={r.unit} total={r.total} />)}
+                : rr.rows.map((r, i) => (
+                    <UnitRow
+                      key={r.unit.id}
+                      unit={r.unit}
+                      total={r.total}
+                      floorBreak={i > 0 && isFloorBreak(rr.rows[i - 1].unit.room, r.unit.room)}
+                    />
+                  ))}
             </tbody>
           </table>
         </div>
@@ -147,9 +159,13 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
   )
 }
 
-function UnitRow({ unit: u, total }: { unit: Unit; total: number }) {
+function UnitRow({ unit: u, total, floorBreak }: { unit: Unit; total: number; floorBreak?: boolean }) {
   return (
-    <tr className="border-b border-slate-100 last:border-0">
+    <tr
+      className={
+        'border-b border-slate-100 last:border-0 ' + (floorBreak ? 'border-t-2 border-t-slate-300' : '')
+      }
+    >
       <Td className="font-medium">{u.room}</Td>
       <Td>{u.layout}</Td>
       <Td className="text-right">{u.area ? `${u.area}㎡` : '—'}</Td>
@@ -188,6 +204,11 @@ function roomKey(room?: string | null) {
   return { hasNum: true, floor: num, sub: 0, raw: String(room) }
 }
 
+// 隣り合う号室で階が変わったか（変わり目に太線を引くため）
+function isFloorBreak(prev?: string | null, cur?: string | null): boolean {
+  return roomKey(prev).floor !== roomKey(cur).floor
+}
+
 // 階数の高い順（降順）、同じ階は号室の小さい順（昇順）。数字なしは末尾。
 function roomCompare(a?: string | null, b?: string | null): number {
   const ka = roomKey(a)
@@ -214,7 +235,8 @@ function Th({ children, className = '' }: { children?: ReactNode; className?: st
   return (
     <th
       className={
-        'sticky top-0 z-20 bg-white px-3 py-2 font-medium shadow-[inset_0_-1px_0_#e2e8f0] ' + className
+        'sticky top-0 z-20 whitespace-nowrap bg-white px-3 py-2 font-medium shadow-[inset_0_-1px_0_#e2e8f0] ' +
+        className
       }
     >
       {children}
@@ -222,5 +244,5 @@ function Th({ children, className = '' }: { children?: ReactNode; className?: st
   )
 }
 function Td({ children, className = '' }: { children?: ReactNode; className?: string }) {
-  return <td className={'px-3 py-2.5 text-slate-700 ' + className}>{children}</td>
+  return <td className={'whitespace-nowrap px-3 py-2.5 text-slate-700 ' + className}>{children}</td>
 }

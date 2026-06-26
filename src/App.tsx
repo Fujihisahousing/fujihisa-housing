@@ -51,11 +51,18 @@ function Shell() {
     void loadProperties()
   }, [loadProperties])
 
+  // レポート系（表が広い）は枠を広く取る
+  const wide =
+    activeView === 'rentroll' ||
+    activeView === 'summary' ||
+    activeView === 'payments' ||
+    activeView === 'prospectus'
+
   return (
     <div className="min-h-full bg-slate-50 text-slate-800 pb-20">
       <Header />
       <PropertyTabs properties={properties} />
-      <main className="max-w-3xl mx-auto px-5 py-5">
+      <main className={(wide ? 'max-w-7xl' : 'max-w-3xl') + ' mx-auto px-5 py-5'}>
         {activeView === 'entry' && <EntryView properties={properties} />}
         {activeView === 'ledger' && <LedgerView properties={properties} />}
         {activeView === 'properties' && <PropertiesView onChanged={loadProperties} />}
