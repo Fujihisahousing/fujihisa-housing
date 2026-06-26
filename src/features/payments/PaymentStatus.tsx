@@ -1,6 +1,7 @@
 // 入金状況（画面）。月次・号室別。マンション帯でグループ表示。備考のみ編集可（月別保存）。
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Loader2, FileSpreadsheet } from 'lucide-react'
+import { Loader2, FileSpreadsheet, Upload } from 'lucide-react'
+import { ImportCsv } from './ImportCsv'
 import { transactionsRepo, unitsRepo, paymentNotesRepo } from '../../lib/repositories'
 import { calcPaymentStatus, type PaymentJudgement, type PaymentRow } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
@@ -34,6 +35,7 @@ export function PaymentStatus({
   const [txs, setTxs] = useState<Transaction[]>([])
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const [importing, setImporting] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -128,13 +130,31 @@ export function PaymentStatus({
           ))}
         </select>
         <button
+          onClick={() => setImporting(true)}
+          className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+        >
+          <Upload className="w-4 h-4" /> 通帳CSV取込
+        </button>
+        <button
           onClick={() => void exportPaymentStatusExcel(propertyName, r)}
           disabled={units.length === 0}
-          className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
           <FileSpreadsheet className="w-4 h-4" /> Excel出力
         </button>
       </div>
+
+      {importing && (
+        <ImportCsv
+          properties={properties}
+          defaultPropertyId={activeProperty}
+          onClose={() => setImporting(false)}
+          onDone={() => {
+            setImporting(false)
+            void load()
+          }}
+        />
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <StatCard label="請求対象戸数" value={`${r.billedUnits}戸`} />
