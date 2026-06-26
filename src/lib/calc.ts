@@ -2,7 +2,7 @@
 import type { Property, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
-const isOccupied = (u: Unit) => u.status === '入居'
+const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予' // 退去予定も入居中・課金対象
 const isStopped = (u: Unit) => u.status === '停止' // 募集停止：空室率の総数に含めない
 
 // =====================================================================

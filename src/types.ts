@@ -1,10 +1,10 @@
 // RentBook データモデル型定義（SOW 5章 / 付録C のスキーマに対応）
 
 export type TxType = 'income' | 'expense'
-export type UnitStatus = '入居' | '空室' | '予定' | '停止' | string
+export type UnitStatus = '入居' | '空室' | '入予' | '退予' | '停止' | string
 
-/** 部屋の状況（選択肢）。空室率の総数からは「停止」を除外する。 */
-export const UNIT_STATUSES = ['入居', '空室', '予定', '停止'] as const
+/** 部屋の状況（選択肢）。空室率の総数からは「停止」を除外する。入予=入居予定／退予=退去予定。 */
+export const UNIT_STATUSES = ['入居', '空室', '入予', '退予', '停止'] as const
 /** 用途の選択肢 */
 export const USE_TYPES = [
   '住居', '事務所', '店舗', 'テナント', '倉庫', '物置', '駐車場', '看板', '賃貸', 'その他',
@@ -56,6 +56,7 @@ export interface Unit {
   refund?: number | null // 返還金
   parking?: string | null // 駐輪場・駐車場
   status?: UnitStatus | null
+  sort_order?: number | null // 表示順（小さいほど上。未設定は階数ロジックで並ぶ）
   tenant?: string | null // 契約者名（漢字/英字）
   tenant_kana?: string | null // 契約者名の読み（カナ）
   guarantor?: string | null

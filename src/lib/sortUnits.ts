@@ -22,7 +22,13 @@ export function unitKey(u: Unit) {
 }
 
 // フロア降順・同階は号室昇順。駐車場はフロアの下、屋上/地下は最下段。
+// 表示順(sort_order)が設定されている部屋はそれを最優先（小さいほど上、未設定は階数ロジック）。
 export function unitCompare(a: Unit, b: Unit): number {
+  const sa = a.sort_order
+  const sb = b.sort_order
+  if (sa != null && sb != null && sa !== sb) return sa - sb
+  if (sa != null && sb == null) return -1
+  if (sa == null && sb != null) return 1
   const ka = unitKey(a)
   const kb = unitKey(b)
   if (ka.rank !== kb.rank) return ka.rank - kb.rank

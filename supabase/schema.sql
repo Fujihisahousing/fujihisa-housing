@@ -37,6 +37,7 @@ alter table units add column if not exists parking text;
 alter table units add column if not exists hoshokin numeric;    -- 保証金
 alter table units add column if not exists kaiyakubiki numeric; -- 解約引
 alter table units add column if not exists tenant_kana text;    -- 契約者名の読み（カナ）
+alter table units add column if not exists sort_order numeric;   -- 表示順（小さいほど上）
 
 -- 入金状況の月別メモ
 create table if not exists payment_notes (

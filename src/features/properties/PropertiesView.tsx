@@ -349,6 +349,7 @@ function UnitModal({
     if (!value) return
     setF({
       room: value.room ?? '',
+      sort_order: value.sort_order != null ? String(value.sort_order) : '',
       layout: value.layout ?? '',
       area: value.area != null ? String(value.area) : '',
       use_type: value.use_type ?? '',
@@ -381,6 +382,7 @@ function UnitModal({
       const payload: Partial<Unit> = {
         property_id: propertyId,
         room: f.room.trim(),
+        sort_order: numOrNull(f.sort_order),
         layout: f.layout || null,
         area: numOrNull(f.area),
         use_type: f.use_type || null,
@@ -431,6 +433,12 @@ function UnitModal({
           <TextField label="号室" value={f.room ?? ''} onChange={set('room')} />
           <TextField label="間取り" value={f.layout ?? ''} onChange={set('layout')} />
         </div>
+        <TextField
+          label="表示順（小さいほど上。空欄は自動＝階数順）"
+          value={f.sort_order ?? ''}
+          onChange={set('sort_order')}
+          type="number"
+        />
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-600 mb-1">用途</label>
