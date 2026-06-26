@@ -319,10 +319,6 @@ function PropertyModal({
           <TextField label="築年" value={f.built ?? ''} onChange={set('built')} />
           <TextField label="取得日" value={f.acquired_date ?? ''} onChange={set('acquired_date')} type="date" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <TextField label="取得価格（円）" value={f.acquired_price ?? ''} onChange={set('acquired_price')} type="number" />
-          <TextField label="ローン残債（円）" value={f.loan_balance ?? ''} onChange={set('loan_balance')} type="number" />
-        </div>
         <TextField label="メモ" value={f.notes ?? ''} onChange={set('notes')} />
         {error && (
           <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm p-3">{error}</div>
