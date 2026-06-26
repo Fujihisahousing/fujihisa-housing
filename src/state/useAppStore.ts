@@ -20,8 +20,8 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  activeProperty: null,
-  activeView: 'entry',
+  activeProperty: null, // null = 全体
+  activeView: 'rentroll', // 起動時は資料の全体レントロールを表示
   setActiveProperty: (id) => set({ activeProperty: id }),
   setActiveView: (view) => set({ activeView: view }),
 }))
