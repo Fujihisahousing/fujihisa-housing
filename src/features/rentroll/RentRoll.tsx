@@ -97,7 +97,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
       {units.length === 0 ? (
         <div className="text-center text-slate-400 text-sm py-12">部屋が登録されていません。</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <div className="overflow-auto max-h-[70vh] rounded-xl border border-slate-200 bg-white">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
@@ -210,7 +210,16 @@ function StatCard({ label, value }: { label: string; value: string }) {
 }
 
 function Th({ children, className = '' }: { children?: ReactNode; className?: string }) {
-  return <th className={'px-3 py-2 font-medium ' + className}>{children}</th>
+  // sticky top-0 で縦スクロール時もヘッダーを固定。bg/影で本文と重なっても見えるように。
+  return (
+    <th
+      className={
+        'sticky top-0 z-20 bg-white px-3 py-2 font-medium shadow-[inset_0_-1px_0_#e2e8f0] ' + className
+      }
+    >
+      {children}
+    </th>
+  )
 }
 function Td({ children, className = '' }: { children?: ReactNode; className?: string }) {
   return <td className={'px-3 py-2.5 text-slate-700 ' + className}>{children}</td>
