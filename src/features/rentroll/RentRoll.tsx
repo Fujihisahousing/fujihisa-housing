@@ -1,4 +1,4 @@
-// レントロール（画面）。一覧上で直接編集できる（金額・備考＝入力、用途・状況＝選択）。
+// レントロール（画面）。一覧上で編集できるのは「状況」「備考」のみ。他は表示専用。
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
 import { unitsRepo } from '../../lib/repositories'
@@ -8,7 +8,31 @@ import { statusBadgeClass } from '../../lib/status'
 import { exportRentRollExcel } from '../../reports/exportExcel'
 import { yen, percent } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import { UNIT_STATUSES, USE_TYPES, TENANT_TYPES, type Property, type Unit } from '../../types'
+import { UNIT_STATUSES, type Property, type Unit } from '../../types'
+
+const money = (v?: number | null) => (v != null ? yen(v) : '—')
+
+// 駐輪・駐車欄（'￥18,700' 等の文字列）から金額を取り出して合算用に数値化
+function parkingYen(s?: string | null): number {
+  if (!s) return 0
+  const m = String(s).match(/[0-9][0-9,]*/)
+  return m ? parseInt(m[0].replace(/,/g, ''), 10) : 0
+}
+
+interface Totals {
+  rent: number
+  kyoeki: number
+  parking: number
+}
+const sumTotals = (rows: { unit: Unit }[]): Totals =>
+  rows.reduce(
+    (a, { unit }) => ({
+      rent: a.rent + (Number(unit.rent) || 0),
+      kyoeki: a.kyoeki + (Number(unit.kyoeki) || 0),
+      parking: a.parking + parkingYen(unit.parking),
+    }),
+    { rent: 0, kyoeki: 0, parking: 0 },
+  )
 
 export function RentRoll({ properties, propertyName }: { properties: Property[]; propertyName: string }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
@@ -28,7 +52,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
     void load()
   }, [load])
 
-  // 一覧上の編集：その場で反映しつつ DB を更新（失敗時は読み直し）
+  // 状況・備考の編集：その場で反映しつつ DB を更新（失敗時は読み直し）
   const patchUnit = useCallback(
     async (id: string, patch: Partial<Unit>) => {
       setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)))
@@ -42,7 +66,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
     [load],
   )
 
-  // 全体表示時は取得価格を合算した擬似物件で表面利回りを算出
+  // 全体表示時は取得価格を合算した擬似物件で集計
   const propertyForCalc: Property | null = useMemo(() => {
     if (activeProperty) return properties.find((p) => p.id === activeProperty) ?? null
     const sum = properties.reduce((s, p) => s + (Number(p.acquired_price) || 0), 0)
@@ -59,7 +83,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
     return (id?: string | null) => (id ? m.get(id) ?? '—' : '—')
   }, [properties])
 
-  // 物件→（階数の高い順・同じ階は号室の小さい順）に並べ替え。Excel出力にも反映される。
+  // 物件→（階数の高い順・同じ階は号室の小さい順）に並べ替え
   const sortedUnits = useMemo(() => {
     return [...units].sort((a, b) => {
       const pa = propOrder.get(a.property_id) ?? 9999
@@ -71,7 +95,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
 
   const rr = useMemo(() => calcRentRoll(sortedUnits, propertyForCalc), [sortedUnits, propertyForCalc])
 
-  // 全体表示のときだけ物件ごとにグループ化（rr.rows は既にソート済み）
+  // 全体表示のときだけ物件ごとにグループ化
   const groups = useMemo(() => {
     if (activeProperty) return null
     const map = new Map<string, typeof rr.rows>()
@@ -82,6 +106,8 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
     }
     return Array.from(map.entries())
   }, [activeProperty, rr.rows])
+
+  const grand = useMemo(() => sumTotals(rr.rows), [rr.rows])
 
   if (loading) {
     return (
@@ -94,7 +120,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <span className="text-xs text-slate-500">セルをタップして直接編集できます（自動保存）</span>
+        <span className="text-xs text-slate-500">状況・備考はその場で編集できます（自動保存）</span>
         <button
           onClick={() => void exportRentRollExcel(propertyName, rr)}
           disabled={units.length === 0}
@@ -107,7 +133,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
         <StatCard label="満室想定(月)" value={yen(rr.fullMonthly)} />
         <StatCard label="現況(月)" value={yen(rr.currentMonthly)} />
         <StatCard label="稼働率" value={`${percent(rr.occupancyRate, 1)}（${rr.occupiedUnits}/${rr.totalUnits}）`} />
-        <StatCard label="表面利回り" value={rr.grossYield != null ? percent(rr.grossYield, 2) : '—'} />
+        <StatCard label="満室想定(年)" value={yen(rr.fullAnnual)} />
       </div>
 
       {units.length === 0 ? (
@@ -124,12 +150,10 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                 <Th>入居者属性</Th>
                 <Th className="text-right">賃料</Th>
                 <Th className="text-right">共益費</Th>
-                <Th className="text-right">合計</Th>
                 <Th className="text-right">敷金</Th>
                 <Th className="text-right">礼金</Th>
                 <Th className="text-right">返還金</Th>
-                <Th>駐輪・駐車</Th>
-                <Th>契約満了</Th>
+                <Th className="text-right">駐輪・駐車</Th>
                 <Th>状況</Th>
                 <Th>備考</Th>
               </tr>
@@ -140,35 +164,33 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                     <Fragment key={pid}>
                       <tr className="bg-slate-100">
                         <td
-                          colSpan={15}
-                          className="px-3 py-2 text-sm font-semibold text-slate-700 border-y border-slate-200"
+                          colSpan={13}
+                          className="px-3 py-1.5 text-sm font-semibold text-slate-700 border-y border-slate-200"
                         >
                           {propName(pid)}
-                          <span className="ml-2 text-xs font-normal text-slate-500">
-                            {rows.length}室／満室想定(月) {yen(rows.reduce((s, r) => s + r.total, 0))}
-                          </span>
+                          <span className="ml-2 text-xs font-normal text-slate-500">{rows.length}室</span>
                         </td>
                       </tr>
                       {rows.map((r, i) => (
                         <UnitRow
                           key={r.unit.id}
                           unit={r.unit}
-                          total={r.total}
                           onPatch={patchUnit}
                           floorBreak={i > 0 && isGroupBreak(rows[i - 1].unit, r.unit)}
                         />
                       ))}
+                      <TotalRow label={`${propName(pid)} 計`} t={sumTotals(rows)} />
                     </Fragment>
                   ))
                 : rr.rows.map((r, i) => (
                     <UnitRow
                       key={r.unit.id}
                       unit={r.unit}
-                      total={r.total}
                       onPatch={patchUnit}
                       floorBreak={i > 0 && isGroupBreak(rr.rows[i - 1].unit, r.unit)}
                     />
                   ))}
+              <TotalRow label={groups ? '総合計' : '合計'} t={grand} grand />
             </tbody>
           </table>
         </div>
@@ -179,47 +201,38 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
 
 function UnitRow({
   unit: u,
-  total,
   floorBreak,
   onPatch,
 }: {
   unit: Unit
-  total: number
   floorBreak?: boolean
   onPatch: (id: string, patch: Partial<Unit>) => void
 }) {
-  const p = (patch: Partial<Unit>) => onPatch(u.id, patch)
   return (
     <tr
       className={
         'border-b border-slate-100 last:border-0 ' + (floorBreak ? 'border-t-2 border-t-slate-300' : '')
       }
     >
-      <EditTd><TextInput value={u.room ?? ''} extra="w-16 font-medium" onCommit={(v) => p({ room: v || null })} /></EditTd>
-      <EditTd><TextInput value={u.layout ?? ''} extra="w-20" onCommit={(v) => p({ layout: v || null })} /></EditTd>
-      <EditTd><NumInput value={u.area} extra="w-16 text-right" onCommit={(v) => p({ area: v })} /></EditTd>
-      <EditTd><SelectInput value={u.use_type} options={USE_TYPES} extra="w-24" onCommit={(v) => p({ use_type: v || null })} /></EditTd>
-      <EditTd><SelectInput value={u.tenant_type} options={TENANT_TYPES} extra="w-20" onCommit={(v) => p({ tenant_type: v || null })} /></EditTd>
-      <EditTd><NumInput value={u.rent} extra="w-24 text-right" onCommit={(v) => p({ rent: v })} /></EditTd>
-      <EditTd><NumInput value={u.kyoeki} extra="w-24 text-right" onCommit={(v) => p({ kyoeki: v })} /></EditTd>
-      <Td className="text-right tabular-nums font-medium">{yen(total)}</Td>
-      <EditTd><NumInput value={u.deposit} extra="w-24 text-right" onCommit={(v) => p({ deposit: v })} /></EditTd>
-      <EditTd><NumInput value={u.key_money} extra="w-24 text-right" onCommit={(v) => p({ key_money: v })} /></EditTd>
-      <EditTd><NumInput value={u.refund} extra="w-24 text-right" onCommit={(v) => p({ refund: v })} /></EditTd>
-      <EditTd><TextInput value={u.parking ?? ''} extra="w-24" onCommit={(v) => p({ parking: v || null })} /></EditTd>
-      <EditTd>
-        <input
-          type="date"
-          value={u.contract_end ?? ''}
-          onChange={(e) => p({ contract_end: e.target.value || null })}
-          className={CELL + ' w-36'}
-        />
-      </EditTd>
-      <EditTd>
+      <Td className="font-medium">{u.room}</Td>
+      <Td>{u.layout || '—'}</Td>
+      <Td className="text-right">{u.area ? `${u.area}㎡` : '—'}</Td>
+      <Td>{u.use_type || '—'}</Td>
+      <Td>{u.tenant_type || '—'}</Td>
+      <Td className="text-right tabular-nums">{money(u.rent)}</Td>
+      <Td className="text-right tabular-nums">{money(u.kyoeki)}</Td>
+      <Td className="text-right tabular-nums">{money(u.deposit)}</Td>
+      <Td className="text-right tabular-nums">{money(u.key_money)}</Td>
+      <Td className="text-right tabular-nums">{money(u.refund)}</Td>
+      <Td className="text-right tabular-nums">{u.parking || '—'}</Td>
+      <td className="px-1.5 py-1">
         <select
           value={u.status ?? ''}
-          onChange={(e) => p({ status: e.target.value })}
-          className={'rounded-full border-0 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-slate-900 ' + statusBadgeClass(u.status)}
+          onChange={(e) => onPatch(u.id, { status: e.target.value })}
+          className={
+            'rounded-full border-0 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-slate-900 ' +
+            statusBadgeClass(u.status)
+          }
         >
           {UNIT_STATUSES.map((s) => (
             <option key={s} value={s} className="bg-white text-slate-700">
@@ -227,25 +240,33 @@ function UnitRow({
             </option>
           ))}
         </select>
-      </EditTd>
-      <EditTd><TextInput value={u.notes ?? ''} extra="w-48" onCommit={(v) => p({ notes: v || null })} /></EditTd>
+      </td>
+      <td className="px-1.5 py-1">
+        <NotesInput value={u.notes ?? ''} onCommit={(v) => onPatch(u.id, { notes: v || null })} />
+      </td>
     </tr>
   )
 }
 
-// ----------------------- 編集セル部品 -----------------------
-const CELL =
-  'rounded border border-transparent bg-transparent px-2 py-1 hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900'
+function TotalRow({ label, t, grand }: { label: string; t: Totals; grand?: boolean }) {
+  const cls = grand
+    ? 'bg-slate-100 font-semibold border-t-2 border-slate-300'
+    : 'bg-slate-50 font-medium border-t border-slate-300'
+  return (
+    <tr className={cls}>
+      <td colSpan={5} className="px-3 py-2 text-slate-600">
+        {label}
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums">{yen(t.rent)}</td>
+      <td className="px-3 py-2 text-right tabular-nums">{yen(t.kyoeki)}</td>
+      <td colSpan={3} />
+      <td className="px-3 py-2 text-right tabular-nums">{yen(t.parking)}</td>
+      <td colSpan={2} />
+    </tr>
+  )
+}
 
-function TextInput({
-  value,
-  onCommit,
-  extra = '',
-}: {
-  value: string
-  onCommit: (v: string) => void
-  extra?: string
-}) {
+function NotesInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
   const [s, setS] = useState(value)
   useEffect(() => setS(value), [value])
   return (
@@ -255,66 +276,9 @@ function TextInput({
       onBlur={() => {
         if (s !== value) onCommit(s)
       }}
-      className={CELL + ' ' + extra}
+      placeholder="—"
+      className="w-44 rounded border border-transparent bg-transparent px-2 py-1 hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
     />
-  )
-}
-
-function NumInput({
-  value,
-  onCommit,
-  extra = '',
-}: {
-  value: number | null | undefined
-  onCommit: (v: number | null) => void
-  extra?: string
-}) {
-  const text = value != null ? String(value) : ''
-  const [s, setS] = useState(text)
-  useEffect(() => setS(value != null ? String(value) : ''), [value])
-  return (
-    <input
-      inputMode="numeric"
-      value={s}
-      onChange={(e) => setS(e.target.value)}
-      onBlur={() => {
-        const t = s.trim()
-        const parsed = t === '' ? null : Number(t)
-        if (t !== '' && !Number.isFinite(parsed)) {
-          setS(value != null ? String(value) : '')
-          return
-        }
-        if ((value ?? null) !== (parsed ?? null)) onCommit(parsed)
-      }}
-      className={CELL + ' tabular-nums ' + extra}
-    />
-  )
-}
-
-function SelectInput({
-  value,
-  options,
-  onCommit,
-  extra = '',
-}: {
-  value?: string | null
-  options: readonly string[]
-  onCommit: (v: string) => void
-  extra?: string
-}) {
-  return (
-    <select
-      value={value ?? ''}
-      onChange={(e) => onCommit(e.target.value)}
-      className={CELL + ' bg-transparent ' + extra}
-    >
-      <option value="">—</option>
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
   )
 }
 
@@ -328,7 +292,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
 }
 
 function Th({ children, className = '' }: { children?: ReactNode; className?: string }) {
-  // sticky top-0 で縦スクロール時もヘッダーを固定。bg/影で本文と重なっても見えるように。
+  // sticky top-0 で縦スクロール時もヘッダーを固定
   return (
     <th
       className={
@@ -341,8 +305,5 @@ function Th({ children, className = '' }: { children?: ReactNode; className?: st
   )
 }
 function Td({ children, className = '' }: { children?: ReactNode; className?: string }) {
-  return <td className={'whitespace-nowrap px-3 py-2.5 text-slate-700 ' + className}>{children}</td>
-}
-function EditTd({ children }: { children?: ReactNode }) {
-  return <td className="whitespace-nowrap px-1.5 py-1">{children}</td>
+  return <td className={'whitespace-nowrap px-3 py-1.5 text-slate-700 ' + className}>{children}</td>
 }
