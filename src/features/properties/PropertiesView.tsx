@@ -360,7 +360,9 @@ function UnitModal({
       rent: value.rent != null ? String(value.rent) : '',
       kyoeki: value.kyoeki != null ? String(value.kyoeki) : '',
       deposit: value.deposit != null ? String(value.deposit) : '',
+      hoshokin: value.hoshokin != null ? String(value.hoshokin) : '',
       key_money: value.key_money != null ? String(value.key_money) : '',
+      kaiyakubiki: value.kaiyakubiki != null ? String(value.kaiyakubiki) : '',
       refund: value.refund != null ? String(value.refund) : '',
       parking: value.parking ?? '',
       status: value.status ?? '空室',
@@ -386,7 +388,9 @@ function UnitModal({
         rent: numOrNull(f.rent) ?? 0,
         kyoeki: numOrNull(f.kyoeki) ?? 0,
         deposit: numOrNull(f.deposit) ?? 0,
+        hoshokin: numOrNull(f.hoshokin),
         key_money: numOrNull(f.key_money) ?? 0,
+        kaiyakubiki: numOrNull(f.kaiyakubiki),
         refund: numOrNull(f.refund),
         parking: f.parking || null,
         status: f.status || '空室',
@@ -475,11 +479,20 @@ function UnitModal({
           <TextField label="共益費（円）" value={f.kyoeki ?? ''} onChange={set('kyoeki')} type="number" />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <TextField label="敷金（円）" value={f.deposit ?? ''} onChange={set('deposit')} type="number" />
-          <TextField label="礼金（円）" value={f.key_money ?? ''} onChange={set('key_money')} type="number" />
+          <TextField
+            label="敷金（円）"
+            value={f.deposit ?? ''}
+            onChange={(v) => setF((p) => ({ ...p, deposit: v, refund: v }))}
+            type="number"
+          />
+          <TextField label="保証金（円）" value={f.hoshokin ?? ''} onChange={set('hoshokin')} type="number" />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <TextField label="返還金（円）" value={f.refund ?? ''} onChange={set('refund')} type="number" />
+          <TextField label="礼金（円）" value={f.key_money ?? ''} onChange={set('key_money')} type="number" />
+          <TextField label="解約引（円）" value={f.kaiyakubiki ?? ''} onChange={set('kaiyakubiki')} type="number" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="返還金（円・敷金と連動）" value={f.refund ?? ''} onChange={set('refund')} type="number" />
           <TextField label="駐輪場・駐車場" value={f.parking ?? ''} onChange={set('parking')} />
         </div>
         <div className="grid grid-cols-2 gap-3">

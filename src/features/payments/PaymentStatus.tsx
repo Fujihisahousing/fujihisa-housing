@@ -134,6 +134,7 @@ export function PaymentStatus({
                 <th className="px-3 py-2 font-medium text-right">請求額</th>
                 <th className="px-3 py-2 font-medium text-right">入金額</th>
                 <th className="px-3 py-2 font-medium">判定</th>
+                <th className="px-3 py-2 font-medium">滞納</th>
               </tr>
             </thead>
             <tbody>
@@ -151,6 +152,15 @@ export function PaymentStatus({
                     <span className={'text-xs rounded-full px-2 py-0.5 ' + JUDGE_STYLE[row.judgement]}>
                       {row.judgement}
                     </span>
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {row.arrearsMonths >= 1 ? (
+                      <span className="text-xs rounded-full px-2 py-0.5 bg-rose-600 text-white font-medium">
+                        {row.arrearsMonths}ヵ月
+                      </span>
+                    ) : (
+                      ''
+                    )}
                   </td>
                 </tr>
               ))}

@@ -50,7 +50,9 @@ export interface Unit {
   rent?: number | null
   kyoeki?: number | null
   deposit?: number | null
+  hoshokin?: number | null // 保証金
   key_money?: number | null
+  kaiyakubiki?: number | null // 解約引
   refund?: number | null // 返還金
   parking?: string | null // 駐輪場・駐車場
   status?: UnitStatus | null

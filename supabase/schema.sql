@@ -34,6 +34,8 @@ alter table units add column if not exists use_type text;
 alter table units add column if not exists tenant_type text;
 alter table units add column if not exists refund numeric;
 alter table units add column if not exists parking text;
+alter table units add column if not exists hoshokin numeric;    -- 保証金
+alter table units add column if not exists kaiyakubiki numeric; -- 解約引
 
 -- 入出金
 create table if not exists transactions (

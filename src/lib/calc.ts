@@ -159,6 +159,7 @@ export interface PaymentRow {
   billed: number // 請求額 = rent+kyoeki（入居戸）
   paid: number // 入金額 = 当月の賃料系入金（該当unit）
   judgement: PaymentJudgement
+  arrearsMonths: number // 滞納月数（初回入金月〜選択月で満額未達の月数）
 }
 export interface PaymentStatusResult {
   year: number
@@ -184,6 +185,9 @@ export function calcPaymentStatus(
     return d.getFullYear() === year && d.getMonth() + 1 === month && t.type === 'income'
   })
 
+  // 選択月のインデックス（年×12＋月）。滞納月数の計算に使う。
+  const selIdx = year * 12 + (month - 1)
+
   const rows: PaymentRow[] = units.map((u) => {
     const billed = n(u.rent) + n(u.kyoeki)
     const unitTxs = monthTxs.filter((t) => t.unit_id === u.id && RENT_CATEGORIES.has(t.category))
@@ -197,7 +201,26 @@ export function calcPaymentStatus(
     else if (paid === 0 && guarantorUnit) judgement = '保証会社請求中'
     else judgement = '未入金'
 
-    return { unit: u, billed, paid, judgement }
+    // 滞納月数：この号室の賃料系入金を月ごとに集計し、初回入金月〜選択月で満額未達の月を数える
+    let arrearsMonths = 0
+    if (isOccupied(u) && billed > 0) {
+      const paidByMonth = new Map<number, number>()
+      for (const t of transactions) {
+        if (t.type !== 'income' || t.unit_id !== u.id || !RENT_CATEGORIES.has(t.category)) continue
+        const d = new Date(t.date)
+        const idx = d.getFullYear() * 12 + d.getMonth()
+        if (idx > selIdx) continue
+        paidByMonth.set(idx, (paidByMonth.get(idx) ?? 0) + n(t.amount))
+      }
+      if (paidByMonth.size > 0) {
+        const startIdx = Math.min(...paidByMonth.keys())
+        for (let i = startIdx; i <= selIdx; i++) {
+          if ((paidByMonth.get(i) ?? 0) < billed) arrearsMonths++
+        }
+      }
+    }
+
+    return { unit: u, billed, paid, judgement, arrearsMonths }
   })
 
   const billable = rows.filter((r) => r.judgement !== '空室')
