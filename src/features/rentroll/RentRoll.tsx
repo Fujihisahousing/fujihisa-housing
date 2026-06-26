@@ -147,10 +147,8 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                 <Th>入居者属性</Th>
                 <Th className="text-right">賃料</Th>
                 <Th className="text-right">共益費</Th>
-                <Th className="text-right">敷金</Th>
-                <Th className="text-right">保証金</Th>
-                <Th className="text-right">礼金</Th>
-                <Th className="text-right">解約引</Th>
+                <Th className="text-right">敷金／保証金</Th>
+                <Th className="text-right">礼金／解約引</Th>
                 <Th className="text-right">返還金</Th>
                 <Th className="text-right">駐輪・駐車</Th>
                 <Th>状況</Th>
@@ -163,7 +161,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                     <Fragment key={pid}>
                       <tr>
                         <td
-                          colSpan={15}
+                          colSpan={13}
                           className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white"
                         >
                           {propName(pid)}
@@ -224,10 +222,26 @@ function UnitRow({
       <Td>{u.tenant_type || '—'}</Td>
       <Td className="text-right tabular-nums">{money(u.rent)}</Td>
       <Td className="text-right tabular-nums">{money(u.kyoeki)}</Td>
-      <Td className="text-right tabular-nums">{money(u.deposit)}</Td>
-      <Td className="text-right tabular-nums">{money(u.hoshokin)}</Td>
-      <Td className="text-right tabular-nums">{money(u.key_money)}</Td>
-      <Td className="text-right tabular-nums">{money(u.kaiyakubiki)}</Td>
+      <Td className="text-right tabular-nums leading-tight whitespace-nowrap">
+        <div>
+          <span className="text-xs text-slate-400 mr-1">敷</span>
+          {money(u.deposit)}
+        </div>
+        <div>
+          <span className="text-xs text-slate-400 mr-1">保</span>
+          {money(u.hoshokin)}
+        </div>
+      </Td>
+      <Td className="text-right tabular-nums leading-tight whitespace-nowrap">
+        <div>
+          <span className="text-xs text-slate-400 mr-1">礼</span>
+          {money(u.key_money)}
+        </div>
+        <div>
+          <span className="text-xs text-slate-400 mr-1">解</span>
+          {money(u.kaiyakubiki)}
+        </div>
+      </Td>
       <Td className="text-right tabular-nums">{money(u.refund)}</Td>
       <Td className="text-right tabular-nums">{u.parking || '—'}</Td>
       <td className="px-1.5 py-1">
@@ -264,12 +278,12 @@ function TotalBlock({ t }: { t: Totals }) {
         </td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.rent)}</td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.kyoeki)}</td>
-        <td colSpan={5} />
+        <td colSpan={3} />
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.parking)}</td>
         <td colSpan={2} />
       </tr>
       <tr className="bg-slate-50 font-semibold">
-        <td colSpan={12} className="px-3 py-1.5 text-slate-700">
+        <td colSpan={10} className="px-3 py-1.5 text-slate-700">
           合計
         </td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(total)}</td>
