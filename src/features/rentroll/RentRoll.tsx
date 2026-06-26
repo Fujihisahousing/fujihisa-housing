@@ -129,11 +129,10 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
           <FileSpreadsheet className="w-4 h-4" /> Excel出力
         </button>
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <StatCard label="満室想定(月)" value={yen(rr.fullMonthly)} />
-        <StatCard label="現況(月)" value={yen(rr.currentMonthly)} />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <DualCard label="満室想定" monthly={rr.fullMonthly} annual={rr.fullAnnual} />
+        <DualCard label="現況" monthly={rr.currentMonthly} annual={rr.currentMonthly * 12} />
         <StatCard label="稼働率" value={`${percent(rr.occupancyRate, 1)}（${rr.occupiedUnits}/${rr.totalUnits}）`} />
-        <StatCard label="満室想定(年)" value={yen(rr.fullAnnual)} />
       </div>
 
       {units.length === 0 ? (
@@ -162,13 +161,13 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
               {groups
                 ? groups.map(([pid, rows]) => (
                     <Fragment key={pid}>
-                      <tr className="bg-slate-100">
+                      <tr>
                         <td
                           colSpan={13}
-                          className="px-3 py-1.5 text-sm font-semibold text-slate-700 border-y border-slate-200"
+                          className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white"
                         >
                           {propName(pid)}
-                          <span className="ml-2 text-xs font-normal text-slate-500">{rows.length}室</span>
+                          <span className="ml-2 text-xs font-normal text-slate-300">{rows.length}室</span>
                         </td>
                       </tr>
                       {rows.map((r, i) => (
@@ -179,7 +178,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                           floorBreak={i > 0 && isGroupBreak(rows[i - 1].unit, r.unit)}
                         />
                       ))}
-                      <TotalRow label={`${propName(pid)} 計`} t={sumTotals(rows)} />
+                      <TotalBlock t={sumTotals(rows)} breakdownLabel="計" totalLabel="合計" />
                     </Fragment>
                   ))
                 : rr.rows.map((r, i) => (
@@ -190,7 +189,12 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                       floorBreak={i > 0 && isGroupBreak(rr.rows[i - 1].unit, r.unit)}
                     />
                   ))}
-              <TotalRow label={groups ? '総合計' : '合計'} t={grand} grand />
+              <TotalBlock
+                t={grand}
+                breakdownLabel={groups ? '総計' : '計'}
+                totalLabel={groups ? '総合計' : '合計'}
+                grand
+              />
             </tbody>
           </table>
         </div>
@@ -248,21 +252,41 @@ function UnitRow({
   )
 }
 
-function TotalRow({ label, t, grand }: { label: string; t: Totals; grand?: boolean }) {
-  const cls = grand
-    ? 'bg-slate-100 font-semibold border-t-2 border-slate-300'
-    : 'bg-slate-50 font-medium border-t border-slate-300'
+// 内訳（賃料・共益費・駐輪駐車）の「計」行と、その下に総額の「合計」行を出す
+function TotalBlock({
+  t,
+  breakdownLabel,
+  totalLabel,
+  grand,
+}: {
+  t: Totals
+  breakdownLabel: string
+  totalLabel: string
+  grand?: boolean
+}) {
+  const total = t.rent + t.kyoeki + t.parking
+  const base = grand ? 'bg-slate-100 font-semibold' : 'bg-slate-50 font-medium'
   return (
-    <tr className={cls}>
-      <td colSpan={5} className="px-3 py-2 text-slate-600">
-        {label}
-      </td>
-      <td className="px-3 py-2 text-right tabular-nums">{yen(t.rent)}</td>
-      <td className="px-3 py-2 text-right tabular-nums">{yen(t.kyoeki)}</td>
-      <td colSpan={3} />
-      <td className="px-3 py-2 text-right tabular-nums">{yen(t.parking)}</td>
-      <td colSpan={2} />
-    </tr>
+    <>
+      <tr className={base + ' border-t border-slate-300'}>
+        <td colSpan={5} className="px-3 py-1.5 text-slate-600">
+          {breakdownLabel}
+        </td>
+        <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.rent)}</td>
+        <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.kyoeki)}</td>
+        <td colSpan={3} />
+        <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.parking)}</td>
+        <td colSpan={2} />
+      </tr>
+      <tr className={base + (grand ? ' border-b-2 border-slate-300' : '')}>
+        <td colSpan={5} className="px-3 py-1.5 text-slate-600">
+          {totalLabel}
+        </td>
+        <td colSpan={8} className="px-3 py-1.5 text-right tabular-nums">
+          {yen(total)}
+        </td>
+      </tr>
+    </>
   )
 }
 
@@ -279,6 +303,25 @@ function NotesInput({ value, onCommit }: { value: string; onCommit: (v: string) 
       placeholder="—"
       className="w-44 rounded border border-transparent bg-transparent px-2 py-1 hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
     />
+  )
+}
+
+// 月/年を1枠にまとめた金額カード（金額は右寄せ）
+function DualCard({ label, monthly, annual }: { label: string; monthly: number; annual: number }) {
+  return (
+    <div className="rounded-xl bg-white border border-slate-200 px-3 py-2.5">
+      <div className="text-xs text-slate-500">{label}</div>
+      <div className="mt-1 space-y-0.5">
+        <div className="flex items-baseline justify-between">
+          <span className="text-xs text-slate-400">月</span>
+          <span className="text-sm font-bold text-slate-800 tabular-nums">{yen(monthly)}</span>
+        </div>
+        <div className="flex items-baseline justify-between">
+          <span className="text-xs text-slate-400">年</span>
+          <span className="text-sm font-bold text-slate-800 tabular-nums">{yen(annual)}</span>
+        </div>
+      </div>
+    </div>
   )
 }
 
