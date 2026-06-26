@@ -157,7 +157,8 @@ export type PaymentJudgement =
 export interface PaymentRow {
   unit: Unit
   billed: number // 請求額 = rent+kyoeki（入居戸）
-  paid: number // 入金額 = 当月の賃料系入金（該当unit）
+  paid: number // 入金額 = 当月分（前家賃で帰属）の賃料系入金
+  paidDate: string | null // 入金日 = 当月分の最新入金の日付
   judgement: PaymentJudgement
   arrearsMonths: number // 滞納月数（初回入金月〜選択月で満額未達の月数）
 }
@@ -204,6 +205,10 @@ export function calcPaymentStatus(
       if (idx === selIdx) selPayments.push(t)
     }
     const paid = paidByMonth.get(selIdx) ?? 0
+    const paidDate =
+      selPayments.length > 0
+        ? selPayments.reduce((mx, t) => (t.date > mx ? t.date : mx), selPayments[0].date)
+        : null
     const guarantorUnit = isGuarantor(u.payment_method) || selPayments.some((t) => isGuarantor(t.method))
 
     let judgement: PaymentJudgement
@@ -222,7 +227,7 @@ export function calcPaymentStatus(
       }
     }
 
-    return { unit: u, billed, paid, judgement, arrearsMonths }
+    return { unit: u, billed, paid, paidDate, judgement, arrearsMonths }
   })
 
   const billable = rows.filter((r) => r.judgement !== '空室')

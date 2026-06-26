@@ -1,11 +1,11 @@
-// 入金状況（画面）。月次・号室別。Excel出力は M4。
-import { useCallback, useEffect, useMemo, useState } from 'react'
+// 入金状況（画面）。月次・号室別。マンション帯でグループ表示。備考のみ編集可（月別保存）。
+import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
-import { transactionsRepo, unitsRepo } from '../../lib/repositories'
-import { calcPaymentStatus, type PaymentJudgement } from '../../lib/calc'
+import { transactionsRepo, unitsRepo, paymentNotesRepo } from '../../lib/repositories'
+import { calcPaymentStatus, type PaymentJudgement, type PaymentRow } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
-import { yen, percent } from '../../lib/format'
+import { yen, percent, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import type { Property, Transaction, Unit } from '../../types'
 
@@ -32,25 +32,40 @@ export function PaymentStatus({
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [units, setUnits] = useState<Unit[]>([])
   const [txs, setTxs] = useState<Transaction[]>([])
+  const [notes, setNotes] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [u, t] = await Promise.all([
+      const [u, t, n] = await Promise.all([
         activeProperty ? unitsRepo.listByProperty(activeProperty) : unitsRepo.listAll(),
         transactionsRepo.list({ propertyId: activeProperty }),
+        paymentNotesRepo.mapByMonth(year, month),
       ])
       setUnits(u)
       setTxs(t)
+      setNotes(n)
     } finally {
       setLoading(false)
     }
-  }, [activeProperty])
+  }, [activeProperty, year, month])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  const saveNote = useCallback(
+    async (unitId: string, memo: string) => {
+      setNotes((prev) => ({ ...prev, [unitId]: memo }))
+      try {
+        await paymentNotesRepo.set(unitId, year, month, memo)
+      } catch (e) {
+        alert('備考の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
+      }
+    },
+    [year, month],
+  )
 
   const propOrder = useMemo(() => {
     const m = new Map<string, number>()
@@ -62,7 +77,6 @@ export function PaymentStatus({
     return (id?: string | null) => (id ? m.get(id) ?? '—' : '—')
   }, [properties])
 
-  // 物件→号室順に並べ替え（レントロールと同じ並び）
   const sortedUnits = useMemo(() => {
     return [...units].sort((a, b) => {
       const pa = propOrder.get(a.property_id) ?? 9999
@@ -76,6 +90,17 @@ export function PaymentStatus({
     () => calcPaymentStatus(sortedUnits, txs, year, month),
     [sortedUnits, txs, year, month],
   )
+
+  const groups = useMemo(() => {
+    if (activeProperty) return null
+    const map = new Map<string, PaymentRow[]>()
+    for (const row of r.rows) {
+      const k = row.unit.property_id
+      if (!map.has(k)) map.set(k, [])
+      map.get(k)!.push(row)
+    }
+    return Array.from(map.entries())
+  }, [activeProperty, r.rows])
 
   return (
     <div className="space-y-4">
@@ -125,50 +150,108 @@ export function PaymentStatus({
       ) : units.length === 0 ? (
         <div className="text-center text-slate-400 text-sm py-12">部屋が登録されていません。</div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
+        <div className="overflow-auto max-h-[70vh] rounded-xl border border-slate-200 bg-white">
+          <table className="w-full min-w-max text-sm">
             <thead>
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
-                <th className="px-3 py-2 font-medium">マンション</th>
-                <th className="px-3 py-2 font-medium">号室</th>
-                <th className="px-3 py-2 font-medium text-right">請求額</th>
-                <th className="px-3 py-2 font-medium text-right">入金額</th>
-                <th className="px-3 py-2 font-medium">判定</th>
-                <th className="px-3 py-2 font-medium">滞納</th>
+                <Th>号室</Th>
+                <Th>契約者名</Th>
+                <Th>読み方</Th>
+                <Th className="text-right">請求額</Th>
+                <Th className="text-right">入金額</Th>
+                <Th>入金日</Th>
+                <Th className="text-right">不足額</Th>
+                <Th>判定</Th>
+                <Th>滞納</Th>
+                <Th>備考</Th>
               </tr>
             </thead>
             <tbody>
-              {r.rows.map((row) => (
-                <tr key={row.unit.id} className="border-b border-slate-100 last:border-0">
-                  <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{propName(row.unit.property_id)}</td>
-                  <td className="px-3 py-2.5 font-medium text-slate-700">{row.unit.room}</td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                    {row.judgement === '空室' ? '—' : yen(row.billed)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                    {row.judgement === '空室' ? '—' : yen(row.paid)}
-                  </td>
-                  <td className="px-3 py-2.5">
-                    <span className={'text-xs rounded-full px-2 py-0.5 ' + JUDGE_STYLE[row.judgement]}>
-                      {row.judgement}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {row.arrearsMonths >= 1 ? (
-                      <span className="text-xs rounded-full px-2 py-0.5 bg-rose-600 text-white font-medium">
-                        {row.arrearsMonths}ヵ月
-                      </span>
-                    ) : (
-                      ''
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {groups
+                ? groups.map(([pid, rows]) => (
+                    <Fragment key={pid}>
+                      <tr>
+                        <td colSpan={10} className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white">
+                          {propName(pid)}
+                          <span className="ml-2 text-xs font-normal text-slate-300">{rows.length}室</span>
+                        </td>
+                      </tr>
+                      {rows.map((row) => (
+                        <PayRow
+                          key={row.unit.id}
+                          row={row}
+                          memo={notes[row.unit.id] ?? ''}
+                          onNote={saveNote}
+                        />
+                      ))}
+                    </Fragment>
+                  ))
+                : r.rows.map((row) => (
+                    <PayRow key={row.unit.id} row={row} memo={notes[row.unit.id] ?? ''} onNote={saveNote} />
+                  ))}
             </tbody>
           </table>
         </div>
       )}
     </div>
+  )
+}
+
+function PayRow({
+  row,
+  memo,
+  onNote,
+}: {
+  row: PaymentRow
+  memo: string
+  onNote: (unitId: string, memo: string) => void
+}) {
+  const u = row.unit
+  const vacant = row.judgement === '空室'
+  const shortfall = Math.max(0, row.billed - row.paid)
+  return (
+    <tr className="border-b border-slate-100 last:border-0">
+      <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{u.room}</td>
+      <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{u.tenant || '—'}</td>
+      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{u.tenant_kana || '—'}</td>
+      <td className="px-3 py-2 text-right tabular-nums text-slate-600">{vacant ? '—' : yen(row.billed)}</td>
+      <td className="px-3 py-2 text-right tabular-nums text-slate-600">{vacant ? '—' : yen(row.paid)}</td>
+      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{row.paidDate ? formatDate(row.paidDate) : '—'}</td>
+      <td className="px-3 py-2 text-right tabular-nums">
+        {vacant || shortfall <= 0 ? <span className="text-slate-400">—</span> : <span className="text-rose-700">{yen(shortfall)}</span>}
+      </td>
+      <td className="px-3 py-2">
+        <span className={'text-xs rounded-full px-2 py-0.5 ' + JUDGE_STYLE[row.judgement]}>
+          {row.judgement}
+        </span>
+      </td>
+      <td className="px-3 py-2">
+        {row.arrearsMonths >= 1 && (
+          <span className="text-xs rounded-full px-2 py-0.5 bg-rose-600 text-white font-medium">
+            {row.arrearsMonths}ヵ月
+          </span>
+        )}
+      </td>
+      <td className="px-1.5 py-1">
+        <NoteInput value={memo} onCommit={(v) => onNote(u.id, v)} />
+      </td>
+    </tr>
+  )
+}
+
+function NoteInput({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [s, setS] = useState(value)
+  useEffect(() => setS(value), [value])
+  return (
+    <input
+      value={s}
+      onChange={(e) => setS(e.target.value)}
+      onBlur={() => {
+        if (s !== value) onCommit(s)
+      }}
+      placeholder="—"
+      className="w-44 rounded border border-transparent bg-transparent px-2 py-1 hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+    />
   )
 }
 
@@ -178,5 +261,18 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <div className="text-xs text-slate-500">{label}</div>
       <div className="text-sm font-bold text-slate-800 mt-0.5">{value}</div>
     </div>
+  )
+}
+
+function Th({ children, className = '' }: { children?: ReactNode; className?: string }) {
+  return (
+    <th
+      className={
+        'sticky top-0 z-20 whitespace-nowrap bg-white px-3 py-2 font-medium shadow-[inset_0_-1px_0_#e2e8f0] ' +
+        className
+      }
+    >
+      {children}
+    </th>
   )
 }

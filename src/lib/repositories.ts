@@ -103,6 +103,41 @@ export const transactionsRepo = {
 }
 
 // ---------------------------------------------------------------------
+// payment_notes（入金状況の月別メモ）
+// ---------------------------------------------------------------------
+export const paymentNotesRepo = {
+  /** 指定年月のメモを { unit_id: memo } のマップで取得 */
+  async mapByMonth(year: number, month: number): Promise<Record<string, string>> {
+    const { data, error } = await supabase
+      .from('payment_notes')
+      .select('unit_id, memo')
+      .eq('year', year)
+      .eq('month', month)
+    const rows = unwrap(data, error) as { unit_id: string; memo: string | null }[]
+    const m: Record<string, string> = {}
+    for (const r of rows) if (r.memo != null) m[r.unit_id] = r.memo
+    return m
+  },
+  /** メモを保存（空なら削除） */
+  async set(unitId: string, year: number, month: number, memo: string): Promise<void> {
+    if (memo.trim() === '') {
+      const { error } = await supabase
+        .from('payment_notes')
+        .delete()
+        .eq('unit_id', unitId)
+        .eq('year', year)
+        .eq('month', month)
+      if (error) throw new Error(error.message)
+      return
+    }
+    const { error } = await supabase
+      .from('payment_notes')
+      .upsert({ unit_id: unitId, year, month, memo, updated_at: new Date().toISOString() })
+    if (error) throw new Error(error.message)
+  },
+}
+
+// ---------------------------------------------------------------------
 // settings（key/value）
 // ---------------------------------------------------------------------
 export const settingsRepo = {

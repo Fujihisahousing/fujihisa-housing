@@ -36,6 +36,20 @@ alter table units add column if not exists refund numeric;
 alter table units add column if not exists parking text;
 alter table units add column if not exists hoshokin numeric;    -- 保証金
 alter table units add column if not exists kaiyakubiki numeric; -- 解約引
+alter table units add column if not exists tenant_kana text;    -- 契約者名の読み（カナ）
+
+-- 入金状況の月別メモ
+create table if not exists payment_notes (
+  unit_id uuid references units(id) on delete cascade,
+  year int not null,
+  month int not null,
+  memo text,
+  updated_at timestamptz default now(),
+  primary key (unit_id, year, month)
+);
+alter table payment_notes enable row level security;
+drop policy if exists "auth all payment_notes" on payment_notes;
+create policy "auth all payment_notes" on payment_notes for all to authenticated using (true) with check (true);
 
 -- 入出金
 create table if not exists transactions (

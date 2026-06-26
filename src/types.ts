@@ -56,7 +56,8 @@ export interface Unit {
   refund?: number | null // 返還金
   parking?: string | null // 駐輪場・駐車場
   status?: UnitStatus | null
-  tenant?: string | null
+  tenant?: string | null // 契約者名（漢字/英字）
+  tenant_kana?: string | null // 契約者名の読み（カナ）
   guarantor?: string | null
   payment_method?: string | null
   contract_start?: string | null

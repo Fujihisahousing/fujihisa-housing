@@ -357,6 +357,8 @@ function UnitModal({
       area: value.area != null ? String(value.area) : '',
       use_type: value.use_type ?? '',
       tenant_type: value.tenant_type ?? '',
+      tenant: value.tenant ?? '',
+      tenant_kana: value.tenant_kana ?? '',
       rent: value.rent != null ? String(value.rent) : '',
       kyoeki: value.kyoeki != null ? String(value.kyoeki) : '',
       deposit: value.deposit != null ? String(value.deposit) : '',
@@ -385,6 +387,8 @@ function UnitModal({
         area: numOrNull(f.area),
         use_type: f.use_type || null,
         tenant_type: f.tenant_type || null,
+        tenant: f.tenant || null,
+        tenant_kana: f.tenant_kana || null,
         rent: numOrNull(f.rent) ?? 0,
         kyoeki: numOrNull(f.kyoeki) ?? 0,
         deposit: numOrNull(f.deposit) ?? 0,
@@ -456,6 +460,10 @@ function UnitModal({
               <option value="企業">企業</option>
             </select>
           </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="契約者名（漢字/英字）" value={f.tenant ?? ''} onChange={set('tenant')} />
+          <TextField label="読み方（カナ）" value={f.tenant_kana ?? ''} onChange={set('tenant_kana')} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <TextField label="面積（㎡）" value={f.area ?? ''} onChange={set('area')} type="number" />
