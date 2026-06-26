@@ -86,6 +86,12 @@ export const transactionsRepo = {
     const { data, error } = await supabase.from('transactions').insert(t).select().single()
     return unwrap(data, error)
   },
+  /** 複数件をまとめて記帳（部屋ごと・建物まとめ入力で使用） */
+  async createMany(rows: Partial<Transaction>[]): Promise<Transaction[]> {
+    if (rows.length === 0) return []
+    const { data, error } = await supabase.from('transactions').insert(rows).select()
+    return unwrap(data, error)
+  },
   async update(id: string, patch: Partial<Transaction>): Promise<Transaction> {
     const { data, error } = await supabase.from('transactions').update(patch).eq('id', id).select().single()
     return unwrap(data, error)

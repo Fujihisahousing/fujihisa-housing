@@ -114,11 +114,33 @@ export interface Profile {
   created_at?: string
 }
 
-/** カテゴリ初期値（SOW 5.3） */
-export const INCOME_CATEGORIES = [
-  '賃料', '共益費', '礼金', '敷金', '更新料', '看板・広告', 'その他入金',
+/** カテゴリ定義
+ * 入力UIは「部屋ごと」「建物まとめ」の2系統。費目の単位（部屋／建物）で分けている。
+ * 共益費・光熱費は手入力タイルには出さず、まとめ入金の自動振り分けでのみ使う。
+ */
+
+/** 部屋ごとの収入（部屋を選んで入力） */
+export const ROOM_INCOME_CATEGORIES = ['賃料', '敷金', '礼金'] as const
+
+/** 建物ごとの収入（物件全体に紐づく） */
+export const BUILDING_INCOME_CATEGORIES = ['看板', 'KDDI', 'タイムズ'] as const
+
+/** 建物ごとの支出（物件全体に紐づく） */
+export const BUILDING_EXPENSE_CATEGORIES = [
+  '管理会社委託費',
+  'BM',
+  'EV保守費',
+  '警備（アルソック）',
+  '清掃費',
+  '公租公課',
+  '保険料（建物保険）',
+  '保険料（賠償責任保険）',
+  '道頓堀商店街　組合費',
+  '町会費',
+  '水道光熱費',
 ] as const
 
-export const EXPENSE_CATEGORIES = [
-  '管理委託費', 'BM', '清掃費', '修繕費', 'ローン返済', '固定資産税', '水道光熱費', '損害保険料', 'その他出金',
-] as const
+/** まとめ入金の自動振り分けで使う収入カテゴリ名（賃料は ROOM_INCOME と共通） */
+export const CAT_RENT = '賃料'
+export const CAT_KYOEKI = '共益費'
+export const CAT_UTILITY = '光熱費'

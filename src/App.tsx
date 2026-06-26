@@ -5,8 +5,8 @@ import { LoginView } from './auth/LoginView'
 import { Header } from './components/layout/Header'
 import { PropertyTabs } from './components/layout/PropertyTabs'
 import { BottomNav } from './components/layout/BottomNav'
-import { EntryGrid } from './components/entry/EntryGrid'
-import { EntrySheet, type EntryTarget } from './components/entry/EntrySheet'
+import { RoomEntry } from './components/entry/RoomEntry'
+import { BuildingEntry } from './components/entry/BuildingEntry'
 import { LedgerView } from './features/ledger/LedgerView'
 import { PropertiesView } from './features/properties/PropertiesView'
 import { ReportsView } from './features/ReportsView'
@@ -69,10 +69,12 @@ function Shell() {
   )
 }
 
+type EntryTab = 'room' | 'building'
+
 function EntryView({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const setActiveView = useAppStore((s) => s.setActiveView)
-  const [target, setTarget] = useState<EntryTarget | null>(null)
+  const [tab, setTab] = useState<EntryTab>('room')
   const [saved, setSaved] = useState(false)
 
   if (properties.length === 0) {
@@ -89,10 +91,15 @@ function EntryView({ properties }: { properties: Property[] }) {
     )
   }
 
+  const onSaved = () => {
+    setSaved(true)
+    window.setTimeout(() => setSaved(false), 4000)
+  }
+
   return (
-    <div>
+    <div className="space-y-4">
       {saved && (
-        <div className="mb-4 flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm p-3">
+        <div className="flex items-center gap-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm p-3">
           <CheckCircle2 className="w-5 h-5" />
           記帳しました。
           <button onClick={() => setActiveView('ledger')} className="underline ml-1">
@@ -100,18 +107,27 @@ function EntryView({ properties }: { properties: Property[] }) {
           </button>
         </div>
       )}
-      <EntryGrid onPick={(type, category) => setTarget({ type, category })} />
-      <EntrySheet
-        target={target}
-        properties={properties}
-        defaultPropertyId={activeProperty}
-        onClose={() => setTarget(null)}
-        onSaved={() => {
-          setTarget(null)
-          setSaved(true)
-          window.setTimeout(() => setSaved(false), 4000)
-        }}
-      />
+
+      <div className="flex rounded-xl bg-slate-100 p-1 text-sm">
+        {(['room', 'building'] as EntryTab[]).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={
+              'flex-1 rounded-lg py-2 font-medium transition-colors ' +
+              (tab === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')
+            }
+          >
+            {t === 'room' ? '部屋ごと' : '建物まとめ'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'room' ? (
+        <RoomEntry properties={properties} defaultPropertyId={activeProperty} onSaved={onSaved} />
+      ) : (
+        <BuildingEntry properties={properties} defaultPropertyId={activeProperty} onSaved={onSaved} />
+      )}
     </div>
   )
 }
