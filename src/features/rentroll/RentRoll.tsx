@@ -225,7 +225,7 @@ function UnitRow({
     >
       <Td className="font-medium">{u.room}</Td>
       <Td>{u.layout || '—'}</Td>
-      <Td className="text-right">{u.area ? `${u.area}㎡` : '—'}</Td>
+      <Td className="text-right">{u.area ? `${Number(u.area).toFixed(2)}㎡` : '—'}</Td>
       <Td>{u.use_type || '—'}</Td>
       <Td>{u.tenant_type || '—'}</Td>
       <Td className="text-right tabular-nums">{money(u.rent)}</Td>
