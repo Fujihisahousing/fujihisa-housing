@@ -131,16 +131,18 @@ export function PaymentStatus({
           const p = Number(x.paid) || 0
           return xi <= selIdx && b > 0 && p < b && x.judgement !== '空室'
         }).length
+        // 記録がある月は、その時点の値だけを使う（物件情報には一切フォールバックしない）。
+        // → 物件情報の契約者名を変更しても過去の表示は変わらない。
         return {
           unit: u,
-          tenant: rec.tenant ?? u.tenant ?? '',
-          tenantType: rec.tenant_type ?? u.tenant_type ?? '',
-          kana: rec.kana ?? u.tenant_kana ?? '',
+          tenant: rec.tenant ?? '',
+          tenantType: rec.tenant_type ?? '',
+          kana: rec.kana ?? '',
           billed: rec.billed ?? null,
           paid: rec.paid ?? null,
           paidDate: rec.paid_on ?? null,
           judgement: rec.judgement ?? '—',
-          guarantor: rec.guarantor ?? u.guarantor ?? '',
+          guarantor: rec.guarantor ?? '',
           memo: rec.memo ?? '',
           arrears,
           fromRecord: true,
