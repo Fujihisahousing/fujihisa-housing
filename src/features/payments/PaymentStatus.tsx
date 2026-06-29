@@ -55,6 +55,22 @@ export function PaymentStatus({
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
 
+  // 表示上限＝翌月（前家賃の記入分まで）。それ以降の未来月は選べない。月が進めば自動で解放。
+  const capDate = new Date(now.getFullYear(), now.getMonth() + 1, 1)
+  const capYear = capDate.getFullYear()
+  const capMonth = capDate.getMonth() + 1
+  const monthMax = year < capYear ? 12 : capMonth
+
+  // 上限を超える年月が選ばれたらクランプ
+  useEffect(() => {
+    if (year > capYear) {
+      setYear(capYear)
+      return
+    }
+    const mMax = year < capYear ? 12 : capMonth
+    if (month > mMax) setMonth(mMax)
+  }, [year, month, capYear, capMonth])
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -227,18 +243,20 @@ export function PaymentStatus({
           onChange={(e) => setYear(Number(e.target.value))}
           className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm bg-white"
         >
-          {Array.from({ length: 6 }, (_, i) => now.getFullYear() - 4 + i).map((y) => (
-            <option key={y} value={y}>
-              {y}年
-            </option>
-          ))}
+          {Array.from({ length: capYear - (now.getFullYear() - 4) + 1 }, (_, i) => now.getFullYear() - 4 + i).map(
+            (y) => (
+              <option key={y} value={y}>
+                {y}年
+              </option>
+            ),
+          )}
         </select>
         <select
           value={month}
           onChange={(e) => setMonth(Number(e.target.value))}
           className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm bg-white"
         >
-          {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+          {Array.from({ length: monthMax }, (_, i) => i + 1).map((m) => (
             <option key={m} value={m}>
               {m}月
             </option>
