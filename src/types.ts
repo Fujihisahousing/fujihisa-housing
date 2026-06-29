@@ -82,6 +82,23 @@ export interface Transaction {
   created_at?: string
 }
 
+/** 月次入金記録（入金状況の手動データ） */
+export interface PaymentRecord {
+  property_id: string
+  room: string
+  year: number
+  month: number
+  tenant?: string | null
+  tenant_type?: string | null
+  kana?: string | null
+  billed?: number | null
+  paid?: number | null
+  paid_on?: string | null
+  judgement?: string | null
+  guarantor?: string | null
+  memo?: string | null
+}
+
 /** 5.4 settings（key/value） */
 export interface Setting {
   key: string

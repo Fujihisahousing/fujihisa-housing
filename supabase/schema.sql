@@ -52,6 +52,22 @@ alter table payment_notes enable row level security;
 drop policy if exists "auth all payment_notes" on payment_notes;
 create policy "auth all payment_notes" on payment_notes for all to authenticated using (true) with check (true);
 
+-- 入金状況の月次入金記録（手動データ）
+create table if not exists payment_records (
+  property_id uuid references properties(id) on delete cascade,
+  room text not null,
+  year int not null,
+  month int not null,
+  tenant text, tenant_type text, kana text,
+  billed numeric, paid numeric, paid_on date,
+  judgement text, guarantor text, memo text,
+  updated_at timestamptz default now(),
+  primary key (property_id, room, year, month)
+);
+alter table payment_records enable row level security;
+drop policy if exists "auth all payment_records" on payment_records;
+create policy "auth all payment_records" on payment_records for all to authenticated using (true) with check (true);
+
 -- 入出金
 create table if not exists transactions (
   id uuid primary key default gen_random_uuid(),

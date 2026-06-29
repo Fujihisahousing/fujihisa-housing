@@ -1,7 +1,7 @@
 // repository層：UI・集計は必ずここ経由で DB にアクセスする（DB実装に依存させない）。
 // RLS により、ログイン済みでないと読み書きできない。個人情報(leases)は admin のみ。
 import { supabase } from './supabase'
-import type { Property, Unit, Transaction, Setting, Profile, Lease } from '../types'
+import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord } from '../types'
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
   if (error) throw new Error(error.message)
@@ -133,6 +133,33 @@ export const paymentNotesRepo = {
     const { error } = await supabase
       .from('payment_notes')
       .upsert({ unit_id: unitId, year, month, memo, updated_at: new Date().toISOString() })
+    if (error) throw new Error(error.message)
+  },
+}
+
+// ---------------------------------------------------------------------
+// payment_records（入金状況の月次記録）
+// ---------------------------------------------------------------------
+export const paymentRecordsRepo = {
+  /** 物件の月次記録を取得（propertyId=null は全件） */
+  async list(propertyId: string | null): Promise<PaymentRecord[]> {
+    let q = supabase.from('payment_records').select('*')
+    if (propertyId) q = q.eq('property_id', propertyId)
+    const { data, error } = await q
+    return unwrap(data, error) as PaymentRecord[]
+  },
+  /** 備考を更新 */
+  async setMemo(
+    property_id: string,
+    room: string,
+    year: number,
+    month: number,
+    memo: string,
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('payment_records')
+      .update({ memo, updated_at: new Date().toISOString() })
+      .match({ property_id, room, year, month })
     if (error) throw new Error(error.message)
   },
 }
