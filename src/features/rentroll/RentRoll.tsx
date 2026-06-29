@@ -20,14 +20,28 @@ function parkingDisplay(s?: string | null): string {
   return m ? yen(Number(m[1].replace(/,/g, ''))) : t
 }
 
-// 返還金：敷金があれば敷金、保証金なら保証金−解約引、どちらも無ければ保存値。
-function refundDisplay(u: Unit): string {
+// 返還金の数値：敷金があれば敷金、保証金なら保証金−解約引、どちらも無ければ保存値。
+function refundValue(u: Unit): number {
   const dep = Number(u.deposit) || 0
   const hosho = Number(u.hoshokin) || 0
   const kaiyaku = Number(u.kaiyakubiki) || 0
-  if (dep > 0) return yen(dep)
-  if (hosho > 0) return yen(hosho - kaiyaku)
+  if (dep > 0) return dep
+  if (hosho > 0) return hosho - kaiyaku
+  return Number(u.refund) || 0
+}
+function refundDisplay(u: Unit): string {
+  const dep = Number(u.deposit) || 0
+  const hosho = Number(u.hoshokin) || 0
+  if (dep > 0 || hosho > 0) return yen(refundValue(u))
   return u.refund != null ? yen(u.refund) : '—'
+}
+
+// 物件グループの稼働率・返還金合計（稼働率は入居+退去予定／停止を除いた総数）
+function groupStats(rows: { unit: Unit }[]) {
+  const occ = rows.filter((r) => r.unit.status === '入居' || r.unit.status === '退予').length
+  const total = rows.filter((r) => r.unit.status !== '停止').length
+  const refund = rows.reduce((s, r) => s + refundValue(r.unit), 0)
+  return { occ, total, rate: total ? occ / total : 0, refund }
 }
 
 // 敷金（保証金）/ 礼金（解約引）を1段で表示。第2引数（保証金・解約引）は ( ) 付き。
@@ -153,10 +167,11 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
           <FileSpreadsheet className="w-4 h-4" /> Excel出力
         </button>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <DualCard label="満室想定" monthly={rr.fullMonthly} annual={rr.fullAnnual} />
         <DualCard label="現況" monthly={rr.currentMonthly} annual={rr.currentMonthly * 12} />
         <StatCard label="稼働率" value={`${percent(rr.occupancyRate, 1)}（${rr.occupiedUnits}/${rr.totalUnits}）`} />
+        <StatCard label="返還金合計" value={yen(rr.rows.reduce((s, r) => s + refundValue(r.unit), 0))} />
       </div>
 
       {units.length === 0 ? (
@@ -191,7 +206,14 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                           className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white"
                         >
                           {propName(pid)}
-                          <span className="ml-2 text-xs font-normal text-slate-300">{rows.length}室</span>
+                          {(() => {
+                            const g = groupStats(rows)
+                            return (
+                              <span className="ml-2 text-xs font-normal text-slate-300">
+                                {rows.length}室／稼働率 {percent(g.rate, 1)}（{g.occ}/{g.total}）／返還金合計 {yen(g.refund)}
+                              </span>
+                            )
+                          })()}
                         </td>
                       </tr>
                       {rows.map((r, i) => (
