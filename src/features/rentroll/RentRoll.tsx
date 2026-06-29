@@ -20,6 +20,16 @@ function parkingDisplay(s?: string | null): string {
   return m ? yen(Number(m[1].replace(/,/g, ''))) : t
 }
 
+// 返還金：敷金があれば敷金、保証金なら保証金−解約引、どちらも無ければ保存値。
+function refundDisplay(u: Unit): string {
+  const dep = Number(u.deposit) || 0
+  const hosho = Number(u.hoshokin) || 0
+  const kaiyaku = Number(u.kaiyakubiki) || 0
+  if (dep > 0) return yen(dep)
+  if (hosho > 0) return yen(hosho - kaiyaku)
+  return u.refund != null ? yen(u.refund) : '—'
+}
+
 // 敷金（保証金）/ 礼金（解約引）を1段で表示。第2引数（保証金・解約引）は ( ) 付き。
 function pairCell(primary?: number | null, paren?: number | null): string {
   const p: string[] = []
@@ -240,7 +250,7 @@ function UnitRow({
       <Td className="text-right tabular-nums">{money(u.kyoeki)}</Td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.deposit, u.hoshokin)}</Td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.key_money, u.kaiyakubiki)}</Td>
-      <Td className="text-right tabular-nums">{money(u.refund)}</Td>
+      <Td className="text-right tabular-nums">{refundDisplay(u)}</Td>
       <Td className="text-right tabular-nums">{parkingDisplay(u.parking)}</Td>
       <td className="px-1.5 py-1">
         <select
