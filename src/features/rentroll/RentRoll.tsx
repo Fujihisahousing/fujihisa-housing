@@ -12,6 +12,14 @@ import { UNIT_STATUSES, type Property, type Unit } from '../../types'
 
 const money = (v?: number | null) => (v != null ? yen(v) : '—')
 
+// 駐輪・駐車欄：金額だけ（数字／￥◯◯）は¥表示に整形。文字（家賃込み・バイク等）はそのまま。
+function parkingDisplay(s?: string | null): string {
+  if (s == null || String(s).trim() === '') return '—'
+  const t = String(s).trim()
+  const m = t.match(/^[¥￥]?\s*([0-9][0-9,]*)$/)
+  return m ? yen(Number(m[1].replace(/,/g, ''))) : t
+}
+
 // 敷金（保証金）/ 礼金（解約引）を1段で表示。第2引数（保証金・解約引）は ( ) 付き。
 function pairCell(primary?: number | null, paren?: number | null): string {
   const p: string[] = []
@@ -233,7 +241,7 @@ function UnitRow({
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.deposit, u.hoshokin)}</Td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.key_money, u.kaiyakubiki)}</Td>
       <Td className="text-right tabular-nums">{money(u.refund)}</Td>
-      <Td className="text-right tabular-nums">{u.parking || '—'}</Td>
+      <Td className="text-right tabular-nums">{parkingDisplay(u.parking)}</Td>
       <td className="px-1.5 py-1">
         <select
           value={u.status ?? ''}
