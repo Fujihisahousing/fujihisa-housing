@@ -1,12 +1,12 @@
 // 収支表（画面）。行=項目 / 列=1〜12月＋合計。Excel出力は M4。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
-import { transactionsRepo } from '../../lib/repositories'
+import { transactionsRepo, paymentRecordsRepo } from '../../lib/repositories'
 import { calcIncomeStatement, type StatementRow } from '../../lib/calc'
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
 import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import type { Transaction } from '../../types'
+import { CAT_RENT, type PaymentRecord, type Transaction } from '../../types'
 
 const MONTHS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
 
@@ -14,12 +14,18 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const [year, setYear] = useState(new Date().getFullYear())
   const [txs, setTxs] = useState<Transaction[]>([])
+  const [records, setRecords] = useState<PaymentRecord[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setTxs(await transactionsRepo.list({ propertyId: activeProperty }))
+      const [t, rec] = await Promise.all([
+        transactionsRepo.list({ propertyId: activeProperty }),
+        paymentRecordsRepo.list(activeProperty),
+      ])
+      setTxs(t)
+      setRecords(rec)
     } finally {
       setLoading(false)
     }
@@ -29,12 +35,30 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
     void load()
   }, [load])
 
-  const r = useMemo(() => calcIncomeStatement(txs, year), [txs, year])
+  // 入金状況の月次記録（入金額）を家賃収入として収支表に合算する
+  const recordTxs: Transaction[] = useMemo(
+    () =>
+      records
+        .filter((rec) => Number(rec.paid) > 0)
+        .map((rec) => ({
+          id: `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`,
+          date: `${rec.year}-${String(rec.month).padStart(2, '0')}-15`,
+          property_id: rec.property_id,
+          type: 'income' as const,
+          category: CAT_RENT,
+          amount: Number(rec.paid),
+        })),
+    [records],
+  )
+
+  const allTxs = useMemo(() => [...txs, ...recordTxs], [txs, recordTxs])
+
+  const r = useMemo(() => calcIncomeStatement(allTxs, year), [allTxs, year])
   const years = useMemo(() => {
     const set = new Set<number>([new Date().getFullYear()])
-    txs.forEach((t) => set.add(new Date(t.date).getFullYear()))
+    allTxs.forEach((t) => set.add(new Date(t.date).getFullYear()))
     return Array.from(set).sort((a, b) => b - a)
-  }, [txs])
+  }, [allTxs])
 
   return (
     <div className="space-y-4">
