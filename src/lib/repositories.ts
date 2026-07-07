@@ -8,6 +8,22 @@ function unwrap<T>(data: T | null, error: { message: string } | null): T {
   return data as T
 }
 
+// Supabase/PostgREST は 1回のクエリで最大1000行しか返さない。
+// 全件が必要な取得は 1000行ずつ range で辿って全ページ結合する。
+const PAGE = 1000
+async function fetchAllPages<T>(
+  makeQuery: () => { range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }> },
+): Promise<T[]> {
+  const all: T[] = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await makeQuery().range(from, from + PAGE - 1)
+    const rows = unwrap(data, error) as T[]
+    all.push(...rows)
+    if (rows.length < PAGE) break
+  }
+  return all
+}
+
 // ---------------------------------------------------------------------
 // properties（物件）
 // ---------------------------------------------------------------------
@@ -75,12 +91,13 @@ export interface TxFilter {
 
 export const transactionsRepo = {
   async list(filter: TxFilter = {}): Promise<Transaction[]> {
-    let q = supabase.from('transactions').select('*').order('date', { ascending: false })
-    if (filter.propertyId) q = q.eq('property_id', filter.propertyId)
-    if (filter.from) q = q.gte('date', filter.from)
-    if (filter.to) q = q.lte('date', filter.to)
-    const { data, error } = await q
-    return unwrap(data, error)
+    return fetchAllPages<Transaction>(() => {
+      let q = supabase.from('transactions').select('*').order('date', { ascending: false })
+      if (filter.propertyId) q = q.eq('property_id', filter.propertyId)
+      if (filter.from) q = q.gte('date', filter.from)
+      if (filter.to) q = q.lte('date', filter.to)
+      return q
+    })
   },
   async create(t: Partial<Transaction>): Promise<Transaction> {
     const { data, error } = await supabase.from('transactions').insert(t).select().single()
@@ -143,10 +160,11 @@ export const paymentNotesRepo = {
 export const paymentRecordsRepo = {
   /** 物件の月次記録を取得（propertyId=null は全件） */
   async list(propertyId: string | null): Promise<PaymentRecord[]> {
-    let q = supabase.from('payment_records').select('*')
-    if (propertyId) q = q.eq('property_id', propertyId)
-    const { data, error } = await q
-    return unwrap(data, error) as PaymentRecord[]
+    return fetchAllPages<PaymentRecord>(() => {
+      let q = supabase.from('payment_records').select('*')
+      if (propertyId) q = q.eq('property_id', propertyId)
+      return q
+    })
   },
   /** 備考を更新 */
   async setMemo(
