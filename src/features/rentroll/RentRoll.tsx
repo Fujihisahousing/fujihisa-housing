@@ -6,7 +6,7 @@ import { calcRentRoll } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
 import { exportRentRollExcel } from '../../reports/exportExcel'
-import { yen, percent } from '../../lib/format'
+import { yen, percent, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { UNIT_STATUSES, type Property, type Unit } from '../../types'
 
@@ -192,6 +192,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                 <Th className="text-right">礼金（解約引）</Th>
                 <Th className="text-right">返還金</Th>
                 <Th className="text-right">駐輪・駐車</Th>
+                <Th>入居開始日</Th>
                 <Th>状況</Th>
                 <Th>備考</Th>
               </tr>
@@ -202,7 +203,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
                     <Fragment key={pid}>
                       <tr>
                         <td
-                          colSpan={13}
+                          colSpan={14}
                           className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white"
                         >
                           {propName(pid)}
@@ -274,6 +275,7 @@ function UnitRow({
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.key_money, u.kaiyakubiki)}</Td>
       <Td className="text-right tabular-nums">{refundDisplay(u)}</Td>
       <Td className="text-right tabular-nums">{parkingDisplay(u.parking)}</Td>
+      <Td>{u.contract_start ? formatDate(u.contract_start) : '—'}</Td>
       <td className="px-1.5 py-1">
         <select
           value={u.status ?? ''}
@@ -310,14 +312,14 @@ function TotalBlock({ t }: { t: Totals }) {
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.kyoeki)}</td>
         <td colSpan={3} />
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.parking)}</td>
-        <td colSpan={2} />
+        <td colSpan={3} />
       </tr>
       <tr className="bg-slate-50 font-semibold">
         <td colSpan={10} className="px-3 py-1.5 text-slate-700">
           合計
         </td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(total)}</td>
-        <td colSpan={2} />
+        <td colSpan={3} />
       </tr>
     </>
   )

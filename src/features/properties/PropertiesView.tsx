@@ -367,6 +367,7 @@ function UnitModal({
       status: value.status ?? '空室',
       guarantor: value.guarantor ?? '',
       payment_method: value.payment_method ?? '',
+      contract_start: value.contract_start ?? '',
       contract_end: value.contract_end ?? '',
       notes: value.notes ?? '',
     })
@@ -400,6 +401,7 @@ function UnitModal({
         status: f.status || '空室',
         guarantor: f.guarantor || null,
         payment_method: f.payment_method || null,
+        contract_start: f.contract_start || null,
         contract_end: f.contract_end || null,
         notes: f.notes || null,
       }
@@ -515,7 +517,10 @@ function UnitModal({
           <TextField label="保証会社" value={f.guarantor ?? ''} onChange={set('guarantor')} />
           <TextField label="支払方法" value={f.payment_method ?? ''} onChange={set('payment_method')} />
         </div>
-        <TextField label="契約満了" value={f.contract_end ?? ''} onChange={set('contract_end')} type="date" />
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="入居開始日" value={f.contract_start ?? ''} onChange={set('contract_start')} type="date" />
+          <TextField label="契約満了" value={f.contract_end ?? ''} onChange={set('contract_end')} type="date" />
+        </div>
         <TextField label="メモ（備考）" value={f.notes ?? ''} onChange={set('notes')} />
         {error && (
           <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm p-3">{error}</div>
