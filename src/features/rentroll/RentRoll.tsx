@@ -183,15 +183,15 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
               <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
                 <Th>号室</Th>
                 <Th>間取</Th>
-                <Th className="text-right">面積</Th>
+                <Th className="text-right" narrow>面積</Th>
                 <Th>用途</Th>
-                <Th>入居者属性</Th>
+                <Th narrow>属性</Th>
                 <Th className="text-right">賃料</Th>
                 <Th className="text-right">共益費</Th>
                 <Th className="text-right">敷金（保証金）</Th>
                 <Th className="text-right">礼金（解約引）</Th>
                 <Th className="text-right">返還金</Th>
-                <Th className="text-right">駐輪・駐車</Th>
+                <Th className="text-right" narrow>駐輪駐車</Th>
                 <Th>入居開始日</Th>
                 <Th>状況</Th>
                 <Th>備考</Th>
@@ -266,15 +266,15 @@ function UnitRow({
     >
       <Td className="font-medium">{u.room}</Td>
       <Td>{u.layout || '—'}</Td>
-      <Td className="text-right">{u.area ? `${Number(u.area).toFixed(2)}㎡` : '—'}</Td>
+      <Td className="text-right" narrow>{u.area ? `${Number(u.area).toFixed(2)}㎡` : '—'}</Td>
       <Td>{u.use_type || '—'}</Td>
-      <Td>{u.tenant_type || '—'}</Td>
+      <Td narrow>{u.tenant_type || '—'}</Td>
       <Td className="text-right tabular-nums">{money(u.rent)}</Td>
       <Td className="text-right tabular-nums">{money(u.kyoeki)}</Td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.deposit, u.hoshokin)}</Td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.key_money, u.kaiyakubiki)}</Td>
       <Td className="text-right tabular-nums">{refundDisplay(u)}</Td>
-      <Td className="text-right tabular-nums">{parkingDisplay(u.parking)}</Td>
+      <Td className="text-right tabular-nums" narrow>{parkingDisplay(u.parking)}</Td>
       <Td>{u.contract_start ? formatDate(u.contract_start) : '—'}</Td>
       <td className="px-1.5 py-1">
         <select
@@ -369,12 +369,22 @@ function StatCard({ label, value }: { label: string; value: string }) {
   )
 }
 
-function Th({ children, className = '' }: { children?: ReactNode; className?: string }) {
-  // sticky top-0 で縦スクロール時もヘッダーを固定
+function Th({
+  children,
+  className = '',
+  narrow,
+}: {
+  children?: ReactNode
+  className?: string
+  narrow?: boolean
+}) {
+  // sticky top-0 で縦スクロール時もヘッダーを固定。narrow指定の列は横paddingを詰める。
   return (
     <th
       className={
-        'sticky top-0 z-20 whitespace-nowrap bg-white px-3 py-2 font-medium shadow-[inset_0_-1px_0_#e2e8f0] ' +
+        'sticky top-0 z-20 whitespace-nowrap bg-white ' +
+        (narrow ? 'px-1.5' : 'px-3') +
+        ' py-2 font-medium shadow-[inset_0_-1px_0_#e2e8f0] ' +
         className
       }
     >
@@ -382,6 +392,18 @@ function Th({ children, className = '' }: { children?: ReactNode; className?: st
     </th>
   )
 }
-function Td({ children, className = '' }: { children?: ReactNode; className?: string }) {
-  return <td className={'whitespace-nowrap px-3 py-1.5 text-slate-700 ' + className}>{children}</td>
+function Td({
+  children,
+  className = '',
+  narrow,
+}: {
+  children?: ReactNode
+  className?: string
+  narrow?: boolean
+}) {
+  return (
+    <td className={'whitespace-nowrap ' + (narrow ? 'px-1.5' : 'px-3') + ' py-1.5 text-slate-700 ' + className}>
+      {children}
+    </td>
+  )
 }

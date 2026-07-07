@@ -12,8 +12,14 @@ dist-ssr
 .env.local
 .env.*.local
 
-# 業務データを含むシード（公開リポジトリに載せない）
+# Supabase service_role キー（絶対に公開しない）
+.service_key.txt
+
+# 業務データ・個人情報を含むSQL（公開リポジトリに載せない）
 supabase/seed_*.sql
+supabase/import_*.sql
+supabase/*_tenants.sql
+supabase/*_payments.sql
 
 # logs
 npm-debug.log*
