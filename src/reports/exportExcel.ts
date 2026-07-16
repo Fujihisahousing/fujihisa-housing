@@ -1,5 +1,6 @@
 // SheetJS による Excel 書き出し（レントロール／収支表／入金状況）。
 // xlsx は重いので動的 import で遅延ロードし、初期表示を軽くする。
+import { DOTONBORI_ONLY_ROWS } from '../lib/calc'
 import type { RentRollResult, IncomeStatementResult, PaymentStatusResult } from '../lib/calc'
 
 function stamp(): string {
@@ -47,15 +48,18 @@ export function exportRentRollExcel(propertyName: string, rr: RentRollResult): P
 // ---------------------- 収支表 ----------------------
 export function exportIncomeStatementExcel(propertyName: string, r: IncomeStatementResult): Promise<void> {
   const header = ['項目', ...Array.from({ length: 12 }, (_, i) => `${i + 1}月`), '年間合計']
+  // KDDI・商店街組合費は全体 or プランドール道頓堀のときだけ出す（画面と同じ）
+  const showDotonboriRows = propertyName === '全体' || propertyName.includes('道頓堀')
+  const keep = (label: string) => showDotonboriRows || !DOTONBORI_ONLY_ROWS.has(label)
   const rows: (string | number | null)[][] = [
     [`収支表（${propertyName}・${r.year}年）`],
     [],
     header,
     ['【収入】'],
-    ...r.income.map((row) => [row.label, ...row.months.map(yenNum), yenNum(row.total)]),
+    ...r.income.filter((row) => keep(row.label)).map((row) => [row.label, ...row.months.map(yenNum), yenNum(row.total)]),
     ['収入計', ...r.incomeTotalByMonth.map(yenNum), yenNum(r.incomeTotal)],
     ['【支出】'],
-    ...r.expense.map((row) => [row.label, ...row.months.map(yenNum), yenNum(row.total)]),
+    ...r.expense.filter((row) => keep(row.label)).map((row) => [row.label, ...row.months.map(yenNum), yenNum(row.total)]),
     ['支出計', ...r.expenseTotalByMonth.map(yenNum), yenNum(r.expenseTotal)],
     ['差引（収支）', ...r.netByMonth.map(yenNum), yenNum(r.net)],
   ]

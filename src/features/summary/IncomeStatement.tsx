@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
 import { transactionsRepo, paymentRecordsRepo } from '../../lib/repositories'
-import { calcIncomeStatement, type StatementRow } from '../../lib/calc'
+import { calcIncomeStatement, DOTONBORI_ONLY_ROWS, type StatementRow } from '../../lib/calc'
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
 import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
@@ -54,6 +54,15 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
   const allTxs = useMemo(() => [...txs, ...recordTxs], [txs, recordTxs])
 
   const r = useMemo(() => calcIncomeStatement(allTxs, year), [allTxs, year])
+
+  // KDDI・商店街組合費は全体タブ or プランドール道頓堀の単独表示のときだけ出す
+  const showDotonboriRows = propertyName === '全体' || propertyName.includes('道頓堀')
+  const keepRow = useCallback(
+    (row: StatementRow) => showDotonboriRows || !DOTONBORI_ONLY_ROWS.has(row.label),
+    [showDotonboriRows],
+  )
+  const incomeRows = useMemo(() => r.income.filter(keepRow), [r.income, keepRow])
+  const expenseRows = useMemo(() => r.expense.filter(keepRow), [r.expense, keepRow])
   const years = useMemo(() => {
     const set = new Set<number>([new Date().getFullYear()])
     allTxs.forEach((t) => set.add(new Date(t.date).getFullYear()))
@@ -103,13 +112,13 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
             </thead>
             <tbody>
               <SectionHeader title="収入" />
-              {r.income.map((row) => (
+              {incomeRows.map((row) => (
                 <DataRow key={row.label} row={row} />
               ))}
               <TotalRow label="収入計" months={r.incomeTotalByMonth} total={r.incomeTotal} tone="income" />
 
               <SectionHeader title="支出" />
-              {r.expense.map((row) => (
+              {expenseRows.map((row) => (
                 <DataRow key={row.label} row={row} />
               ))}
               <TotalRow label="支出計" months={r.expenseTotalByMonth} total={r.expenseTotal} tone="expense" />
