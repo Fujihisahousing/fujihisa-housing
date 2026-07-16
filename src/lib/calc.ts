@@ -82,8 +82,14 @@ export const EXPENSE_ROWS = [
   '保険料（建物）', '保険料（賠償責任）', '商店街組合費', '町会費', '水道光熱費', 'その他',
 ] as const
 
-// プランドール道頓堀のみ表示する行（他物件の単独表示では非表示。全体タブでは表示）
-export const DOTONBORI_ONLY_ROWS: ReadonlySet<string> = new Set(['KDDI', '商店街組合費'])
+// 特定物件のみ表示する行（他物件の単独表示では非表示。全体タブでは常に表示）。
+// key=行ラベル、value=物件名に含まれるべき文字列
+export const PROPERTY_ONLY_ROWS: ReadonlyMap<string, string> = new Map([
+  ['KDDI', '道頓堀'],
+  ['商店街組合費', '道頓堀'],
+  ['タイムズ', '近畿吉田ビル'],
+  ['管理会社委託費', '道頓堀'],
+])
 
 export interface StatementRow {
   label: string

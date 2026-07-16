@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
 import { transactionsRepo, paymentRecordsRepo } from '../../lib/repositories'
-import { calcIncomeStatement, DOTONBORI_ONLY_ROWS, type StatementRow } from '../../lib/calc'
+import { calcIncomeStatement, PROPERTY_ONLY_ROWS, type StatementRow } from '../../lib/calc'
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
 import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
@@ -55,11 +55,15 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
 
   const r = useMemo(() => calcIncomeStatement(allTxs, year), [allTxs, year])
 
-  // KDDI・商店街組合費は全体タブ or プランドール道頓堀の単独表示のときだけ出す
-  const showDotonboriRows = propertyName === '全体' || propertyName.includes('道頓堀')
+  // 特定物件限定行（KDDI・商店街組合費・管理会社委託費→道頓堀のみ、タイムズ→近畿吉田ビルのみ）は
+  // 全体タブ or 対象物件の単独表示のときだけ出す
   const keepRow = useCallback(
-    (row: StatementRow) => showDotonboriRows || !DOTONBORI_ONLY_ROWS.has(row.label),
-    [showDotonboriRows],
+    (row: StatementRow) => {
+      const restrictTo = PROPERTY_ONLY_ROWS.get(row.label)
+      if (!restrictTo) return true
+      return propertyName === '全体' || propertyName.includes(restrictTo)
+    },
+    [propertyName],
   )
   const incomeRows = useMemo(() => r.income.filter(keepRow), [r.income, keepRow])
   const expenseRows = useMemo(() => r.expense.filter(keepRow), [r.expense, keepRow])
