@@ -150,10 +150,10 @@ export interface Profile {
  */
 
 /** 部屋ごとの収入（部屋を選んで入力） */
-export const ROOM_INCOME_CATEGORIES = ['賃料', '敷金', '礼金'] as const
+export const ROOM_INCOME_CATEGORIES = ['賃料', '敷金', '礼金', '水道代', '電気代', 'その他'] as const
 
 /** 建物ごとの収入（物件全体に紐づく） */
-export const BUILDING_INCOME_CATEGORIES = ['看板', 'KDDI', 'タイムズ'] as const
+export const BUILDING_INCOME_CATEGORIES = ['看板', 'KDDI', 'タイムズ', 'その他'] as const
 
 /** 建物ごとの支出（物件全体に紐づく） */
 export const BUILDING_EXPENSE_CATEGORIES = [

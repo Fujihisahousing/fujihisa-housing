@@ -33,6 +33,9 @@ export function RoomEntry({
   const [rent, setRent] = useState('')
   const [deposit, setDeposit] = useState('')
   const [keyMoney, setKeyMoney] = useState('')
+  const [water, setWater] = useState('')
+  const [electricity, setElectricity] = useState('')
+  const [other, setOther] = useState('')
   // まとめ入金
   const [lump, setLump] = useState('')
 
@@ -68,6 +71,9 @@ export function RoomEntry({
     else setRent('')
     setDeposit('')
     setKeyMoney('')
+    setWater('')
+    setElectricity('')
+    setOther('')
     setLump('')
     setError(null)
   }, [unitId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -100,6 +106,9 @@ export function RoomEntry({
       if (n(rent) > 0) rows.push({ ...base, category: CAT_RENT, amount: n(rent) })
       if (n(deposit) > 0) rows.push({ ...base, category: '敷金', amount: n(deposit) })
       if (n(keyMoney) > 0) rows.push({ ...base, category: '礼金', amount: n(keyMoney) })
+      if (n(water) > 0) rows.push({ ...base, category: '水道代', amount: n(water) })
+      if (n(electricity) > 0) rows.push({ ...base, category: '電気代', amount: n(electricity) })
+      if (n(other) > 0) rows.push({ ...base, category: 'その他', amount: n(other) })
       if (rows.length === 0) return setError('金額を1つ以上入力してください。')
     } else {
       if (split.total <= 0) return setError('入金額を入力してください。')
@@ -115,6 +124,9 @@ export function RoomEntry({
       // 入力欄をリセット（物件・号室・日付は残す）
       setDeposit('')
       setKeyMoney('')
+      setWater('')
+      setElectricity('')
+      setOther('')
       setLump('')
       if (mode === 'lump') setRent(String(contractRent + contractKyoeki || ''))
       onSaved()
@@ -189,6 +201,17 @@ export function RoomEntry({
               <MoneyInput value={keyMoney} onChange={setKeyMoney} />
             </Field>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="水道代">
+              <MoneyInput value={water} onChange={setWater} />
+            </Field>
+            <Field label="電気代">
+              <MoneyInput value={electricity} onChange={setElectricity} />
+            </Field>
+          </div>
+          <Field label="その他">
+            <MoneyInput value={other} onChange={setOther} />
+          </Field>
         </div>
       ) : (
         <div className="space-y-3">
