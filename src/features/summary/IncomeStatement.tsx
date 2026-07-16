@@ -1,12 +1,12 @@
 // 収支表（画面）。行=項目 / 列=1〜12月＋合計。Excel出力は M4。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
-import { transactionsRepo, paymentRecordsRepo } from '../../lib/repositories'
+import { transactionsRepo, paymentRecordsRepo, unitsRepo } from '../../lib/repositories'
 import { calcIncomeStatement, PROPERTY_ONLY_ROWS, type StatementRow } from '../../lib/calc'
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
 import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import { CAT_RENT, type PaymentRecord, type Transaction } from '../../types'
+import { CAT_RENT, type PaymentRecord, type Transaction, type Unit } from '../../types'
 
 const MONTHS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
 
@@ -15,17 +15,20 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
   const [year, setYear] = useState(new Date().getFullYear())
   const [txs, setTxs] = useState<Transaction[]>([])
   const [records, setRecords] = useState<PaymentRecord[]>([])
+  const [units, setUnits] = useState<Unit[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [t, rec] = await Promise.all([
+      const [t, rec, u] = await Promise.all([
         transactionsRepo.list({ propertyId: activeProperty }),
         paymentRecordsRepo.list(activeProperty),
+        activeProperty ? unitsRepo.listByProperty(activeProperty) : unitsRepo.listAll(),
       ])
       setTxs(t)
       setRecords(rec)
+      setUnits(u)
     } finally {
       setLoading(false)
     }
@@ -35,7 +38,17 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
     void load()
   }, [load])
 
-  // 入金状況の月次記録（入金額）を家賃収入として収支表に合算する
+  // 部屋がKDDI契約（アンテナ等）かどうかの判定用（物件ID+号室→契約者名がKDDIか）
+  const kddiRooms = useMemo(() => {
+    const s = new Set<string>()
+    for (const u of units) {
+      if (u.tenant === 'KDDI') s.add(`${u.property_id}|${u.room}`)
+    }
+    return s
+  }, [units])
+
+  // 入金状況の月次記録（入金額）を家賃収入として収支表に合算する。
+  // KDDI契約の部屋の入金だけは家賃ではなくKDDI収入として計上する。
   const recordTxs: Transaction[] = useMemo(
     () =>
       records
@@ -45,10 +58,10 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
           date: `${rec.year}-${String(rec.month).padStart(2, '0')}-15`,
           property_id: rec.property_id,
           type: 'income' as const,
-          category: CAT_RENT,
+          category: kddiRooms.has(`${rec.property_id}|${rec.room}`) ? 'KDDI' : CAT_RENT,
           amount: Number(rec.paid),
         })),
-    [records],
+    [records, kddiRooms],
   )
 
   const allTxs = useMemo(() => [...txs, ...recordTxs], [txs, recordTxs])
