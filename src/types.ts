@@ -99,6 +99,16 @@ export interface PaymentRecord {
   memo?: string | null
 }
 
+/** 賃料・共益費の履歴（反映開始日つき）。ある年月時点の実効値＝effective_date がその年月以前で最大の行。 */
+export interface RentHistory {
+  id: string
+  unit_id: string
+  effective_date: string
+  rent: number
+  kyoeki: number
+  created_at?: string
+}
+
 /** 5.4 settings（key/value） */
 export interface Setting {
   key: string

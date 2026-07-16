@@ -1,7 +1,7 @@
 // repository層：UI・集計は必ずここ経由で DB にアクセスする（DB実装に依存させない）。
 // RLS により、ログイン済みでないと読み書きできない。個人情報(leases)は admin のみ。
 import { supabase } from './supabase'
-import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord } from '../types'
+import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory } from '../types'
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
   if (error) throw new Error(error.message)
@@ -76,6 +76,37 @@ export const unitsRepo = {
   },
   async remove(id: string): Promise<void> {
     const { error } = await supabase.from('units').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+  },
+}
+
+// ---------------------------------------------------------------------
+// rent_history（賃料・共益費の履歴、反映開始日つき）
+// ---------------------------------------------------------------------
+export const rentHistoryRepo = {
+  async listByUnitIds(unitIds: string[]): Promise<RentHistory[]> {
+    if (unitIds.length === 0) return []
+    const { data, error } = await supabase
+      .from('rent_history')
+      .select('*')
+      .in('unit_id', unitIds)
+      .order('effective_date', { ascending: false })
+    return unwrap(data, error)
+  },
+  async listByUnit(unitId: string): Promise<RentHistory[]> {
+    const { data, error } = await supabase
+      .from('rent_history')
+      .select('*')
+      .eq('unit_id', unitId)
+      .order('effective_date', { ascending: false })
+    return unwrap(data, error)
+  },
+  async create(h: Partial<RentHistory>): Promise<RentHistory> {
+    const { data, error } = await supabase.from('rent_history').insert(h).select().single()
+    return unwrap(data, error)
+  },
+  async remove(id: string): Promise<void> {
+    const { error } = await supabase.from('rent_history').delete().eq('id', id)
     if (error) throw new Error(error.message)
   },
 }

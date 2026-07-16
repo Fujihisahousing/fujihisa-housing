@@ -39,6 +39,22 @@ alter table units add column if not exists kaiyakubiki numeric; -- 解約引
 alter table units add column if not exists tenant_kana text;    -- 契約者名の読み（カナ）
 alter table units add column if not exists sort_order numeric;   -- 表示順（小さいほど上）
 
+-- 賃料・共益費の履歴（反映開始日つき）。過去からの売上比較のため、部屋編集で賃料/共益費を
+-- 変更するたびに1行追加する。ある年月時点の実効値＝effective_date が その年月以前で最大の行。
+-- 履歴が無い部屋は units.rent/kyoeki（現在値）にフォールバックする。
+create table if not exists rent_history (
+  id uuid primary key default gen_random_uuid(),
+  unit_id uuid references units(id) on delete cascade,
+  effective_date date not null,
+  rent numeric not null default 0,
+  kyoeki numeric not null default 0,
+  created_at timestamptz default now()
+);
+create index if not exists rent_history_unit_date_idx on rent_history(unit_id, effective_date);
+alter table rent_history enable row level security;
+drop policy if exists "auth all rent_history" on rent_history;
+create policy "auth all rent_history" on rent_history for all to authenticated using (true) with check (true);
+
 -- 入金状況の月別メモ
 create table if not exists payment_notes (
   unit_id uuid references units(id) on delete cascade,

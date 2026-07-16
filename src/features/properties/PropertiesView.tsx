@@ -4,11 +4,11 @@ import { Plus, Pencil, Trash2, Loader2, DoorOpen, ChevronDown, ChevronRight, Use
 import { Modal } from '../../components/common/Modal'
 import { LeaseManager } from '../leases/LeaseManager'
 import { useAuth } from '../../auth/AuthProvider'
-import { propertiesRepo, unitsRepo } from '../../lib/repositories'
+import { propertiesRepo, unitsRepo, rentHistoryRepo } from '../../lib/repositories'
 import { unitCompare } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
-import { yen } from '../../lib/format'
-import { UNIT_STATUSES, USE_TYPES, type Property, type Unit } from '../../types'
+import { yen, formatDate, today } from '../../lib/format'
+import { UNIT_STATUSES, USE_TYPES, type Property, type RentHistory, type Unit } from '../../types'
 
 export function PropertiesView({ onChanged }: { onChanged: () => void }) {
   const [properties, setProperties] = useState<Property[]>([])
@@ -343,6 +343,7 @@ function UnitModal({
   const [f, setF] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [history, setHistory] = useState<RentHistory[]>([])
   const isEdit = Boolean(value?.id)
 
   useEffect(() => {
@@ -358,6 +359,7 @@ function UnitModal({
       tenant_kana: value.tenant_kana ?? '',
       rent: value.rent != null ? String(value.rent) : '',
       kyoeki: value.kyoeki != null ? String(value.kyoeki) : '',
+      rent_effective_date: today(),
       deposit: value.deposit != null ? String(value.deposit) : '',
       hoshokin: value.hoshokin != null ? String(value.hoshokin) : '',
       key_money: value.key_money != null ? String(value.key_money) : '',
@@ -372,14 +374,26 @@ function UnitModal({
       notes: value.notes ?? '',
     })
     setError(null)
+    if (value.id) void rentHistoryRepo.listByUnit(value.id).then(setHistory)
+    else setHistory([])
   }, [value])
 
   const set = (k: string) => (v: string) => setF((p) => ({ ...p, [k]: v }))
+
+  async function removeHistory(id: string) {
+    if (!window.confirm('この賃料履歴を削除しますか？')) return
+    await rentHistoryRepo.remove(id)
+    setHistory((prev) => prev.filter((h) => h.id !== id))
+  }
 
   async function save() {
     if (!f.room?.trim()) return setError('号室を入力してください。')
     setSaving(true)
     try {
+      const newRent = numOrNull(f.rent) ?? 0
+      const newKyoeki = numOrNull(f.kyoeki) ?? 0
+      const rentChanged = !isEdit || newRent !== (Number(value?.rent) || 0) || newKyoeki !== (Number(value?.kyoeki) || 0)
+
       const payload: Partial<Unit> = {
         property_id: propertyId,
         room: f.room.trim(),
@@ -390,8 +404,8 @@ function UnitModal({
         tenant_type: f.tenant_type || null,
         tenant: f.tenant || null,
         tenant_kana: f.tenant_kana || null,
-        rent: numOrNull(f.rent) ?? 0,
-        kyoeki: numOrNull(f.kyoeki) ?? 0,
+        rent: newRent,
+        kyoeki: newKyoeki,
         deposit: numOrNull(f.deposit) ?? 0,
         hoshokin: numOrNull(f.hoshokin),
         key_money: numOrNull(f.key_money) ?? 0,
@@ -405,8 +419,28 @@ function UnitModal({
         contract_end: f.contract_end || null,
         notes: f.notes || null,
       }
-      if (isEdit && value?.id) await unitsRepo.update(value.id, payload)
-      else await unitsRepo.create(payload)
+
+      let unitId = value?.id
+      if (isEdit && unitId) await unitsRepo.update(unitId, payload)
+      else unitId = (await unitsRepo.create(payload)).id
+
+      if (rentChanged && (newRent > 0 || newKyoeki > 0)) {
+        await rentHistoryRepo.create({
+          unit_id: unitId,
+          effective_date: f.rent_effective_date || today(),
+          rent: newRent,
+          kyoeki: newKyoeki,
+        })
+        // 反映開始日が過去日（バックデート修正）の場合、「今日時点で最新の履歴」を units の現在値として再計算する。
+        const allHistory = await rentHistoryRepo.listByUnit(unitId)
+        const todayStr = today()
+        const current = allHistory
+          .filter((h) => h.effective_date <= todayStr)
+          .sort((a, b) => (a.effective_date < b.effective_date ? 1 : -1))[0]
+        if (current && (current.rent !== newRent || current.kyoeki !== newKyoeki)) {
+          await unitsRepo.update(unitId, { rent: current.rent, kyoeki: current.kyoeki })
+        }
+      }
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存に失敗しました。')
@@ -495,6 +529,33 @@ function UnitModal({
         <div className="grid grid-cols-2 gap-3">
           <TextField label="賃料（円）" value={f.rent ?? ''} onChange={set('rent')} type="number" />
           <TextField label="共益費（円）" value={f.kyoeki ?? ''} onChange={set('kyoeki')} type="number" />
+        </div>
+        <div>
+          <TextField
+            label="反映開始日（賃料・共益費の変更時のみ使用。過去日を入れれば遡って修正、将来分は今日の日付でOK）"
+            value={f.rent_effective_date ?? ''}
+            onChange={set('rent_effective_date')}
+            type="date"
+          />
+          {history.length > 0 && (
+            <div className="mt-2 rounded-lg border border-slate-200 divide-y divide-slate-100">
+              {history.map((h) => (
+                <div key={h.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-600">
+                  <span className="w-24 shrink-0">{formatDate(h.effective_date)}〜</span>
+                  <span className="flex-1">
+                    賃料 {yen(h.rent)}／共益費 {yen(h.kyoeki)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void removeHistory(h.id)}
+                    className="text-slate-400 hover:text-rose-600"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-3">
           <TextField

@@ -3,13 +3,13 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2, FileSpreadsheet, Upload } from 'lucide-react'
 import { ImportCsv } from './ImportCsv'
-import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo } from '../../lib/repositories'
+import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo } from '../../lib/repositories'
 import { calcPaymentStatus } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
 import { yen, percent, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import type { PaymentRecord, Property, Transaction, Unit } from '../../types'
+import type { PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
 
 const JUDGE_STYLE: Record<string, string> = {
   入金済: 'bg-emerald-50 text-emerald-700',
@@ -52,6 +52,7 @@ export function PaymentStatus({
   const [txs, setTxs] = useState<Transaction[]>([])
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [records, setRecords] = useState<PaymentRecord[]>([])
+  const [rentHistory, setRentHistory] = useState<RentHistory[]>([])
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
 
@@ -74,16 +75,18 @@ export function PaymentStatus({
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [u, t, n, rec] = await Promise.all([
-        activeProperty ? unitsRepo.listByProperty(activeProperty) : unitsRepo.listAll(),
+      const u = await (activeProperty ? unitsRepo.listByProperty(activeProperty) : unitsRepo.listAll())
+      const [t, n, rec, rh] = await Promise.all([
         transactionsRepo.list({ propertyId: activeProperty }),
         paymentNotesRepo.mapByMonth(year, month),
         paymentRecordsRepo.list(activeProperty),
+        rentHistoryRepo.listByUnitIds(u.map((x) => x.id)),
       ])
       setUnits(u)
       setTxs(t)
       setNotes(n)
       setRecords(rec)
+      setRentHistory(rh)
     } finally {
       setLoading(false)
     }
@@ -112,9 +115,18 @@ export function PaymentStatus({
     })
   }, [units, propOrder])
 
+  const rentHistoryByUnit = useMemo(() => {
+    const m = new Map<string, RentHistory[]>()
+    for (const h of rentHistory) {
+      if (!m.has(h.unit_id)) m.set(h.unit_id, [])
+      m.get(h.unit_id)!.push(h)
+    }
+    return m
+  }, [rentHistory])
+
   const r = useMemo(
-    () => calcPaymentStatus(sortedUnits, txs, year, month),
-    [sortedUnits, txs, year, month],
+    () => calcPaymentStatus(sortedUnits, txs, year, month, rentHistoryByUnit),
+    [sortedUnits, txs, year, month, rentHistoryByUnit],
   )
 
   // 記録のインデックス

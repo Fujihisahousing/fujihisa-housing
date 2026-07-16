@@ -1,9 +1,28 @@
 // 集計ロジック（レントロール・利回り・収支表・入金状況）。UI から分離（SOW 設計方針）。
-import type { Property, Transaction, Unit } from '../types'
+import type { Property, RentHistory, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
 const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予' // 退去予定も入居中・課金対象
 const isStopped = (u: Unit) => u.status === '停止' // 募集停止：空室率の総数に含めない
+
+// 指定年月時点で有効な賃料・共益費を履歴から求める（履歴が無い/その年月以前の履歴が無い場合は units の現在値にフォールバック）。
+// 「新しい日付の開始日ほど優先」＝ effective_date が対象年月以前で最大の行を採用する。
+export function effectiveRentKyoeki(
+  unit: Unit,
+  history: RentHistory[] | undefined,
+  year: number,
+  month: number,
+): { rent: number; kyoeki: number } {
+  const fallback = { rent: n(unit.rent), kyoeki: n(unit.kyoeki) }
+  if (!history || history.length === 0) return fallback
+  const asOf = new Date(year, month - 1, 1).getTime()
+  let best: RentHistory | null = null
+  for (const h of history) {
+    const t = new Date(h.effective_date).getTime()
+    if (t <= asOf && (!best || t > new Date(best.effective_date).getTime())) best = h
+  }
+  return best ? { rent: n(best.rent), kyoeki: n(best.kyoeki) } : fallback
+}
 
 // =====================================================================
 // レントロール（SOW 6.4）
@@ -194,6 +213,7 @@ export function calcPaymentStatus(
   transactions: Transaction[],
   year: number,
   month: number, // 1-12
+  rentHistoryByUnit?: Map<string, RentHistory[]>, // 未指定時は units の現在値のみ使用（旧挙動と同じ）
 ): PaymentStatusResult {
   // 前家賃ルール：翌月分は前月末日までに入金、当月10日を過ぎても未着なら滞納。
   // 入金の「帰属月」＝ 11日以降の入金は翌月分の前払い、10日までの入金は当月分とみなす。
@@ -206,7 +226,8 @@ export function calcPaymentStatus(
   const gracePassed = (i: number) => (i < nowIdx ? true : i > nowIdx ? false : today.getDate() >= 11)
 
   const rows: PaymentRow[] = units.map((u) => {
-    const billed = n(u.rent) + n(u.kyoeki)
+    const eff = effectiveRentKyoeki(u, rentHistoryByUnit?.get(u.id), year, month)
+    const billed = eff.rent + eff.kyoeki
 
     // この号室の賃料系入金を帰属月ごとに集計（選択月まで）
     const paidByMonth = new Map<number, number>()
