@@ -229,6 +229,16 @@ export const paymentRecordsRepo = {
       .match({ property_id, room, year, month })
     if (error) throw new Error(error.message)
   },
+  /** 月次記録を作成/更新（手入力用）。キー=property_id+room+year+month */
+  async upsert(rec: PaymentRecord): Promise<void> {
+    const { error } = await supabase
+      .from('payment_records')
+      .upsert(
+        { ...rec, updated_at: new Date().toISOString() },
+        { onConflict: 'property_id,room,year,month' },
+      )
+    if (error) throw new Error(error.message)
+  },
 }
 
 // ---------------------------------------------------------------------

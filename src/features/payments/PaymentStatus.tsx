@@ -4,10 +4,10 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } f
 import { Loader2, FileSpreadsheet, Upload, ListChecks } from 'lucide-react'
 import { ImportCsv } from './ImportCsv'
 import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo, arrearsNotesRepo } from '../../lib/repositories'
-import { calcPaymentStatus, calcArrearsList, type ArrearsUnitRow } from '../../lib/calc'
+import { calcPaymentStatus, calcArrearsList, deriveJudgement, type ArrearsUnitRow } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
-import { yen, percent, formatDate } from '../../lib/format'
+import { yen, percent, formatDate, today } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import type { ArrearsNote, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
 
@@ -27,6 +27,7 @@ interface DisplayRow {
   tenantType: string
   kana: string
   billed: number | null
+  calcBilled: number // 実効家賃ベースの請求額（記録のbilledがnullでも常に埋まる。手入力の判定計算に使う）
   paid: number | null
   paidDate: string | null
   judgement: string
@@ -199,6 +200,7 @@ export function PaymentStatus({
           tenantType: rec.tenant_type ?? '',
           kana: rec.kana ?? '',
           billed: rec.billed ?? null,
+          calcBilled: row.billed,
           paid: rec.paid ?? null,
           paidDate: rec.paid_on ?? null,
           judgement: rec.judgement ?? '—',
@@ -214,6 +216,7 @@ export function PaymentStatus({
         tenantType: u.tenant_type ?? '',
         kana: u.tenant_kana ?? '',
         billed: row.billed,
+        calcBilled: row.billed,
         paid: row.paid,
         paidDate: row.paidDate,
         judgement: row.judgement,
@@ -277,6 +280,41 @@ export function PaymentStatus({
       }
     },
     [year, month],
+  )
+
+  // 入金額の手入力：payment_records を作成/更新し、判定は請求額との比較で自動導出する
+  const savePaid = useCallback(
+    async (row: DisplayRow, paidStr: string) => {
+      const u = row.unit
+      const paid = paidStr.trim() === '' ? 0 : Number(paidStr)
+      if (!Number.isFinite(paid)) return
+      const billed = row.billed != null ? Number(row.billed) : row.calcBilled
+      const occupied = u.status === '入居' || u.status === '退予'
+      // 判定は金額のみで導出（既存の手入力データと同じく保証会社の有無で分けない）
+      const judgement = deriveJudgement(occupied, billed, paid, false)
+      const rec: PaymentRecord = {
+        property_id: u.property_id,
+        room: u.room ?? '',
+        year,
+        month,
+        tenant: row.tenant || u.tenant || null,
+        tenant_type: row.tenantType || u.tenant_type || null,
+        kana: row.kana || u.tenant_kana || null,
+        billed,
+        paid,
+        paid_on: paid > 0 ? today() : null,
+        judgement,
+        guarantor: u.guarantor ?? null,
+        memo: row.memo || null,
+      }
+      try {
+        await paymentRecordsRepo.upsert(rec)
+        await load() // 月次・未入金一覧の両方を更新
+      } catch (e) {
+        alert('入金額の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
+      }
+    },
+    [year, month, load],
   )
 
   return (
@@ -405,11 +443,11 @@ export function PaymentStatus({
                         </td>
                       </tr>
                       {rows.map((d) => (
-                        <PayRow key={d.unit.id} d={d} onMemo={saveMemo} />
+                        <PayRow key={d.unit.id} d={d} onMemo={saveMemo} onPaid={savePaid} />
                       ))}
                     </Fragment>
                   ))
-                : displayRows.map((d) => <PayRow key={d.unit.id} d={d} onMemo={saveMemo} />)}
+                : displayRows.map((d) => <PayRow key={d.unit.id} d={d} onMemo={saveMemo} onPaid={savePaid} />)}
             </tbody>
           </table>
         </div>
@@ -558,17 +596,43 @@ function ArrearsRow({
   )
 }
 
-function PayRow({ d, onMemo }: { d: DisplayRow; onMemo: (d: DisplayRow, memo: string) => void }) {
+function PayRow({
+  d,
+  onMemo,
+  onPaid,
+}: {
+  d: DisplayRow
+  onMemo: (d: DisplayRow, memo: string) => void
+  onPaid: (d: DisplayRow, paid: string) => void
+}) {
   const vacant = d.judgement === '空室'
-  const shortfall = Math.max(0, (Number(d.billed) || 0) - (Number(d.paid) || 0))
+  const billedShown = d.billed != null ? Number(d.billed) : d.calcBilled // 記録のbilledが空なら実効家賃を表示
+  const shortfall = Math.max(0, billedShown - (Number(d.paid) || 0))
   return (
     <tr className="border-b border-slate-100 last:border-0">
       <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{d.unit.room}</td>
       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{d.tenantType || '—'}</td>
       <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{d.tenant || '—'}</td>
       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{d.kana || '—'}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-slate-600">{vacant || d.billed == null ? '—' : yen(d.billed)}</td>
-      <td className="px-3 py-2 text-right tabular-nums text-slate-600">{vacant || d.paid == null ? '—' : yen(d.paid)}</td>
+      <td className="px-3 py-2 text-right tabular-nums text-slate-600">{vacant ? '—' : yen(billedShown)}</td>
+      <td className="px-2 py-1 text-right">
+        {vacant ? (
+          <span className="text-slate-400">—</span>
+        ) : (
+          <input
+            type="number"
+            defaultValue={d.paid != null ? String(d.paid) : ''}
+            onBlur={(e) => {
+              const v = e.target.value.trim()
+              const cur = d.paid != null ? String(d.paid) : ''
+              if (v !== cur) onPaid(d, v)
+            }}
+            placeholder="0"
+            title="入金額を入力（0円で未入金・満額で入金済に自動判定）"
+            className="w-24 rounded border border-transparent bg-transparent px-2 py-1 text-right tabular-nums hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+          />
+        )}
+      </td>
       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{d.paidDate ? formatDate(d.paidDate) : '—'}</td>
       <td className="px-3 py-2 text-right tabular-nums">
         {vacant || shortfall <= 0 ? <span className="text-slate-400">—</span> : <span className="text-rose-700">{yen(shortfall)}</span>}

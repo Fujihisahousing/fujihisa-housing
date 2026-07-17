@@ -208,6 +208,20 @@ export interface PaymentStatusResult {
 const RENT_CATEGORIES = new Set(['賃料', '共益費'])
 const isGuarantor = (s?: string | null) => Boolean(s && /保証/.test(s))
 
+// 請求額・入金額・入居状況・保証会社有無 から判定を導出（手入力の入金額編集で使用）。
+export function deriveJudgement(
+  occupied: boolean,
+  billed: number,
+  paid: number,
+  hasGuarantor: boolean,
+): PaymentJudgement {
+  if (!occupied) return '空室'
+  if (paid >= billed && billed > 0) return hasGuarantor ? '保証会社入金済' : '入金済'
+  if (paid > 0 && paid < billed) return '一部入金'
+  if (paid === 0 && hasGuarantor) return '保証会社請求中'
+  return '未入金'
+}
+
 export function calcPaymentStatus(
   units: Unit[],
   transactions: Transaction[],
