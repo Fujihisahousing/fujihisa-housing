@@ -1,7 +1,7 @@
 // repository層：UI・集計は必ずここ経由で DB にアクセスする（DB実装に依存させない）。
 // RLS により、ログイン済みでないと読み書きできない。個人情報(leases)は admin のみ。
 import { supabase } from './supabase'
-import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory, ArrearsNote } from '../types'
+import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory, ArrearsNote, AuditLog } from '../types'
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
   if (error) throw new Error(error.message)
@@ -141,7 +141,8 @@ export interface TxFilter {
 export const transactionsRepo = {
   async list(filter: TxFilter = {}): Promise<Transaction[]> {
     return fetchAllPages<Transaction>(() => {
-      let q = supabase.from('transactions').select('*').order('date', { ascending: false })
+      // 論理削除(deleted_at)済みは除外
+      let q = supabase.from('transactions').select('*').is('deleted_at', null).order('date', { ascending: false })
       if (filter.propertyId) q = q.eq('property_id', filter.propertyId)
       if (filter.from) q = q.gte('date', filter.from)
       if (filter.to) q = q.lte('date', filter.to)
@@ -162,9 +163,28 @@ export const transactionsRepo = {
     const { data, error } = await supabase.from('transactions').update(patch).eq('id', id).select().single()
     return unwrap(data, error)
   },
+  /** 論理削除（物理削除しない）。deleted_at を付与し、監査ログには delete として残る。 */
   async remove(id: string): Promise<void> {
-    const { error } = await supabase.from('transactions').delete().eq('id', id)
+    const { error } = await supabase
+      .from('transactions')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', id)
     if (error) throw new Error(error.message)
+  },
+}
+
+// ---------------------------------------------------------------------
+// audit_logs（変更履歴・監査ログ）※閲覧は admin のみ（RLS）
+// ---------------------------------------------------------------------
+export const auditLogsRepo = {
+  async listByRecord(tableName: string, recordId: string): Promise<AuditLog[]> {
+    const { data, error } = await supabase
+      .from('audit_logs')
+      .select('*')
+      .eq('table_name', tableName)
+      .eq('record_id', recordId)
+      .order('created_at', { ascending: false })
+    return unwrap(data, error)
   },
 }
 

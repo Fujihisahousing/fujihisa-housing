@@ -80,6 +80,19 @@ export interface Transaction {
   status?: string | null
   memo?: string | null
   created_at?: string
+  deleted_at?: string | null // 論理削除（NULLでない＝削除済み）
+}
+
+/** 監査ログ（変更履歴）。detail に変更前(old)・変更後(new)の行を保持 */
+export interface AuditLog {
+  id: string
+  table_name: string
+  record_id: string
+  action: 'insert' | 'update' | 'delete' | string
+  actor?: string | null
+  actor_email?: string | null
+  detail?: { old?: Record<string, unknown> | null; new?: Record<string, unknown> | null } | null
+  created_at: string
 }
 
 /** 月次入金記録（入金状況の手動データ） */

@@ -105,8 +105,65 @@ create table if not exists transactions (
   type text not null check (type in ('income','expense')),
   category text not null,
   amount numeric not null default 0,
-  method text, status text, memo text, created_at timestamptz default now()
+  method text, status text, memo text, created_at timestamptz default now(),
+  deleted_at timestamptz  -- 論理削除（NULLでない＝削除済み。会計データは物理削除しない）
 );
+alter table transactions add column if not exists deleted_at timestamptz;
+
+-- 監査ログ（変更履歴）：台帳(transactions)の作成・変更・削除を自動記録。detail に old/new を保存。
+create table if not exists audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  table_name text not null,
+  record_id uuid not null,
+  action text not null,            -- insert / update / delete
+  actor uuid,                      -- 変更者（auth.uid()）
+  actor_email text,                -- 変更者メール（記録時点）
+  detail jsonb,                    -- { "old": {...}, "new": {...} }
+  created_at timestamptz default now()
+);
+create index if not exists idx_audit_logs_record on audit_logs(table_name, record_id, created_at desc);
+alter table audit_logs enable row level security;
+drop policy if exists "audit_logs admin read" on audit_logs;
+create policy "audit_logs admin read" on audit_logs for select to authenticated using (is_admin());
+
+-- 監査トリガ：old/new を detail(jsonb) に記録。論理削除(deleted_at 付与)は delete として記録。
+create or replace function log_audit() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_actor uuid := auth.uid();
+  v_email text;
+  v_action text;
+  v_record_id uuid;
+  v_old jsonb;
+  v_new jsonb;
+begin
+  select email into v_email from public.profiles where id = v_actor;
+  if (TG_OP = 'INSERT') then
+    v_action := 'insert'; v_record_id := NEW.id;
+    v_old := null; v_new := to_jsonb(NEW);
+  elsif (TG_OP = 'UPDATE') then
+    v_record_id := NEW.id;
+    v_old := to_jsonb(OLD); v_new := to_jsonb(NEW);
+    if (OLD.deleted_at is null and NEW.deleted_at is not null) then
+      v_action := 'delete';
+    else
+      v_action := 'update';
+    end if;
+  else
+    v_action := 'delete'; v_record_id := OLD.id;
+    v_old := to_jsonb(OLD); v_new := null;
+  end if;
+  insert into public.audit_logs(table_name, record_id, action, actor, actor_email, detail)
+  values (TG_TABLE_NAME, v_record_id, v_action, v_actor, v_email,
+          jsonb_build_object('old', v_old, 'new', v_new));
+  if (TG_OP = 'DELETE') then return OLD; end if;
+  return NEW;
+end;
+$$;
+drop trigger if exists trg_audit_transactions on transactions;
+create trigger trg_audit_transactions
+  after insert or update or delete on transactions
+  for each row execute function log_audit();
 
 -- 設定
 create table if not exists settings (
