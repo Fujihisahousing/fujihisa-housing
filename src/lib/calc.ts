@@ -194,7 +194,6 @@ export interface PaymentRow {
   paidDate: string | null // 入金日 = 当月分の最新入金の日付
   judgement: PaymentJudgement
   arrearsMonths: number // 滞納月数（初回入金月〜選択月で満額未達の月数）
-  tracked: boolean // 記帳(賃料系transactions)で追跡されているか。falseかつ記録も無ければ「未記録」扱い
 }
 export interface PaymentStatusResult {
   year: number
@@ -277,7 +276,7 @@ export function calcPaymentStatus(
       }
     }
 
-    return { unit: u, billed, paid, paidDate, judgement, arrearsMonths, tracked: paidByMonth.size > 0 }
+    return { unit: u, billed, paid, paidDate, judgement, arrearsMonths }
   })
 
   const billable = rows.filter((r) => r.judgement !== '空室')

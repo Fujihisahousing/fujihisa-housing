@@ -17,7 +17,6 @@ const JUDGE_STYLE: Record<string, string> = {
   一部入金: 'bg-amber-50 text-amber-700',
   保証会社請求中: 'bg-sky-50 text-sky-700',
   未入金: 'bg-rose-50 text-rose-700',
-  未記録: 'bg-slate-50 text-slate-400',
   空室: 'bg-slate-100 text-slate-500',
 }
 const judgeStyle = (j: string) => JUDGE_STYLE[j] ?? 'bg-slate-100 text-slate-600'
@@ -211,10 +210,6 @@ export function PaymentStatus({
           fromRecord: true,
         }
       }
-      // 記録が無く、記帳(賃料系)でも追跡されていない部屋は「未記録」＝判定しない（未入金にしない）。
-      // 空室はそのまま空室。実際の未入金は記録（手入力）で明示する運用。
-      const judgement =
-        !row.tracked && row.judgement !== '空室' ? '未記録' : row.judgement
       return {
         unit: u,
         tenant: u.tenant ?? '',
@@ -222,12 +217,12 @@ export function PaymentStatus({
         kana: u.tenant_kana ?? '',
         billed: row.billed,
         calcBilled: row.billed,
-        paid: judgement === '未記録' ? null : row.paid,
+        paid: row.paid,
         paidDate: row.paidDate,
-        judgement,
+        judgement: row.judgement,
         guarantor: u.guarantor ?? '',
         memo: notes[u.id] ?? '',
-        arrears: judgement === '未記録' ? 0 : row.arrearsMonths,
+        arrears: row.arrearsMonths,
         fromRecord: false,
       }
     })
@@ -235,8 +230,7 @@ export function PaymentStatus({
 
   // 集計（表示行ベース）
   const summary = useMemo(() => {
-    // 空室・未記録は請求対象に含めない（回収率の分母から除外）
-    const billable = displayRows.filter((d) => d.judgement !== '空室' && d.judgement !== '未記録')
+    const billable = displayRows.filter((d) => d.judgement !== '空室')
     const collected = displayRows.filter((d) => d.judgement === '入金済' || d.judgement === '保証会社入金済')
     const attention = displayRows.filter((d) =>
       ['一部入金', '未入金', '保証会社請求中'].includes(d.judgement),
@@ -612,9 +606,8 @@ function PayRow({
   onPaid: (d: DisplayRow, paid: string) => void
 }) {
   const vacant = d.judgement === '空室'
-  const untracked = d.judgement === '未記録' // 未記録は不足額を出さない（未入金ではない）
   const billedShown = d.billed != null ? Number(d.billed) : d.calcBilled // 記録のbilledが空なら実効家賃を表示
-  const shortfall = untracked ? 0 : Math.max(0, billedShown - (Number(d.paid) || 0))
+  const shortfall = Math.max(0, billedShown - (Number(d.paid) || 0))
   return (
     <tr className="border-b border-slate-100 last:border-0">
       <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{d.unit.room}</td>
@@ -642,7 +635,7 @@ function PayRow({
       </td>
       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{d.paidDate ? formatDate(d.paidDate) : '—'}</td>
       <td className="px-3 py-2 text-right tabular-nums">
-        {vacant || untracked || shortfall <= 0 ? <span className="text-slate-400">—</span> : <span className="text-rose-700">{yen(shortfall)}</span>}
+        {vacant || shortfall <= 0 ? <span className="text-slate-400">—</span> : <span className="text-rose-700">{yen(shortfall)}</span>}
       </td>
       <td className="px-3 py-2">
         <span className={'text-xs rounded-full px-2 py-0.5 ' + judgeStyle(d.judgement)}>{d.judgement}</span>
