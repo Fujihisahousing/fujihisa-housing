@@ -64,13 +64,19 @@ interface Totals {
   kyoeki: number
   parking: number
 }
+// 合計は「入居・退予」の部屋のみ計上する（入予・空室・停止は合計に含めない）。
+// ※各行の賃料表示はそのまま（0にしない）。合計への計上有無だけを状況で判定する。
+const isChargeable = (u: Unit) => u.status === '入居' || u.status === '退予'
 const sumTotals = (rows: { unit: Unit }[]): Totals =>
   rows.reduce(
-    (a, { unit }) => ({
-      rent: a.rent + (Number(unit.rent) || 0),
-      kyoeki: a.kyoeki + (Number(unit.kyoeki) || 0),
-      parking: a.parking + parkingYen(unit.parking),
-    }),
+    (a, { unit }) =>
+      isChargeable(unit)
+        ? {
+            rent: a.rent + (Number(unit.rent) || 0),
+            kyoeki: a.kyoeki + (Number(unit.kyoeki) || 0),
+            parking: a.parking + parkingYen(unit.parking),
+          }
+        : a,
     { rent: 0, kyoeki: 0, parking: 0 },
   )
 
