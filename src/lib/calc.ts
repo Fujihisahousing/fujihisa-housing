@@ -37,18 +37,27 @@ export interface RentRollResult {
   totalUnits: number
   occupiedUnits: number
   occupancyRate: number // 稼働率 = 入居戸数 / 総戸数
-  fullMonthly: number // 満室想定(月) = Σ(rent+kyoeki) 全戸
-  currentMonthly: number // 現況(月) = 入居戸の Σ
+  fullMonthly: number // 満室想定(月) = Σ(家賃+共益費+駐輪駐車) 全戸
+  currentMonthly: number // 現況(月) = 入居戸の Σ(家賃+共益費+駐輪駐車)
   fullAnnual: number // 満室想定(年)
   grossYield: number | null // 表面利回り = 満室想定×12 / acquired_price
 }
+
+// 駐輪・駐車・バイク代（parking欄の金額文字列 '￥18,700' 等）を数値化。金額でなければ0。
+const parkingYen = (s?: string | null): number => {
+  const m = s ? String(s).match(/[0-9][0-9,]*/) : null
+  return m ? parseInt(m[0].replace(/,/g, ''), 10) : 0
+}
+// 1戸あたりの月額収入 ＝ 家賃＋共益費＋駐輪駐車（バイク代含む）
+const unitMonthly = (u: Unit) => n(u.rent) + n(u.kyoeki) + parkingYen(u.parking)
 
 export function calcRentRoll(units: Unit[], property?: Property | null): RentRollResult {
   const rows = units.map((u) => ({ unit: u, total: n(u.rent) + n(u.kyoeki) }))
   const totalUnits = units.filter((u) => !isStopped(u)).length // 停止は総数に含めない
   const occupiedUnits = units.filter(isOccupied).length
-  const fullMonthly = rows.reduce((s, r) => s + r.total, 0)
-  const currentMonthly = rows.filter((r) => isOccupied(r.unit)).reduce((s, r) => s + r.total, 0)
+  // 満室想定・現況とも 家賃＋共益費＋駐輪駐車（バイク代）込みで集計
+  const fullMonthly = units.reduce((s, u) => s + unitMonthly(u), 0)
+  const currentMonthly = units.filter(isOccupied).reduce((s, u) => s + unitMonthly(u), 0)
   const fullAnnual = fullMonthly * 12
   const acquired = property?.acquired_price ? n(property.acquired_price) : 0
   return {
