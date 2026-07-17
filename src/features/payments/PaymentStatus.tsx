@@ -1,15 +1,15 @@
 // 入金状況（画面）。月次。マンション帯でグループ表示。
 // payment_records に記録があればそれを表示、無ければ記帳からの自動計算。備考は編集可。
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Loader2, FileSpreadsheet, Upload } from 'lucide-react'
+import { Loader2, FileSpreadsheet, Upload, ListChecks } from 'lucide-react'
 import { ImportCsv } from './ImportCsv'
-import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo } from '../../lib/repositories'
-import { calcPaymentStatus } from '../../lib/calc'
+import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo, arrearsNotesRepo } from '../../lib/repositories'
+import { calcPaymentStatus, calcArrearsList, type ArrearsUnitRow } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
 import { yen, percent, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import type { PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
+import type { ArrearsNote, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
 
 const JUDGE_STYLE: Record<string, string> = {
   入金済: 'bg-emerald-50 text-emerald-700',
@@ -53,8 +53,10 @@ export function PaymentStatus({
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [records, setRecords] = useState<PaymentRecord[]>([])
   const [rentHistory, setRentHistory] = useState<RentHistory[]>([])
+  const [arrearsNotes, setArrearsNotes] = useState<ArrearsNote[]>([])
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
+  const [mode, setMode] = useState<'monthly' | 'arrears'>('monthly')
 
   // 表示上限＝翌月（前家賃の記入分まで）。それ以降の未来月は選べない。月が進めば自動で解放。
   const capDate = new Date(now.getFullYear(), now.getMonth() + 1, 1)
@@ -76,17 +78,19 @@ export function PaymentStatus({
     setLoading(true)
     try {
       const u = await (activeProperty ? unitsRepo.listByProperty(activeProperty) : unitsRepo.listAll())
-      const [t, n, rec, rh] = await Promise.all([
+      const [t, n, rec, rh, an] = await Promise.all([
         transactionsRepo.list({ propertyId: activeProperty }),
         paymentNotesRepo.mapByMonth(year, month),
         paymentRecordsRepo.list(activeProperty),
         rentHistoryRepo.listByUnitIds(u.map((x) => x.id)),
+        arrearsNotesRepo.listByUnitIds(u.map((x) => x.id)),
       ])
       setUnits(u)
       setTxs(t)
       setNotes(n)
       setRecords(rec)
       setRentHistory(rh)
+      setArrearsNotes(an)
     } finally {
       setLoading(false)
     }
@@ -128,6 +132,34 @@ export function PaymentStatus({
     () => calcPaymentStatus(sortedUnits, txs, year, month, rentHistoryByUnit),
     [sortedUnits, txs, year, month, rentHistoryByUnit],
   )
+
+  // 未入金一覧（選択月まで）
+  const arrears = useMemo(
+    () => calcArrearsList(sortedUnits, records, txs, year, month, rentHistoryByUnit),
+    [sortedUnits, records, txs, year, month, rentHistoryByUnit],
+  )
+  const arrearsNoteMap = useMemo(() => {
+    const m = new Map<string, ArrearsNote>()
+    for (const a of arrearsNotes) m.set(a.unit_id, a)
+    return m
+  }, [arrearsNotes])
+
+  const saveArrearsNote = useCallback(async (unitId: string, patch: Partial<ArrearsNote>) => {
+    setArrearsNotes((prev) => {
+      const idx = prev.findIndex((a) => a.unit_id === unitId)
+      if (idx >= 0) {
+        const next = [...prev]
+        next[idx] = { ...next[idx], ...patch }
+        return next
+      }
+      return [...prev, { unit_id: unitId, ...patch }]
+    })
+    try {
+      await arrearsNotesRepo.upsert(unitId, patch)
+    } catch (e) {
+      alert('保存に失敗しました：' + (e instanceof Error ? e.message : ''))
+    }
+  }, [])
 
   // 記録のインデックス
   const recIndex = useMemo(() => {
@@ -281,6 +313,17 @@ export function PaymentStatus({
           <Upload className="w-4 h-4" /> 通帳CSV取込
         </button>
         <button
+          onClick={() => setMode((m) => (m === 'arrears' ? 'monthly' : 'arrears'))}
+          className={
+            'flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ' +
+            (mode === 'arrears'
+              ? 'border-rose-600 bg-rose-600 text-white hover:bg-rose-700'
+              : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50')
+          }
+        >
+          <ListChecks className="w-4 h-4" /> 未入金一覧
+        </button>
+        <button
           onClick={() => void exportPaymentStatusExcel(propertyName, r)}
           disabled={units.length === 0}
           className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
@@ -301,12 +344,21 @@ export function PaymentStatus({
         />
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <StatCard label="請求対象戸数" value={`${summary.billed}戸`} />
-        <StatCard label="回収済" value={`${summary.collected}戸`} />
-        <StatCard label="要対応" value={`${summary.attention}戸`} />
-        <StatCard label="回収率" value={percent(summary.rate, 1)} />
-      </div>
+      {mode === 'arrears' ? (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <StatCard label="未入金の号室" value={`${arrears.length}戸`} />
+          <StatCard label="合計滞納額" value={yen(arrears.reduce((s, a) => s + a.total, 0))} />
+          <StatCard label="保証会社入金予定" value={yen(arrearsNotes.reduce((s, a) => s + (Number(a.expected_from_guarantor) || 0), 0))} />
+          <StatCard label="報告済" value={`${arrearsNotes.filter((a) => a.reported).length}戸`} />
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <StatCard label="請求対象戸数" value={`${summary.billed}戸`} />
+          <StatCard label="回収済" value={`${summary.collected}戸`} />
+          <StatCard label="要対応" value={`${summary.attention}戸`} />
+          <StatCard label="回収率" value={percent(summary.rate, 1)} />
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center gap-2 text-slate-500 text-sm py-8 justify-center">
@@ -314,6 +366,15 @@ export function PaymentStatus({
         </div>
       ) : units.length === 0 ? (
         <div className="text-center text-slate-400 text-sm py-12">部屋が登録されていません。</div>
+      ) : mode === 'arrears' ? (
+        <ArrearsTable
+          arrears={arrears}
+          noteMap={arrearsNoteMap}
+          onSave={saveArrearsNote}
+          groupHeader={activeProperty ? null : propName}
+          year={year}
+          month={month}
+        />
       ) : (
         <div className="overflow-auto max-h-[70vh] rounded-xl border border-slate-200 bg-white">
           <table className="w-full min-w-max text-sm">
@@ -354,6 +415,146 @@ export function PaymentStatus({
         </div>
       )}
     </div>
+  )
+}
+
+// ---------------------- 未入金一覧 ----------------------
+function ArrearsTable({
+  arrears,
+  noteMap,
+  onSave,
+  groupHeader,
+  year,
+  month,
+}: {
+  arrears: ArrearsUnitRow[]
+  noteMap: Map<string, ArrearsNote>
+  onSave: (unitId: string, patch: Partial<ArrearsNote>) => void
+  groupHeader: ((id?: string | null) => string) | null
+  year: number
+  month: number
+}) {
+  if (arrears.length === 0) {
+    return (
+      <div className="text-center text-emerald-600 text-sm py-12">
+        {year}年{month}月時点で未入金の号室はありません。
+      </div>
+    )
+  }
+  // 全体表示のときは物件ごとに区切る
+  const groups = groupHeader
+    ? Array.from(
+        arrears.reduce((m, a) => {
+          const k = a.unit.property_id
+          if (!m.has(k)) m.set(k, [])
+          m.get(k)!.push(a)
+          return m
+        }, new Map<string, ArrearsUnitRow[]>()),
+      )
+    : null
+
+  return (
+    <div className="overflow-auto max-h-[70vh] rounded-xl border border-slate-200 bg-white">
+      <table className="w-full min-w-max text-sm">
+        <thead>
+          <tr className="text-left text-xs text-slate-500 border-b border-slate-200">
+            <Th>号室</Th>
+            <Th>契約者名</Th>
+            <Th>滞納している月・金額</Th>
+            <Th className="text-right">滞納月数</Th>
+            <Th className="text-right">合計滞納額</Th>
+            <Th>保証会社</Th>
+            <Th className="text-right">保証会社入金予定額</Th>
+            <Th>報告済</Th>
+            <Th>備考</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {groups
+            ? groups.map(([pid, rows]) => (
+                <Fragment key={pid}>
+                  <tr>
+                    <td colSpan={9} className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white">
+                      {groupHeader!(pid)}
+                      <span className="ml-2 text-xs font-normal text-slate-300">{rows.length}室</span>
+                    </td>
+                  </tr>
+                  {rows.map((a) => (
+                    <ArrearsRow key={a.unit.id} a={a} note={noteMap.get(a.unit.id)} onSave={onSave} />
+                  ))}
+                </Fragment>
+              ))
+            : arrears.map((a) => (
+                <ArrearsRow key={a.unit.id} a={a} note={noteMap.get(a.unit.id)} onSave={onSave} />
+              ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ArrearsRow({
+  a,
+  note,
+  onSave,
+}: {
+  a: ArrearsUnitRow
+  note?: ArrearsNote
+  onSave: (unitId: string, patch: Partial<ArrearsNote>) => void
+}) {
+  return (
+    <tr className="border-b border-slate-100 last:border-0 align-top">
+      <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">{a.unit.room}</td>
+      <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{a.tenant || '—'}</td>
+      <td className="px-3 py-2">
+        <div className="space-y-0.5">
+          {a.months.map((m) => (
+            <div key={`${m.year}-${m.month}`} className="flex gap-2 whitespace-nowrap">
+              <span className="text-slate-500 w-24">
+                {m.year}年{m.month}月分
+              </span>
+              <span className="tabular-nums text-rose-700">{yen(m.shortfall)}</span>
+            </div>
+          ))}
+        </div>
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums">
+        {a.monthsCount >= 2 ? (
+          <span className="text-rose-700 font-semibold">{a.monthsCount}ヵ月</span>
+        ) : (
+          `${a.monthsCount}ヵ月`
+        )}
+      </td>
+      <td className="px-3 py-2 text-right tabular-nums font-semibold text-rose-700 whitespace-nowrap">
+        {yen(a.total)}
+      </td>
+      <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{a.guarantor || '—'}</td>
+      <td className="px-3 py-2 text-right">
+        <input
+          type="number"
+          defaultValue={note?.expected_from_guarantor != null ? String(note.expected_from_guarantor) : ''}
+          onBlur={(e) => {
+            const v = e.target.value.trim()
+            const num = v === '' ? null : Number(v)
+            const cur = note?.expected_from_guarantor ?? null
+            if (num !== cur) onSave(a.unit.id, { expected_from_guarantor: num })
+          }}
+          placeholder="0"
+          className="w-28 rounded border border-slate-200 px-2 py-1 text-right tabular-nums focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+        />
+      </td>
+      <td className="px-3 py-2 text-center">
+        <input
+          type="checkbox"
+          checked={Boolean(note?.reported)}
+          onChange={(e) => onSave(a.unit.id, { reported: e.target.checked })}
+          className="h-4 w-4 rounded border-slate-300 accent-slate-900"
+        />
+      </td>
+      <td className="px-1.5 py-1">
+        <NoteInput value={note?.memo ?? ''} onCommit={(v) => onSave(a.unit.id, { memo: v || null })} />
+      </td>
+    </tr>
   )
 }
 

@@ -68,6 +68,18 @@ alter table payment_notes enable row level security;
 drop policy if exists "auth all payment_notes" on payment_notes;
 create policy "auth all payment_notes" on payment_notes for all to authenticated using (true) with check (true);
 
+-- 未入金一覧の保証会社対応メモ（号室単位）。保証会社から入る予定額・報告済フラグ・備考。
+create table if not exists arrears_notes (
+  unit_id uuid primary key references units(id) on delete cascade,
+  expected_from_guarantor numeric,
+  reported boolean not null default false,
+  memo text,
+  updated_at timestamptz default now()
+);
+alter table arrears_notes enable row level security;
+drop policy if exists "auth all arrears_notes" on arrears_notes;
+create policy "auth all arrears_notes" on arrears_notes for all to authenticated using (true) with check (true);
+
 -- 入金状況の月次入金記録（手動データ）
 create table if not exists payment_records (
   property_id uuid references properties(id) on delete cascade,

@@ -99,6 +99,14 @@ export interface PaymentRecord {
   memo?: string | null
 }
 
+/** 未入金一覧の保証会社対応メモ（号室単位） */
+export interface ArrearsNote {
+  unit_id: string
+  expected_from_guarantor?: number | null
+  reported?: boolean | null
+  memo?: string | null
+}
+
 /** 賃料・共益費の履歴（反映開始日つき）。ある年月時点の実効値＝effective_date がその年月以前で最大の行。 */
 export interface RentHistory {
   id: string

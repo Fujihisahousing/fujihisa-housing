@@ -1,7 +1,7 @@
 // repository層：UI・集計は必ずここ経由で DB にアクセスする（DB実装に依存させない）。
 // RLS により、ログイン済みでないと読み書きできない。個人情報(leases)は admin のみ。
 import { supabase } from './supabase'
-import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory } from '../types'
+import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory, ArrearsNote } from '../types'
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
   if (error) throw new Error(error.message)
@@ -107,6 +107,24 @@ export const rentHistoryRepo = {
   },
   async remove(id: string): Promise<void> {
     const { error } = await supabase.from('rent_history').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+  },
+}
+
+// ---------------------------------------------------------------------
+// arrears_notes（未入金一覧の保証会社対応メモ）
+// ---------------------------------------------------------------------
+export const arrearsNotesRepo = {
+  async listByUnitIds(unitIds: string[]): Promise<ArrearsNote[]> {
+    if (unitIds.length === 0) return []
+    const { data, error } = await supabase.from('arrears_notes').select('*').in('unit_id', unitIds)
+    return unwrap(data, error)
+  },
+  // 号室単位で保存（存在すれば更新、無ければ作成）。渡したフィールドだけ上書きする。
+  async upsert(unitId: string, patch: Partial<ArrearsNote>): Promise<void> {
+    const { error } = await supabase
+      .from('arrears_notes')
+      .upsert({ unit_id: unitId, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'unit_id' })
     if (error) throw new Error(error.message)
   },
 }

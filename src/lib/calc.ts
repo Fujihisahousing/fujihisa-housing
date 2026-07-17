@@ -1,5 +1,5 @@
 // 集計ロジック（レントロール・利回り・収支表・入金状況）。UI から分離（SOW 設計方針）。
-import type { Property, RentHistory, Transaction, Unit } from '../types'
+import type { PaymentRecord, Property, RentHistory, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
 const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予' // 退去予定も入居中・課金対象
@@ -279,6 +279,108 @@ export function calcPaymentStatus(
     attentionUnits: attention.length,
     collectionRate: billable.length ? collected.length / billable.length : 0,
   }
+}
+
+// =====================================================================
+// 未入金一覧 — 号室ごとに、滞納している月とその金額・合計を集計
+// =====================================================================
+export interface ArrearsMonthDetail {
+  year: number
+  month: number
+  shortfall: number // その月の不足額（請求額−入金額）
+}
+export interface ArrearsUnitRow {
+  unit: Unit
+  tenant: string
+  guarantor: string
+  months: ArrearsMonthDetail[] // 未入金・一部入金の月（古い順）
+  monthsCount: number
+  total: number // 合計滞納額
+}
+
+// 判定：入金済・保証会社入金済・空室 は滞納ではない
+const isSettled = (j?: string | null) => j === '入金済' || j === '保証会社入金済' || j === '空室'
+
+export function calcArrearsList(
+  units: Unit[],
+  records: PaymentRecord[],
+  transactions: Transaction[],
+  upToYear: number,
+  upToMonth: number,
+  rentHistoryByUnit?: Map<string, RentHistory[]>,
+): ArrearsUnitRow[] {
+  const selIdx = upToYear * 12 + (upToMonth - 1)
+  const today = new Date()
+  const nowIdx = today.getFullYear() * 12 + today.getMonth()
+  // 締め切り経過（未到来の月は滞納に数えない）
+  const gracePassed = (i: number) => (i < nowIdx ? true : i > nowIdx ? false : today.getDate() >= 11)
+  const attrIdx = (d: Date) => d.getFullYear() * 12 + d.getMonth() + (d.getDate() > 10 ? 1 : 0)
+
+  // 月次記録を号室（property_id|room）→ idx→record に索引化
+  const recByUnit = new Map<string, Map<number, PaymentRecord>>()
+  for (const rec of records) {
+    const k = `${rec.property_id}|${rec.room}`
+    if (!recByUnit.has(k)) recByUnit.set(k, new Map())
+    recByUnit.get(k)!.set(rec.year * 12 + (rec.month - 1), rec)
+  }
+  // 記帳（transactions）の賃料系入金を unit_id→帰属月→合計 に索引化
+  const paidByUnit = new Map<string, Map<number, number>>()
+  for (const t of transactions) {
+    if (t.type !== 'income' || !t.unit_id || !RENT_CATEGORIES.has(t.category)) continue
+    const idx = attrIdx(new Date(t.date))
+    if (!paidByUnit.has(t.unit_id)) paidByUnit.set(t.unit_id, new Map())
+    const m = paidByUnit.get(t.unit_id)!
+    m.set(idx, (m.get(idx) ?? 0) + n(t.amount))
+  }
+
+  const out: ArrearsUnitRow[] = []
+  for (const u of units) {
+    const recMap = recByUnit.get(`${u.property_id}|${u.room}`)
+    const txMap = paidByUnit.get(u.id)
+    // 記録のある月＋入金のある月 の和集合だけを見る（データの無い月は誤検知になるので数えない）
+    const idxSet = new Set<number>()
+    if (recMap) for (const i of recMap.keys()) idxSet.add(i)
+    if (txMap) for (const i of txMap.keys()) idxSet.add(i)
+
+    const months: ArrearsMonthDetail[] = []
+    let tenant = u.tenant ?? ''
+    let guarantor = u.guarantor ?? ''
+    for (const idx of Array.from(idxSet).sort((a, b) => a - b)) {
+      if (idx > selIdx || !gracePassed(idx)) continue
+      const y = Math.floor(idx / 12)
+      const mo = (idx % 12) + 1
+      const eff = effectiveRentKyoeki(u, rentHistoryByUnit?.get(u.id), y, mo)
+      const rec = recMap?.get(idx)
+      let billed: number
+      let paid: number
+      if (rec) {
+        if (isSettled(rec.judgement)) continue
+        billed = rec.billed != null ? n(rec.billed) : eff.rent + eff.kyoeki
+        paid = rec.paid != null ? n(rec.paid) : 0
+        if (!tenant && rec.tenant) tenant = rec.tenant
+        if (!guarantor && rec.guarantor) guarantor = rec.guarantor
+      } else {
+        if (!isOccupied(u)) continue // 記録の無い空室月は数えない
+        billed = eff.rent + eff.kyoeki
+        paid = txMap?.get(idx) ?? 0
+      }
+      const shortfall = Math.max(0, billed - paid)
+      if (shortfall > 0) months.push({ year: y, month: mo, shortfall })
+    }
+
+    if (months.length > 0) {
+      out.push({
+        unit: u,
+        tenant,
+        guarantor,
+        months,
+        monthsCount: months.length,
+        total: months.reduce((s, m) => s + m.shortfall, 0),
+      })
+    }
+  }
+  // 合計滞納額の大きい順
+  return out.sort((a, b) => b.total - a.total)
 }
 
 // =====================================================================
