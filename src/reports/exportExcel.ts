@@ -1,6 +1,6 @@
 // SheetJS による Excel 書き出し（レントロール／収支表／入金状況）。
 // xlsx は重いので動的 import で遅延ロードし、初期表示を軽くする。
-import { PROPERTY_ONLY_ROWS } from '../lib/calc'
+import { isStatementRowVisible } from '../lib/calc'
 import type { RentRollResult, IncomeStatementResult, PaymentStatusResult } from '../lib/calc'
 
 function stamp(): string {
@@ -48,11 +48,8 @@ export function exportRentRollExcel(propertyName: string, rr: RentRollResult): P
 // ---------------------- 収支表 ----------------------
 export function exportIncomeStatementExcel(propertyName: string, r: IncomeStatementResult): Promise<void> {
   const header = ['項目', ...Array.from({ length: 12 }, (_, i) => `${i + 1}月`), '年間合計']
-  // 特定物件限定行は全体 or 対象物件のときだけ出す（画面と同じ）
-  const keep = (label: string) => {
-    const restrictTo = PROPERTY_ONLY_ROWS.get(label)
-    return !restrictTo || propertyName === '全体' || propertyName.includes(restrictTo)
-  }
+  // 行の出し分けは画面（IncomeStatement）と同じ判定を使う
+  const keep = (label: string) => isStatementRowVisible(label, propertyName)
   const rows: (string | number | null)[][] = [
     [`収支表（${propertyName}・${r.year}年）`],
     [],

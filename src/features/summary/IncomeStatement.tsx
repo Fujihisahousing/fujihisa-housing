@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
 import { transactionsRepo, paymentRecordsRepo, unitsRepo } from '../../lib/repositories'
-import { calcIncomeStatement, PROPERTY_ONLY_ROWS, type StatementRow } from '../../lib/calc'
+import { calcIncomeStatement, isStatementRowVisible, type StatementRow } from '../../lib/calc'
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
 import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
@@ -68,14 +68,9 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
 
   const r = useMemo(() => calcIncomeStatement(allTxs, year), [allTxs, year])
 
-  // 特定物件限定行（KDDI・商店街組合費・管理会社委託費→道頓堀のみ、タイムズ→近畿吉田ビルのみ）は
-  // 全体タブ or 対象物件の単独表示のときだけ出す
+  // 行の出し分けは calc.ts に集約（特定物件限定行・全体非表示行・物件ごとの非表示行）
   const keepRow = useCallback(
-    (row: StatementRow) => {
-      const restrictTo = PROPERTY_ONLY_ROWS.get(row.label)
-      if (!restrictTo) return true
-      return propertyName === '全体' || propertyName.includes(restrictTo)
-    },
+    (row: StatementRow) => isStatementRowVisible(row.label, propertyName),
     [propertyName],
   )
   const incomeRows = useMemo(() => r.income.filter(keepRow), [r.income, keepRow])

@@ -113,13 +113,43 @@ export const EXPENSE_ROWS = [
 ] as const
 
 // 特定物件のみ表示する行（他物件の単独表示では非表示。全体タブでは常に表示）。
-// key=行ラベル、value=物件名に含まれるべき文字列
-export const PROPERTY_ONLY_ROWS: ReadonlyMap<string, string> = new Map([
-  ['KDDI', '道頓堀'],
-  ['商店街組合費', '道頓堀'],
-  ['タイムズ', '近畿吉田ビル'],
-  ['管理会社委託費', '道頓堀'],
+// key=行ラベル、value=対象物件名（properties.name と完全一致）
+export const PROPERTY_ONLY_ROWS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['KDDI', ['プランドール道頓堀']],
+  ['商店街組合費', ['プランドール道頓堀']],
+  ['タイムズ', ['近畿吉田ビル']],
+  ['管理会社委託費', ['プランドール道頓堀', '近畿吉田ビル']],
 ])
+
+// どの物件でも（全体タブでも）表示しない行。実務上その費目が発生しないもの。
+export const HIDDEN_ROWS: ReadonlySet<string> = new Set(['町会費'])
+
+// 物件ごとに非表示にする行（その物件では発生しない費目）。全体タブでは表示する。
+// key=物件名（properties.name と完全一致。「守口」は部分一致だと ルネス〜 と衝突するので必ず完全一致）
+const KODATE_LIKE_HIDDEN = [
+  '光熱費（入居者負担）', '看板',
+  'BM', 'EV保守費', 'アルソック', '清掃費', 'ゴミ処理代', '通信費', '保険料（賠償責任）', '水道光熱費',
+]
+export const PROPERTY_HIDDEN_ROWS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ['プランドール守口', new Set(['ゴミ処理代', '保険料（賠償責任）'])],
+  ['プランドール道頓堀', new Set(['ゴミ処理代'])],
+  ['プランドール堂島', new Set(['看板', '保険料（賠償責任）'])],
+  ['シャーメゾン新大阪', new Set(['看板', '保険料（賠償責任）'])],
+  ['ルネスプランドール守口', new Set(['看板'])],
+  ['プランドール阿波座', new Set(['光熱費（入居者負担）', '看板'])],
+  ['近畿吉田ビル', new Set(['看板', 'アルソック', '清掃費', 'ゴミ処理代', '保険料（賠償責任）'])],
+  ['富士マンション', new Set(KODATE_LIKE_HIDDEN)],
+  ['戸建て賃貸', new Set(KODATE_LIKE_HIDDEN)],
+])
+
+// 収支表のこの行を、この物件の表示で出すか。画面・Excel出力の両方から使う。
+export function isStatementRowVisible(label: string, propertyName: string): boolean {
+  if (HIDDEN_ROWS.has(label)) return false
+  const only = PROPERTY_ONLY_ROWS.get(label)
+  if (only && propertyName !== '全体' && !only.includes(propertyName)) return false
+  if (PROPERTY_HIDDEN_ROWS.get(propertyName)?.has(label)) return false
+  return true
+}
 
 export interface StatementRow {
   label: string
