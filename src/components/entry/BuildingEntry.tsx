@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { transactionsRepo } from '../../lib/repositories'
 import { today } from '../../lib/format'
-import { BUILDING_INCOME_CATEGORIES, BUILDING_EXPENSE_CATEGORIES } from '../../types'
+import { BUILDING_INCOME_CATEGORIES, BUILDING_EXPENSE_CATEGORIES, categoryLabel } from '../../types'
 import type { Property, Transaction } from '../../types'
 
 const n = (s: string) => {
@@ -100,7 +100,12 @@ export function BuildingEntry({
 
       <Section title="支出" accent="text-rose-700">
         {BUILDING_EXPENSE_CATEGORIES.map((cat) => (
-          <Line key={cat} label={cat} value={values[cat] ?? ''} onChange={(v) => set(cat, v)} />
+          <Line
+            key={cat}
+            label={categoryLabel(cat)}
+            value={values[cat] ?? ''}
+            onChange={(v) => set(cat, v)}
+          />
         ))}
       </Section>
 

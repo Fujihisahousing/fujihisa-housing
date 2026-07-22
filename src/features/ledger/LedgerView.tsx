@@ -7,6 +7,7 @@ import { exportTransactionsCSV, exportAllJSON } from '../../lib/csv'
 import { yen, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { useAuth } from '../../auth/AuthProvider'
+import { categoryLabel } from '../../types'
 import type { AuditLog, Property, Transaction, Unit } from '../../types'
 
 type TypeFilter = 'all' | 'income' | 'expense'
@@ -104,7 +105,9 @@ export function LedgerView({ properties }: { properties: Property[] }) {
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-slate-800 truncate">{r.category}</span>
+                  <span className="text-sm font-medium text-slate-800 truncate">
+                    {categoryLabel(r.category)}
+                  </span>
                   <span className="text-xs text-slate-400">{formatDate(r.date)}</span>
                 </div>
                 <div className="text-xs text-slate-500 truncate">
@@ -204,6 +207,7 @@ function HistoryModal({
     if (field === 'amount') return yen(Number(v))
     if (field === 'date') return formatDate(String(v))
     if (field === 'type') return v === 'income' ? '収入' : '支出'
+    if (field === 'category') return categoryLabel(String(v))
     return String(v)
   }
 
