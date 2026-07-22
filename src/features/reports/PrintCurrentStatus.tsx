@@ -182,22 +182,28 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                   </tr>
                 </thead>
                 <tbody>
-                  {rooms.map((u) => (
-                    <tr key={u.id}>
-                      <td className="rm">{text(u.room)}</td>
-                      <td>{text(u.use_type)}</td>
-                      <td>{text(u.tenant_type)}</td>
-                      <td className="r">{num(u.rent)}</td>
-                      <td className="r">{num(u.kyoeki)}</td>
-                      <td className="r">{parkingText(u.parking)}</td>
-                      <td className="c">
-                        <span className={'sr-pill ' + (STATUS_TONE[u.status ?? ''] ?? '')}>
-                          {text(u.status)}
-                        </span>
-                      </td>
-                      <td className="nt">{text(u.notes)}</td>
-                    </tr>
-                  ))}
+                  {rooms.map((u) => {
+                    // 停止中の部屋は賃料・共益費を出さない（募集していないため）。
+                    // 入予・空室は「まだ確定収入ではない」ことが一目で分かるようオレンジ文字にする。
+                    const stopped = u.status === '停止'
+                    const pending = u.status === '入予' || u.status === '空室'
+                    return (
+                      <tr key={u.id}>
+                        <td className="rm">{text(u.room)}</td>
+                        <td>{text(u.use_type)}</td>
+                        <td>{text(u.tenant_type)}</td>
+                        <td className={'r' + (pending ? ' is-pending' : '')}>{stopped ? '' : num(u.rent)}</td>
+                        <td className={'r' + (pending ? ' is-pending' : '')}>{stopped ? '' : num(u.kyoeki)}</td>
+                        <td className="r">{parkingText(u.parking)}</td>
+                        <td className="c">
+                          <span className={'sr-pill ' + (STATUS_TONE[u.status ?? ''] ?? '')}>
+                            {text(u.status)}
+                          </span>
+                        </td>
+                        <td className="nt">{text(u.notes)}</td>
+                      </tr>
+                    )
+                  })}
                   <tr className="sr-total">
                     <td colSpan={3}>計</td>
                     <td className="r">{num(sum.rent)}</td>

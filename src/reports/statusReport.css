@@ -161,6 +161,11 @@
   color: #64748b;
   max-width: 16mm;
 }
+/* 入予・空室の賃料・共益費は「まだ確定収入ではない」ことが分かるようオレンジに */
+.sr-table td.is-pending {
+  color: #c2410c;
+  font-weight: 700;
+}
 .sr-table tbody td {
   padding: 0.12mm 0.8mm;
   border-bottom: 1px solid #f1f5f9;
