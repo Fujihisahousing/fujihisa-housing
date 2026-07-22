@@ -23,12 +23,24 @@ const STATUS_TONE: Record<string, string> = {
 }
 
 const isChargeable = (u: Unit) => u.status === '入居' || u.status === '退予'
+
+// 検査済証（和暦の年月。例「昭和63年4月」）から築年数を出す
+function buildingAge(wareki?: string | null): string {
+  if (!wareki) return ''
+  const m = wareki.match(/(昭和|平成|令和)\s*(\d+|元)年/)
+  if (!m) return ''
+  const base = m[1] === '昭和' ? 1925 : m[1] === '平成' ? 1988 : 2018
+  const year = base + (m[2] === '元' ? 1 : Number(m[2]))
+  return `築${new Date().getFullYear() - year}年`
+}
 const parkingYen = (s?: string | null) => {
   const m = s ? String(s).match(/[0-9][0-9,]*/) : null
   return m ? parseInt(m[0].replace(/,/g, ''), 10) : 0
 }
 
 export interface Block {
+  /** 見出しに出す名前。戸建てのようにまとめた場合はグループ名 */
+  label: string
   property: Property
   rooms: Unit[]
 }
@@ -61,20 +73,32 @@ export function PrintCurrentStatus({ properties }: { properties: Property[] }) {
     void load()
   }, [load])
 
+  // group_name を持つ物件は1ブロックにまとめる（戸建て6現場 →「戸建て」）。
+  // 並びは properties の順（＝手本PDFの並びに合わせて created_at を調整済み）。
   const blocks = useMemo<Block[]>(() => {
+    const propById = new Map(properties.map((p) => [p.id, p]))
     const order = new Map(properties.map((p, i) => [p.id, i]))
-    const byProp = new Map<string, Unit[]>()
+    const byKey = new Map<string, { label: string; property: Property; rooms: Unit[]; ord: number }>()
     for (const u of units) {
-      if (!byProp.has(u.property_id)) byProp.set(u.property_id, [])
-      byProp.get(u.property_id)!.push(u)
+      const p = propById.get(u.property_id)
+      if (!p) continue
+      const key = p.group_name || p.id
+      if (!byKey.has(key)) {
+        byKey.set(key, {
+          label: p.group_name ? p.group_name.replace(/賃貸$/, '') : p.name,
+          property: p,
+          rooms: [],
+          ord: order.get(p.id) ?? 9999,
+        })
+      }
+      const g = byKey.get(key)!
+      g.ord = Math.min(g.ord, order.get(p.id) ?? 9999)
+      // まとめた場合は号室だけでは物件が分からないので、現場名を前置きする
+      g.rooms.push(p.group_name ? { ...u, room: `${p.name}${u.room && u.room !== p.name ? ' ' + u.room : ''}` } : u)
     }
-    return Array.from(byProp.entries())
-      .sort((a, b) => (order.get(a[0]) ?? 9999) - (order.get(b[0]) ?? 9999))
-      .map(([pid, list]) => ({
-        property: properties.find((p) => p.id === pid)!,
-        rooms: [...list].sort(unitCompare),
-      }))
-      .filter((b) => b.property)
+    return Array.from(byKey.values())
+      .sort((a, b) => a.ord - b.ord)
+      .map((g) => ({ label: g.label, property: g.property, rooms: g.rooms.sort(unitCompare) }))
   }, [units, properties])
 
   if (loading) {
@@ -142,22 +166,32 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
       </header>
 
       <div className="sr-cols">
-        {blocks.map(({ property, rooms }) => {
+        {blocks.map(({ label, property, rooms }) => {
           const c = rooms.filter((u) => u.status !== '停止')
           const o = rooms.filter(isChargeable)
           const sum = o.reduce(
-            (a, u) => ({ rent: a.rent + n(u.rent), kyoeki: a.kyoeki + n(u.kyoeki) }),
-            { rent: 0, kyoeki: 0 },
+            (a, u) => ({
+              rent: a.rent + n(u.rent),
+              kyoeki: a.kyoeki + n(u.kyoeki),
+              parking: a.parking + parkingYen(u.parking),
+            }),
+            { rent: 0, kyoeki: 0, parking: 0 },
           )
           return (
             <section className="sr-block" key={property.id}>
               <div className="sr-block-head">
-                <h2>{property.name}</h2>
+                <h2>{label}</h2>
                 <span className="sr-rate">
                   {o.length}/{c.length}
                   <i>{c.length ? Math.round((o.length / c.length) * 100) : 0}%</i>
                 </span>
               </div>
+              {property.inspection_date && (
+                <div className="sr-block-meta">
+                  検査済証 {property.inspection_date}
+                  <span>{buildingAge(property.inspection_date)}</span>
+                </div>
+              )}
               <table className="sr-table">
                 <thead>
                   <tr>
@@ -166,7 +200,9 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                     <th>入居者</th>
                     <th className="r">賃料</th>
                     <th className="r">共益費</th>
+                    <th className="r">駐輪駐車</th>
                     <th className="c">状況</th>
+                    <th>備考</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -177,18 +213,21 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                       <td>{text(u.tenant_type)}</td>
                       <td className="r">{num(u.rent)}</td>
                       <td className="r">{num(u.kyoeki)}</td>
+                      <td className="r">{text(u.parking)}</td>
                       <td className="c">
                         <span className={'sr-pill ' + (STATUS_TONE[u.status ?? ''] ?? '')}>
                           {text(u.status)}
                         </span>
                       </td>
+                      <td className="nt">{text(u.notes)}</td>
                     </tr>
                   ))}
                   <tr className="sr-total">
                     <td colSpan={3}>計</td>
                     <td className="r">{num(sum.rent)}</td>
                     <td className="r">{num(sum.kyoeki)}</td>
-                    <td />
+                    <td className="r">{num(sum.parking)}</td>
+                    <td colSpan={2} />
                   </tr>
                 </tbody>
               </table>

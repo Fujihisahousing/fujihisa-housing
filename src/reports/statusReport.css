@@ -97,29 +97,46 @@
 }
 .sr-block-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 2mm;
-  padding: 0 0 1mm 2mm;
-  border-left: 2px solid #6366f1;
+  padding: 1mm 2mm;
+  background: #1e293b; /* 帯で塗りつぶすと物件の切れ目が分かりやすい */
+  color: #fff;
+  border-radius: 1mm 1mm 0 0;
   break-after: avoid; /* 見出しだけ列末に残さない */
 }
 .sr-block-head h2 {
   margin: 0;
-  font-size: 9pt;
+  font-size: 8.6pt;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
 }
 .sr-rate {
   margin-left: auto;
-  font-size: 6.8pt;
-  color: #94a3b8;
+  font-size: 6.4pt;
+  color: #cbd5e1;
   white-space: nowrap;
 }
 .sr-rate i {
   font-style: normal;
   font-weight: 700;
-  color: #4f46e5;
+  color: #a5b4fc;
   margin-left: 1mm;
+}
+/* 検査済証・築年数は帯のすぐ下に小さく置く */
+.sr-block-meta {
+  display: flex;
+  gap: 1.5mm;
+  padding: 0.5mm 2mm;
+  background: #f1f5f9;
+  font-size: 5.9pt;
+  color: #64748b;
+  letter-spacing: 0.02em;
+  break-after: avoid;
+}
+.sr-block-meta span {
+  font-weight: 700;
+  color: #334155;
 }
 
 /* ---------------- 表 ---------------- */
@@ -139,6 +156,10 @@
   border-bottom: 1px solid #cbd5e1;
   white-space: nowrap;
 }
+.sr-table td.nt {
+  color: #64748b;
+  max-width: 16mm;
+}
 .sr-table tbody td {
   padding: 0.6mm 1mm;
   border-bottom: 1px solid #f1f5f9;
@@ -146,7 +167,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 22mm;
+  max-width: 18mm;
 }
 .sr-table .r {
   text-align: right;
