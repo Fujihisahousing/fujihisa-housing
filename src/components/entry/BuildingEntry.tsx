@@ -1,10 +1,10 @@
 // 建物まとめ入力。物件を選び、建物単位の収入（看板・KDDI・タイムズ）と
-// 支出（管理委託費〜水道光熱費）を1画面で入力し、入力した費目だけまとめて記帳する。
+// 支出（管理委託費〜利息）を1画面で入力し、入力した費目だけまとめて記帳する。
 // 公租公課・各保険・組合費など年1回の費目は、支払った月に入力する（月割りはしない）。
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { transactionsRepo } from '../../lib/repositories'
 import { today } from '../../lib/format'
-import { BUILDING_INCOME_CATEGORIES, BUILDING_EXPENSE_CATEGORIES, categoryLabel } from '../../types'
+import { BUILDING_INCOME_CATEGORIES, BUILDING_EXPENSE_CATEGORIES } from '../../types'
 import type { Property, Transaction } from '../../types'
 
 const n = (s: string) => {
@@ -100,12 +100,7 @@ export function BuildingEntry({
 
       <Section title="支出" accent="text-rose-700">
         {BUILDING_EXPENSE_CATEGORIES.map((cat) => (
-          <Line
-            key={cat}
-            label={categoryLabel(cat)}
-            value={values[cat] ?? ''}
-            onChange={(v) => set(cat, v)}
-          />
+          <Line key={cat} label={cat} value={values[cat] ?? ''} onChange={(v) => set(cat, v)} />
         ))}
       </Section>
 

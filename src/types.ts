@@ -201,21 +201,10 @@ export const BUILDING_EXPENSE_CATEGORIES = [
   '保険料（賠償責任保険）',
   '道頓堀商店街　組合費',
   '町会費',
-  '水道光熱費',
+  '水道、電気代', // 旧名 '水道光熱費'。2026-07 に DB の値も含めて改名済み
   '元金',
   '利息',
 ] as const
-
-/**
- * 画面に出すカテゴリ名。DB に保存する category とは別物。
- * 既存データ（水道光熱費 約260件）を移行せず表示名だけ変えるための対応表で、
- * 収支表の行名（calc.ts の EXPENSE_ROW_OF）と揃えてある。
- * 保存・検索・SQL では必ず元の category 名を使うこと。
- */
-const CATEGORY_LABELS: Record<string, string> = {
-  水道光熱費: '水道、電気代',
-}
-export const categoryLabel = (category: string): string => CATEGORY_LABELS[category] ?? category
 
 /** まとめ入金の自動振り分けで使う収入カテゴリ名（賃料は ROOM_INCOME と共通） */
 export const CAT_RENT = '賃料'
