@@ -168,9 +168,22 @@ export function isStatementRowVisible(label: string, propertyName: string): bool
   return true
 }
 
+// 会計年度は9月始まり8月締め。例：2026年度 = 2026-09 〜 2027-08。
+export const FISCAL_START_MONTH = 9
+/** 収支表の列の並び（0番目=9月 … 11番目=8月） */
+export const FISCAL_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8] as const
+/** その日付が属する会計年度。1〜8月は前年の年度に入る */
+export function fiscalYearOf(d: Date): number {
+  return d.getMonth() + 1 >= FISCAL_START_MONTH ? d.getFullYear() : d.getFullYear() - 1
+}
+/** 会計年度内の月インデックス（9月=0 … 8月=11） */
+export function fiscalMonthIndex(d: Date): number {
+  return (d.getMonth() + 1 - FISCAL_START_MONTH + 12) % 12
+}
+
 export interface StatementRow {
   label: string
-  months: number[] // 12要素（0=1月）
+  months: number[] // 12要素（0=9月 … 11=8月。FISCAL_MONTHS と同じ並び）
   total: number
 }
 export interface IncomeStatementResult {
@@ -195,7 +208,7 @@ function buildRows(
   for (const t of txs) {
     const row = mapOf[t.category] ?? 'その他'
     const arr = table.get(row) ?? table.get('その他')!
-    const m = new Date(t.date).getMonth()
+    const m = fiscalMonthIndex(new Date(t.date))
     if (m >= 0 && m <= 11) arr[m] += n(t.amount)
   }
   return labels.map((l) => {
@@ -210,8 +223,9 @@ function sumByMonth(rows: StatementRow[]): number[] {
   return out
 }
 
+/** year は会計年度。2026 を渡すと 2026-09 〜 2027-08 が対象になる */
 export function calcIncomeStatement(transactions: Transaction[], year: number): IncomeStatementResult {
-  const inYear = transactions.filter((t) => new Date(t.date).getFullYear() === year)
+  const inYear = transactions.filter((t) => fiscalYearOf(new Date(t.date)) === year)
   const income = buildRows(INCOME_ROWS, INCOME_ROW_OF, inYear.filter((t) => t.type === 'income'))
   const expense = buildRows(EXPENSE_ROWS, EXPENSE_ROW_OF, inYear.filter((t) => t.type === 'expense'))
   const incomeTotalByMonth = sumByMonth(income)

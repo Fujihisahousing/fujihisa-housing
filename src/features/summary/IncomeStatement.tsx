@@ -2,19 +2,24 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
 import { transactionsRepo, paymentRecordsRepo, unitsRepo } from '../../lib/repositories'
-import { calcIncomeStatement, isStatementRowVisible, type StatementRow } from '../../lib/calc'
+import {
+  calcIncomeStatement,
+  fiscalYearOf,
+  isStatementRowVisible,
+  FISCAL_MONTHS,
+  type StatementRow,
+} from '../../lib/calc'
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
 import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { CAT_RENT, type PaymentRecord, type Transaction, type Unit } from '../../types'
 
-const MONTHS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
-// 収支表の年度プルダウンに常に出す最も古い年（データの有無に関わらず選べるようにする）
+// 収支表の年度プルダウンに常に出す最も古い会計年度（データの有無に関わらず選べるようにする）
 const FIRST_YEAR = 2022
 
 export function IncomeStatement({ propertyName }: { propertyName: string }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
-  const [year, setYear] = useState(new Date().getFullYear())
+  const [year, setYear] = useState(fiscalYearOf(new Date()))
   const [txs, setTxs] = useState<Transaction[]>([])
   const [records, setRecords] = useState<PaymentRecord[]>([])
   const [units, setUnits] = useState<Unit[]>([])
@@ -77,12 +82,12 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
   )
   const incomeRows = useMemo(() => r.income.filter(keepRow), [r.income, keepRow])
   const expenseRows = useMemo(() => r.expense.filter(keepRow), [r.expense, keepRow])
-  // 年度の選択肢は運用開始年〜今年を常に出す。データが1件も無い物件（富士マンション等）で
-  // 今年しか選べず過去年度を開けなくなるのを防ぐ。データ側に範囲外の年があれば併せて出す。
+  // 年度の選択肢は運用開始年度〜今年度を常に出す。データが1件も無い物件（富士マンション等）で
+  // 今年度しか選べず過去年度を開けなくなるのを防ぐ。データ側に範囲外の年度があれば併せて出す。
   const years = useMemo(() => {
     const set = new Set<number>()
-    for (let y = FIRST_YEAR; y <= new Date().getFullYear(); y++) set.add(y)
-    allTxs.forEach((t) => set.add(new Date(t.date).getFullYear()))
+    for (let y = FIRST_YEAR; y <= fiscalYearOf(new Date()); y++) set.add(y)
+    allTxs.forEach((t) => set.add(fiscalYearOf(new Date(t.date))))
     return Array.from(set).sort((a, b) => b - a)
   }, [allTxs])
 
@@ -97,7 +102,7 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
         >
           {years.map((y) => (
             <option key={y} value={y}>
-              {y}年
+              {y}年度（{y}年9月〜{y + 1}年8月）
             </option>
           ))}
         </select>
@@ -119,12 +124,12 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
             <thead>
               <tr className="text-xs text-slate-500 border-b border-slate-200">
                 <th className="sticky left-0 bg-white px-3 py-2 text-left font-medium">項目</th>
-                {MONTHS.map((m) => (
+                {FISCAL_MONTHS.map((m) => (
                   <th key={m} className="px-3 py-2 text-right font-medium">
                     {m}月
                   </th>
                 ))}
-                <th className="px-3 py-2 text-right font-medium bg-slate-50">年間合計</th>
+                <th className="px-3 py-2 text-right font-medium bg-slate-50">年度合計</th>
               </tr>
             </thead>
             <tbody>
