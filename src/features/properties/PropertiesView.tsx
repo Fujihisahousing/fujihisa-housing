@@ -403,7 +403,12 @@ function UnitModal({
     try {
       const newRent = numOrNull(f.rent) ?? 0
       const newKyoeki = numOrNull(f.kyoeki) ?? 0
-      const rentChanged = !isEdit || newRent !== (Number(value?.rent) || 0) || newKyoeki !== (Number(value?.kyoeki) || 0)
+      const newParking = f.parking || null
+      const rentChanged =
+        !isEdit ||
+        newRent !== (Number(value?.rent) || 0) ||
+        newKyoeki !== (Number(value?.kyoeki) || 0) ||
+        newParking !== (value?.parking ?? null)
 
       const payload: Partial<Unit> = {
         property_id: propertyId,
@@ -448,12 +453,13 @@ function UnitModal({
         )
       }
 
-      if (rentChanged && (newRent > 0 || newKyoeki > 0)) {
+      if (rentChanged && (newRent > 0 || newKyoeki > 0 || newParking)) {
         await rentHistoryRepo.create({
           unit_id: unitId,
           effective_date: f.rent_effective_date || today(),
           rent: newRent,
           kyoeki: newKyoeki,
+          parking: newParking,
         })
         // 反映開始日が過去日（バックデート修正）の場合、「今日時点で最新の履歴」を units の現在値として再計算する。
         const allHistory = await rentHistoryRepo.listByUnit(unitId)
@@ -461,8 +467,11 @@ function UnitModal({
         const current = allHistory
           .filter((h) => h.effective_date <= todayStr)
           .sort((a, b) => (a.effective_date < b.effective_date ? 1 : -1))[0]
-        if (current && (current.rent !== newRent || current.kyoeki !== newKyoeki)) {
-          await unitsRepo.update(unitId, { rent: current.rent, kyoeki: current.kyoeki })
+        if (
+          current &&
+          (current.rent !== newRent || current.kyoeki !== newKyoeki || (current.parking ?? null) !== newParking)
+        ) {
+          await unitsRepo.update(unitId, { rent: current.rent, kyoeki: current.kyoeki, parking: current.parking ?? null })
         }
       }
       onSaved()
@@ -556,7 +565,7 @@ function UnitModal({
         </div>
         <div>
           <TextField
-            label="反映開始日（賃料・共益費の変更時のみ使用。過去日を入れれば遡って修正、将来分は今日の日付でOK）"
+            label="反映開始日（賃料・共益費・駐輪駐車の変更時のみ使用。過去日を入れれば遡って修正、将来分は今日の日付でOK）"
             value={f.rent_effective_date ?? ''}
             onChange={set('rent_effective_date')}
             type="date"
@@ -568,6 +577,7 @@ function UnitModal({
                   <span className="w-24 shrink-0">{formatDate(h.effective_date)}〜</span>
                   <span className="flex-1">
                     賃料 {yen(h.rent)}／共益費 {yen(h.kyoeki)}
+                    {h.parking && `／駐輪駐車 ${h.parking}`}
                   </span>
                   <button
                     type="button"

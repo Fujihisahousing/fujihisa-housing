@@ -144,6 +144,8 @@ export interface RentHistory {
   effective_date: string
   rent: number
   kyoeki: number
+  /** その反映開始日時点の駐輪駐車欄（units.parkingと同じテキスト形式） */
+  parking?: string | null
   created_at?: string
 }
 
