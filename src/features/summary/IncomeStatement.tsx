@@ -7,6 +7,7 @@ import {
   fiscalYearOf,
   isStatementRowVisible,
   FISCAL_MONTHS,
+  type IncomeStatementResult,
   type StatementRow,
 } from '../../lib/calc'
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
@@ -123,37 +124,61 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
           <Loader2 className="w-4 h-4 animate-spin" /> 読み込み中…
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="text-sm border-collapse min-w-[860px]">
-            <thead>
-              <tr className="text-xs text-slate-500 border-b border-slate-200">
-                <th className="sticky left-0 bg-white px-3 py-2 text-left font-medium">項目</th>
-                {FISCAL_MONTHS.map((m) => (
-                  <th key={m} className="px-3 py-2 text-right font-medium">
-                    {m}月
-                  </th>
-                ))}
-                <th className="px-3 py-2 text-right font-medium bg-slate-50">年度合計</th>
-              </tr>
-            </thead>
-            <tbody>
-              <SectionHeader title="収入" />
-              {incomeRows.map((row) => (
-                <DataRow key={row.label} row={row} />
-              ))}
-              <TotalRow label="収入計" months={r.incomeTotalByMonth} total={r.incomeTotal} tone="income" />
-
-              <SectionHeader title="支出" />
-              {expenseRows.map((row) => (
-                <DataRow key={row.label} row={row} />
-              ))}
-              <TotalRow label="支出計" months={r.expenseTotalByMonth} total={r.expenseTotal} tone="expense" />
-
-              <TotalRow label="差引（収支）" months={r.netByMonth} total={r.net} tone="net" />
-            </tbody>
-          </table>
-        </div>
+        <StatementTable r={r} incomeRows={incomeRows} expenseRows={expenseRows} />
       )}
+    </div>
+  )
+}
+
+// 列数 = 項目 + 12ヶ月 + 年度合計
+const COL_COUNT = FISCAL_MONTHS.length + 2
+
+// 左端（項目）と右端（年度合計）は横スクロールしても固定する。
+// 金額は whitespace-nowrap で折り返さない（折り返すと行が縦に伸びて非常に見づらい）。
+// 固定列は背景を不透明にし、z-index でスクロールしてくる月の列より前面に出すこと。
+const COL_ITEM = 'sticky left-0 z-10 bg-white border-r border-slate-200 whitespace-nowrap'
+const COL_TOTAL = 'sticky right-0 z-10 bg-slate-50 border-l border-slate-200 whitespace-nowrap'
+const CELL = 'px-3 py-2 whitespace-nowrap'
+
+export function StatementTable({
+  r,
+  incomeRows,
+  expenseRows,
+}: {
+  r: IncomeStatementResult
+  incomeRows: StatementRow[]
+  expenseRows: StatementRow[]
+}) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <table className="text-sm border-collapse w-max">
+        <thead>
+          <tr className="text-xs text-slate-500 border-b border-slate-200">
+            <th className={`${CELL} ${COL_ITEM} z-20 text-left font-medium min-w-[9rem]`}>項目</th>
+            {FISCAL_MONTHS.map((m) => (
+              <th key={m} className={`${CELL} text-right font-medium min-w-[6.5rem]`}>
+                {m}月
+              </th>
+            ))}
+            <th className={`${CELL} ${COL_TOTAL} z-20 text-right font-medium`}>年度合計</th>
+          </tr>
+        </thead>
+        <tbody>
+          <SectionHeader title="収入" />
+          {incomeRows.map((row) => (
+            <DataRow key={row.label} row={row} />
+          ))}
+          <TotalRow label="収入計" months={r.incomeTotalByMonth} total={r.incomeTotal} tone="income" />
+
+          <SectionHeader title="支出" />
+          {expenseRows.map((row) => (
+            <DataRow key={row.label} row={row} />
+          ))}
+          <TotalRow label="支出計" months={r.expenseTotalByMonth} total={r.expenseTotal} tone="expense" />
+
+          <TotalRow label="差引（収支）" months={r.netByMonth} total={r.net} tone="net" />
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -161,8 +186,9 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
 function SectionHeader({ title }: { title: string }) {
   return (
     <tr className="bg-slate-50">
-      <td className="sticky left-0 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-500" colSpan={14}>
-        {title}
+      <td className="px-3 py-1.5 text-xs font-semibold text-slate-500" colSpan={COL_COUNT}>
+        {/* 横スクロールしても見出しが左端に残るように */}
+        <span className="sticky left-3 whitespace-nowrap">{title}</span>
       </td>
     </tr>
   )
@@ -170,14 +196,14 @@ function SectionHeader({ title }: { title: string }) {
 
 function DataRow({ row }: { row: StatementRow }) {
   return (
-    <tr className="border-b border-slate-100">
-      <td className="sticky left-0 bg-white px-3 py-2 text-slate-700">{row.label}</td>
+    <tr className="border-b border-slate-100 bg-white">
+      <td className={`${CELL} ${COL_ITEM} text-slate-700`}>{row.label}</td>
       {row.months.map((v, i) => (
-        <td key={i} className="px-3 py-2 text-right tabular-nums text-slate-600">
+        <td key={i} className={`${CELL} text-right tabular-nums text-slate-600`}>
           {v ? yen(v) : '—'}
         </td>
       ))}
-      <td className="px-3 py-2 text-right tabular-nums font-medium bg-slate-50">{yen(row.total)}</td>
+      <td className={`${CELL} ${COL_TOTAL} text-right tabular-nums font-medium`}>{yen(row.total)}</td>
     </tr>
   )
 }
@@ -196,14 +222,14 @@ function TotalRow({
   const color =
     tone === 'income' ? 'text-emerald-700' : tone === 'expense' ? 'text-rose-700' : 'text-slate-900'
   return (
-    <tr className="border-b-2 border-slate-200 font-medium">
-      <td className={'sticky left-0 bg-white px-3 py-2 ' + color}>{label}</td>
+    <tr className="border-b-2 border-slate-200 font-medium bg-white">
+      <td className={`${CELL} ${COL_ITEM} ${color}`}>{label}</td>
       {months.map((v, i) => (
-        <td key={i} className={'px-3 py-2 text-right tabular-nums ' + color}>
+        <td key={i} className={`${CELL} text-right tabular-nums ${color}`}>
           {v ? yen(v) : '—'}
         </td>
       ))}
-      <td className={'px-3 py-2 text-right tabular-nums bg-slate-50 ' + color}>{yen(total)}</td>
+      <td className={`${CELL} ${COL_TOTAL} text-right tabular-nums ${color}`}>{yen(total)}</td>
     </tr>
   )
 }
