@@ -3,7 +3,7 @@ import { RentRoll } from './rentroll/RentRoll'
 import { IncomeStatement } from './summary/IncomeStatement'
 import { PaymentStatus } from './payments/PaymentStatus'
 import { Prospectus } from './prospectus/Prospectus'
-import { ExportPatternBar } from './ExportPatternBar'
+import { PrintCurrentStatus } from './reports/PrintCurrentStatus'
 import { useAppStore, type ViewKey } from '../state/useAppStore'
 import type { Property } from '../types'
 
@@ -12,6 +12,7 @@ const TABS: { key: ViewKey; label: string }[] = [
   { key: 'summary', label: '収支表' },
   { key: 'payments', label: '入金状況' },
   { key: 'prospectus', label: '物件概要書' },
+  { key: 'statusreport', label: '現況報告書' },
 ]
 
 export function ReportsView({ properties }: { properties: Property[] }) {
@@ -41,12 +42,11 @@ export function ReportsView({ properties }: { properties: Property[] }) {
         ))}
       </div>
 
-      <ExportPatternBar properties={properties} />
-
       {activeView === 'rentroll' && <RentRoll properties={properties} />}
       {activeView === 'summary' && <IncomeStatement propertyName={propertyName} />}
       {activeView === 'payments' && <PaymentStatus properties={properties} propertyName={propertyName} />}
       {activeView === 'prospectus' && <Prospectus properties={properties} />}
+      {activeView === 'statusreport' && <PrintCurrentStatus properties={properties} />}
     </div>
   )
 }

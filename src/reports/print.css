@@ -29,4 +29,23 @@
     box-shadow: none !important;
     border: none !important;
   }
+
+  /* 現況報告書：物件ブロックは途中で切らない。見出しだけ次ページに残るのも防ぐ */
+  #print-root .report-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  #print-root thead {
+    display: table-header-group; /* ページをまたぐ表は各ページに見出しを出す */
+  }
+  #print-root tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* 背景色（物件帯・状況バッジ）を印刷でも出す */
+  #print-root * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }

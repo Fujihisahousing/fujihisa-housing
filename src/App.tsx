@@ -55,7 +55,8 @@ function Shell() {
     activeView === 'rentroll' ||
     activeView === 'summary' ||
     activeView === 'payments' ||
-    activeView === 'prospectus'
+    activeView === 'prospectus' ||
+    activeView === 'statusreport'
 
   return (
     <div className="min-h-full bg-slate-50 text-slate-800 pb-8">
@@ -68,7 +69,8 @@ function Shell() {
         {(activeView === 'rentroll' ||
           activeView === 'summary' ||
           activeView === 'payments' ||
-          activeView === 'prospectus') && <ReportsView properties={properties} />}
+          activeView === 'prospectus' ||
+          activeView === 'statusreport') && <ReportsView properties={properties} />}
       </main>
     </div>
   )

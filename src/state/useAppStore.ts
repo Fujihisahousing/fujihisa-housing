@@ -9,6 +9,7 @@ export type ViewKey =
   | 'summary'
   | 'payments'
   | 'prospectus'
+  | 'statusreport'
 
 interface AppState {
   /** 選択中の物件ID。null = 「全体」（合算表示） */
