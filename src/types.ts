@@ -113,7 +113,19 @@ export interface PaymentRecord {
   judgement?: string | null
   guarantor?: string | null
   memo?: string | null
+  /** 滞納月数の手入力値。null なら自動計算値を表示する */
+  arrears_months?: number | null
 }
+
+/** 入金状況の判定（手入力のプルダウンで選べる値） */
+export const PAYMENT_JUDGEMENTS = [
+  '入金済',
+  '保証会社入金済',
+  '一部入金',
+  '保証会社請求中',
+  '未入金',
+  '空室',
+] as const
 
 /** 未入金一覧の保証会社対応メモ（号室単位） */
 export interface ArrearsNote {

@@ -9,6 +9,7 @@ import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
 import { yen, percent, formatDate, today } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
+import { PAYMENT_JUDGEMENTS } from '../../types'
 import type { ArrearsNote, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
 
 const JUDGE_STYLE: Record<string, string> = {
@@ -34,6 +35,8 @@ interface DisplayRow {
   guarantor: string
   memo: string
   arrears: number
+  /** 滞納月数が手入力値か（true なら自動計算を上書きしている） */
+  arrearsManual: boolean
   fromRecord: boolean
 }
 
@@ -206,7 +209,8 @@ export function PaymentStatus({
           judgement: rec.judgement ?? '—',
           guarantor: rec.guarantor ?? '',
           memo: rec.memo ?? '',
-          arrears,
+          arrears: rec.arrears_months ?? arrears, // 手入力があればそれを優先
+          arrearsManual: rec.arrears_months != null,
           fromRecord: true,
         }
       }
@@ -223,6 +227,7 @@ export function PaymentStatus({
         guarantor: u.guarantor ?? '',
         memo: notes[u.id] ?? '',
         arrears: row.arrearsMonths,
+        arrearsManual: false,
         fromRecord: false,
       }
     })
@@ -282,6 +287,73 @@ export function PaymentStatus({
     [year, month],
   )
 
+  // 手入力の保存に使う payment_records の下地。記録の無い月でも新規作成できるようにする。
+  const baseRecord = useCallback(
+    (row: DisplayRow): PaymentRecord => {
+      const u = row.unit
+      return {
+        property_id: u.property_id,
+        room: u.room ?? '',
+        year,
+        month,
+        tenant: row.tenant || u.tenant || null,
+        tenant_type: row.tenantType || u.tenant_type || null,
+        kana: row.kana || u.tenant_kana || null,
+        billed: row.billed != null ? Number(row.billed) : row.calcBilled,
+        paid: row.paid != null ? Number(row.paid) : 0,
+        paid_on: row.paidDate ?? null,
+        judgement: row.judgement,
+        guarantor: row.guarantor || u.guarantor || null,
+        memo: row.memo || null,
+        arrears_months: row.arrearsManual ? row.arrears : null,
+      }
+    },
+    [year, month],
+  )
+
+  // 判定の手入力：その月の状態を確定させる。
+  // 空室を選んだ月は請求も入金も無かった月として扱う（契約者名・請求額・入金額をクリア）。
+  const saveJudgement = useCallback(
+    async (row: DisplayRow, judgement: string) => {
+      const rec = baseRecord(row)
+      rec.judgement = judgement
+      if (judgement === '空室') {
+        rec.tenant = null
+        rec.kana = null
+        rec.guarantor = null
+        rec.billed = 0
+        rec.paid = 0
+        rec.paid_on = null
+        rec.arrears_months = null
+      }
+      try {
+        await paymentRecordsRepo.upsert(rec)
+        await load() // 月次・未入金一覧の両方に反映
+      } catch (e) {
+        alert('判定の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
+      }
+    },
+    [baseRecord, load],
+  )
+
+  // 滞納月数の手入力：空欄にすると自動計算に戻す
+  const saveArrears = useCallback(
+    async (row: DisplayRow, value: string) => {
+      const s = value.trim()
+      const n = s === '' ? null : Number(s)
+      if (n != null && (!Number.isFinite(n) || n < 0)) return
+      const rec = baseRecord(row)
+      rec.arrears_months = n
+      try {
+        await paymentRecordsRepo.upsert(rec)
+        await load()
+      } catch (e) {
+        alert('滞納月数の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
+      }
+    },
+    [baseRecord, load],
+  )
+
   // 入金額の手入力：payment_records を作成/更新し、判定は請求額との比較で自動導出する
   const savePaid = useCallback(
     async (row: DisplayRow, paidStr: string) => {
@@ -293,19 +365,11 @@ export function PaymentStatus({
       // 判定は金額のみで導出（既存の手入力データと同じく保証会社の有無で分けない）
       const judgement = deriveJudgement(occupied, billed, paid, false)
       const rec: PaymentRecord = {
-        property_id: u.property_id,
-        room: u.room ?? '',
-        year,
-        month,
-        tenant: row.tenant || u.tenant || null,
-        tenant_type: row.tenantType || u.tenant_type || null,
-        kana: row.kana || u.tenant_kana || null,
+        ...baseRecord(row), // 手入力済みの滞納月数などを引き継ぐ
         billed,
         paid,
         paid_on: paid > 0 ? today() : null,
         judgement,
-        guarantor: u.guarantor ?? null,
-        memo: row.memo || null,
       }
       try {
         await paymentRecordsRepo.upsert(rec)
@@ -314,7 +378,7 @@ export function PaymentStatus({
         alert('入金額の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
       }
     },
-    [year, month, load],
+    [baseRecord, load],
   )
 
   return (
@@ -443,11 +507,25 @@ export function PaymentStatus({
                         </td>
                       </tr>
                       {rows.map((d) => (
-                        <PayRow key={d.unit.id} d={d} onMemo={saveMemo} onPaid={savePaid} />
+                        <PayRow
+                          key={d.unit.id}
+                          d={d}
+                          onMemo={saveMemo}
+                          onPaid={savePaid}
+                          onJudgement={saveJudgement}
+                          onArrears={saveArrears}
+                        />
                       ))}
                     </Fragment>
                   ))
-                : displayRows.map((d) => <PayRow key={d.unit.id} d={d} onMemo={saveMemo} onPaid={savePaid} />)}
+                : displayRows.map((d) => <PayRow
+                          key={d.unit.id}
+                          d={d}
+                          onMemo={saveMemo}
+                          onPaid={savePaid}
+                          onJudgement={saveJudgement}
+                          onArrears={saveArrears}
+                        />)}
             </tbody>
           </table>
         </div>
@@ -596,14 +674,18 @@ function ArrearsRow({
   )
 }
 
-function PayRow({
+export function PayRow({
   d,
   onMemo,
   onPaid,
+  onJudgement,
+  onArrears,
 }: {
   d: DisplayRow
   onMemo: (d: DisplayRow, memo: string) => void
   onPaid: (d: DisplayRow, paid: string) => void
+  onJudgement: (d: DisplayRow, judgement: string) => void
+  onArrears: (d: DisplayRow, months: string) => void
 }) {
   const vacant = d.judgement === '空室'
   const billedShown = d.billed != null ? Number(d.billed) : d.calcBilled // 記録のbilledが空なら実効家賃を表示
@@ -637,14 +719,48 @@ function PayRow({
       <td className="px-3 py-2 text-right tabular-nums">
         {vacant || shortfall <= 0 ? <span className="text-slate-400">—</span> : <span className="text-rose-700">{yen(shortfall)}</span>}
       </td>
-      <td className="px-3 py-2">
-        <span className={'text-xs rounded-full px-2 py-0.5 ' + judgeStyle(d.judgement)}>{d.judgement}</span>
+      <td className="px-2 py-1">
+        {/* 判定はプルダウンで確定できる。空室を選ぶとその月は請求も入金も無かった扱いになる */}
+        <select
+          value={d.judgement}
+          onChange={(e) => onJudgement(d, e.target.value)}
+          title="判定を選ぶとその月の状態が確定します（空室を選ぶと契約者名・請求額・入金額をクリア）"
+          className={
+            'text-xs rounded-full px-2 py-1 border border-transparent hover:border-slate-300 ' +
+            'focus:border-slate-900 focus:outline-none ' +
+            judgeStyle(d.judgement)
+          }
+        >
+          {!PAYMENT_JUDGEMENTS.includes(d.judgement as (typeof PAYMENT_JUDGEMENTS)[number]) && (
+            <option value={d.judgement}>{d.judgement}</option>
+          )}
+          {PAYMENT_JUDGEMENTS.map((j) => (
+            <option key={j} value={j}>
+              {j}
+            </option>
+          ))}
+        </select>
       </td>
       <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{d.guarantor || '—'}</td>
-      <td className="px-3 py-2">
-        {d.arrears >= 1 && (
-          <span className="text-xs rounded-full px-2 py-0.5 bg-rose-600 text-white font-medium">{d.arrears}ヵ月</span>
-        )}
+      <td className="px-2 py-1 text-right">
+        {/* 空欄にすると自動計算に戻る。手入力中は色を変えて区別する */}
+        <input
+          type="number"
+          min={0}
+          defaultValue={d.arrears ? String(d.arrears) : ''}
+          onBlur={(e) => {
+            const v = e.target.value.trim()
+            const cur = d.arrearsManual && d.arrears ? String(d.arrears) : ''
+            if (v !== cur) onArrears(d, v)
+          }}
+          placeholder="自動"
+          title="滞納月数を手入力（空欄にすると自動計算に戻ります）"
+          className={
+            'w-16 rounded border border-transparent bg-transparent px-2 py-1 text-right tabular-nums ' +
+            'hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900 ' +
+            (d.arrears >= 1 ? 'font-medium text-rose-700' : 'text-slate-500')
+          }
+        />
       </td>
       <td className="px-1.5 py-1">
         <NoteInput value={d.memo} onCommit={(v) => onMemo(d, v)} />
