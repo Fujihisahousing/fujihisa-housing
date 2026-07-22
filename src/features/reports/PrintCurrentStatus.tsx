@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, Printer } from 'lucide-react'
 import { unitsRepo } from '../../lib/repositories'
-import { unitCompare } from '../../lib/sortUnits'
 import { useAppStore } from '../../state/useAppStore'
 import '../../reports/print.css'
 import '../../reports/statusReport.css'
+import { buildBlocks } from './buildBlocks'
+import type { Block } from './buildBlocks'
 import type { Property, Unit } from '../../types'
 
 const n = (v: unknown) => Number(v ?? 0) || 0
@@ -24,6 +25,14 @@ const STATUS_TONE: Record<string, string> = {
 
 const isChargeable = (u: Unit) => u.status === '入居' || u.status === '退予'
 
+/** 駐輪駐車：￥を外して桁区切りに統一する。金額でない記載（家賃込み等）はそのまま */
+function parkingText(s?: string | null): string {
+  if (!s || !String(s).trim()) return ''
+  const t = String(s).trim()
+  const m = t.match(/^[¥￥]?\s*([0-9][0-9,]*)\s*$/)
+  return m ? Number(m[1].replace(/,/g, '')).toLocaleString('ja-JP') : t
+}
+
 // 検査済証（和暦の年月。例「昭和63年4月」）から築年数を出す
 function buildingAge(wareki?: string | null): string {
   if (!wareki) return ''
@@ -36,13 +45,6 @@ function buildingAge(wareki?: string | null): string {
 const parkingYen = (s?: string | null) => {
   const m = s ? String(s).match(/[0-9][0-9,]*/) : null
   return m ? parseInt(m[0].replace(/,/g, ''), 10) : 0
-}
-
-export interface Block {
-  /** 見出しに出す名前。戸建てのようにまとめた場合はグループ名 */
-  label: string
-  property: Property
-  rooms: Unit[]
 }
 
 export function PrintCurrentStatus({ properties }: { properties: Property[] }) {
@@ -73,33 +75,7 @@ export function PrintCurrentStatus({ properties }: { properties: Property[] }) {
     void load()
   }, [load])
 
-  // group_name を持つ物件は1ブロックにまとめる（戸建て6現場 →「戸建て」）。
-  // 並びは properties の順（＝手本PDFの並びに合わせて created_at を調整済み）。
-  const blocks = useMemo<Block[]>(() => {
-    const propById = new Map(properties.map((p) => [p.id, p]))
-    const order = new Map(properties.map((p, i) => [p.id, i]))
-    const byKey = new Map<string, { label: string; property: Property; rooms: Unit[]; ord: number }>()
-    for (const u of units) {
-      const p = propById.get(u.property_id)
-      if (!p) continue
-      const key = p.group_name || p.id
-      if (!byKey.has(key)) {
-        byKey.set(key, {
-          label: p.group_name ? p.group_name.replace(/賃貸$/, '') : p.name,
-          property: p,
-          rooms: [],
-          ord: order.get(p.id) ?? 9999,
-        })
-      }
-      const g = byKey.get(key)!
-      g.ord = Math.min(g.ord, order.get(p.id) ?? 9999)
-      // まとめた場合は号室だけでは物件が分からないので、現場名を前置きする
-      g.rooms.push(p.group_name ? { ...u, room: `${p.name}${u.room && u.room !== p.name ? ' ' + u.room : ''}` } : u)
-    }
-    return Array.from(byKey.values())
-      .sort((a, b) => a.ord - b.ord)
-      .map((g) => ({ label: g.label, property: g.property, rooms: g.rooms.sort(unitCompare) }))
-  }, [units, properties])
+  const blocks = useMemo<Block[]>(() => buildBlocks(units, properties), [units, properties])
 
   if (loading) {
     return (
@@ -213,7 +189,7 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                       <td>{text(u.tenant_type)}</td>
                       <td className="r">{num(u.rent)}</td>
                       <td className="r">{num(u.kyoeki)}</td>
-                      <td className="r">{text(u.parking)}</td>
+                      <td className="r">{parkingText(u.parking)}</td>
                       <td className="c">
                         <span className={'sr-pill ' + (STATUS_TONE[u.status ?? ''] ?? '')}>
                           {text(u.status)}
@@ -228,6 +204,11 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                     <td className="r">{num(sum.kyoeki)}</td>
                     <td className="r">{num(sum.parking)}</td>
                     <td colSpan={2} />
+                  </tr>
+                  <tr className="sr-grand">
+                    <td colSpan={3}>合計（賃料＋共益費）</td>
+                    <td className="r" colSpan={2}>{num(sum.rent + sum.kyoeki)}</td>
+                    <td colSpan={3} />
                   </tr>
                 </tbody>
               </table>

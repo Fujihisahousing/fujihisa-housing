@@ -85,21 +85,22 @@
 
 /* ---------------- 段組み ---------------- */
 .sr-cols {
-  column-count: 4;
+  column-count: 3;
   column-gap: 6mm;
   column-fill: auto;
   height: 268mm; /* ヘッダー分を引いた残り。列を端から詰める */
 }
 
 .sr-block {
-  break-inside: auto; /* 大きい物件（堂島57室）は列をまたいでよい */
-  margin-bottom: 3.4mm;
+  break-inside: avoid; /* 物件が途中で切れないようにする */
+  page-break-inside: avoid;
+  margin-bottom: 2.4mm;
 }
 .sr-block-head {
   display: flex;
   align-items: center;
   gap: 2mm;
-  padding: 1mm 2mm;
+  padding: 0.5mm 1.5mm;
   background: #1e293b; /* 帯で塗りつぶすと物件の切れ目が分かりやすい */
   color: #fff;
   border-radius: 1mm 1mm 0 0;
@@ -107,7 +108,7 @@
 }
 .sr-block-head h2 {
   margin: 0;
-  font-size: 8.6pt;
+  font-size: 8pt;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
@@ -127,7 +128,7 @@
 .sr-block-meta {
   display: flex;
   gap: 1.5mm;
-  padding: 0.5mm 2mm;
+  padding: 0.25mm 1.5mm;
   background: #f1f5f9;
   font-size: 5.9pt;
   color: #64748b;
@@ -143,12 +144,12 @@
 .sr-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 7pt;
-  line-height: 1.28;
+  font-size: 6pt;
+  line-height: 1.05;
 }
 .sr-table thead th {
-  padding: 0.7mm 1mm;
-  font-size: 5.7pt;
+  padding: 0.35mm 0.8mm;
+  font-size: 5.1pt;
   font-weight: 600;
   letter-spacing: 0.1em;
   color: #94a3b8;
@@ -161,7 +162,7 @@
   max-width: 16mm;
 }
 .sr-table tbody td {
-  padding: 0.6mm 1mm;
+  padding: 0.12mm 0.8mm;
   border-bottom: 1px solid #f1f5f9;
   color: #334155;
   white-space: nowrap;
@@ -187,13 +188,20 @@
   break-inside: avoid;
 }
 
+.sr-grand td {
+  border-bottom: none;
+  font-weight: 700;
+  color: #1e293b;
+  background: #eef2ff !important;
+  padding: 0.35mm 0.8mm;
+}
 .sr-total td {
   border-top: 1px solid #cbd5e1;
   border-bottom: none;
   font-weight: 700;
   color: #0b1220;
   background: #fff !important;
-  padding-top: 0.9mm;
+  padding-top: 0.5mm;
 }
 
 /* 状況のピル。印刷でも潰れないよう彩度を保つ */
@@ -201,10 +209,10 @@
   display: inline-block;
   padding: 0.15mm 1.2mm;
   border-radius: 999px;
-  font-size: 5.7pt;
+  font-size: 5.3pt;
   font-weight: 700;
   letter-spacing: 0.02em;
-  line-height: 1.5;
+  line-height: 1.4;
 }
 .sr-pill.is-occupied {
   background: #e7f6ee;
