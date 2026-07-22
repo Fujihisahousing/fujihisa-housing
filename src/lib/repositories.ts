@@ -259,6 +259,36 @@ export const paymentRecordsRepo = {
       )
     if (error) throw new Error(error.message)
   },
+  /**
+   * 部屋詳細で契約者情報を入力・更新したときに呼ぶ。この号室の月次記録のうち
+   * 「契約者名が未入力（null/空文字）」のものだけ、契約者名・属性・読み方を
+   * 埋める。既に契約者名が入っている記録（前の入居者の分など）は一切触らない
+   * ——過去の履歴を保護するのと同じ理由。
+   */
+  async fillMissingTenant(
+    property_id: string,
+    room: string,
+    tenant: string | null,
+    tenant_type: string | null,
+    kana: string | null,
+  ): Promise<void> {
+    if (!tenant) return
+    const patch = { tenant, tenant_type, kana, updated_at: new Date().toISOString() }
+    // null と 空文字 は別条件として2回に分けて更新する（.or() の文字列構文より
+    // .is() / .eq() の方が確実で、意図しない行まで拾う心配が無い）
+    const { error: e1 } = await supabase
+      .from('payment_records')
+      .update(patch)
+      .match({ property_id, room })
+      .is('tenant', null)
+    if (e1) throw new Error(e1.message)
+    const { error: e2 } = await supabase
+      .from('payment_records')
+      .update(patch)
+      .match({ property_id, room })
+      .eq('tenant', '')
+    if (e2) throw new Error(e2.message)
+  },
 }
 
 // ---------------------------------------------------------------------

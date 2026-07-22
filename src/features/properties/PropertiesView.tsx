@@ -4,7 +4,7 @@ import { Plus, Pencil, Trash2, Loader2, DoorOpen, ChevronDown, ChevronRight, Use
 import { Modal } from '../../components/common/Modal'
 import { LeaseManager } from '../leases/LeaseManager'
 import { useAuth } from '../../auth/AuthProvider'
-import { propertiesRepo, unitsRepo, rentHistoryRepo } from '../../lib/repositories'
+import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo } from '../../lib/repositories'
 import { unitCompare } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, formatDate, today } from '../../lib/format'
@@ -434,6 +434,19 @@ function UnitModal({
       let unitId = value?.id
       if (isEdit && unitId) await unitsRepo.update(unitId, payload)
       else unitId = (await unitsRepo.create(payload)).id
+
+      // 入金状況の月次記録のうち「契約者名が未入力」のものだけ、ここで
+      // 入力した契約者情報を反映する。既に契約者名が入っている記録
+      // （前の入居者の分など）には触らない——過去の履歴を保護するため。
+      if (payload.tenant) {
+        await paymentRecordsRepo.fillMissingTenant(
+          propertyId,
+          payload.room!,
+          payload.tenant,
+          payload.tenant_type ?? null,
+          payload.tenant_kana ?? null,
+        )
+      }
 
       if (rentChanged && (newRent > 0 || newKyoeki > 0)) {
         await rentHistoryRepo.create({
