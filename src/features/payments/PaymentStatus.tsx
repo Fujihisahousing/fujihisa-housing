@@ -40,6 +40,11 @@ interface DisplayRow {
   fromRecord: boolean
 }
 
+// 契約者名の表記ゆれ（全角/半角スペースの有無）を無視して同一人物か判定する
+const stripSpaces = (s: string) => s.replace(/[\s　]/g, '')
+const sameTenant = (a?: string | null, b?: string | null) =>
+  !!a && !!b && stripSpaces(a) === stripSpaces(b)
+
 const now = new Date()
 
 export function PaymentStatus({
@@ -196,7 +201,9 @@ export function PaymentStatus({
         // 物件情報の現在値と一致する場合に限り、物件情報の読み方を補完する。
         // 契約者名が一致しない（＝過去の入居者の記録）場合は補完しない。
         // これは「読み方の入力が漏れているだけ」のケースを、部屋詳細から救うためのもの。
-        const kana = rec.kana || (rec.tenant && rec.tenant === u.tenant ? u.tenant_kana : null) || ''
+        // 「中島聡」と「中島　聡」のように空白の有無だけが違う表記ゆれが多いため、
+        // 比較は空白（半角・全角）を除いた文字列同士で行う。
+        const kana = rec.kana || (sameTenant(rec.tenant, u.tenant) ? u.tenant_kana : null) || ''
         return {
           unit: u,
           tenant: rec.tenant ?? '',
