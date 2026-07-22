@@ -93,16 +93,20 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      {/* flex-wrap と max-w-full は、選択肢が長くなっても横幅を突き破らないための保険 */}
+      <div className="flex flex-wrap items-center gap-2">
         <label className="text-sm text-slate-600">年度</label>
         <select
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm bg-white"
+          className="max-w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm bg-white"
         >
+          {/* 「2025年度（2025年9月〜2026年8月）」のように期間まで書くと、select が
+              最長の選択肢の幅（105px→278px）まで広がってスマホ幅でツールバーが
+              はみ出し、表全体が潰れる。表記は短いままにすること */}
           {years.map((y) => (
             <option key={y} value={y}>
-              {y}年度（{y}年9月〜{y + 1}年8月）
+              {y}年度
             </option>
           ))}
         </select>
