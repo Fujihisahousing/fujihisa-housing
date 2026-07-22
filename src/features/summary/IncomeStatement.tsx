@@ -7,6 +7,7 @@ import {
   fiscalYearOf,
   isStatementRowVisible,
   FISCAL_MONTHS,
+  FISCAL_START_MONTH,
   type IncomeStatementResult,
   type StatementRow,
 } from '../../lib/calc'
@@ -133,6 +134,8 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
 
 // 列数 = 項目 + 12ヶ月 + 年度合計
 const COL_COUNT = FISCAL_MONTHS.length + 2
+// 年度の前半（9〜12月）は前の暦年、後半（1〜8月）は年度と同じ暦年。ヘッダーの年をまとめる幅に使う。
+const PREV_YEAR_COLS = FISCAL_MONTHS.filter((m) => m >= FISCAL_START_MONTH).length
 
 // 左端（項目）と右端（年度合計）は横スクロールしても固定する。
 // 金額は whitespace-nowrap で折り返さない（折り返すと行が縦に伸びて非常に見づらい）。
@@ -154,14 +157,42 @@ export function StatementTable({
     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
       <table className="text-sm border-collapse w-max">
         <thead>
+          {/* 1段目＝暦年。2026年度なら 9〜12月の上に2025年、1〜8月の上に2026年が乗る */}
+          <tr className="text-xs text-slate-500">
+            <th
+              rowSpan={2}
+              className={`${CELL} ${COL_ITEM} z-20 text-left align-bottom font-medium min-w-[9rem]`}
+            >
+              項目
+            </th>
+            <th colSpan={PREV_YEAR_COLS} className={`${CELL} pb-0 text-left font-medium`}>
+              {r.year - 1}年
+            </th>
+            <th
+              colSpan={FISCAL_MONTHS.length - PREV_YEAR_COLS}
+              className={`${CELL} pb-0 text-left font-medium border-l border-slate-200`}
+            >
+              {r.year}年
+            </th>
+            <th
+              rowSpan={2}
+              className={`${CELL} ${COL_TOTAL} z-20 text-right align-bottom font-medium`}
+            >
+              年度合計
+            </th>
+          </tr>
           <tr className="text-xs text-slate-500 border-b border-slate-200">
-            <th className={`${CELL} ${COL_ITEM} z-20 text-left font-medium min-w-[9rem]`}>項目</th>
-            {FISCAL_MONTHS.map((m) => (
-              <th key={m} className={`${CELL} text-right font-medium min-w-[6.5rem]`}>
+            {FISCAL_MONTHS.map((m, i) => (
+              <th
+                key={m}
+                className={
+                  `${CELL} pt-0 text-left font-medium min-w-[6.5rem] ` +
+                  (i === PREV_YEAR_COLS ? 'border-l border-slate-200' : '')
+                }
+              >
                 {m}月
               </th>
             ))}
-            <th className={`${CELL} ${COL_TOTAL} z-20 text-right font-medium`}>年度合計</th>
           </tr>
         </thead>
         <tbody>
