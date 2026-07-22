@@ -171,30 +171,25 @@ export function PaymentStatus({
     for (const rec of records) m.set(`${rec.property_id}|${rec.room}|${rec.year}|${rec.month}`, rec)
     return m
   }, [records])
-  const recsByUnit = useMemo(() => {
-    const m = new Map<string, PaymentRecord[]>()
-    for (const rec of records) {
-      const k = `${rec.property_id}|${rec.room}`
-      if (!m.has(k)) m.set(k, [])
-      m.get(k)!.push(rec)
-    }
+  // 滞納月数は未入金一覧と同じ計算（calcArrearsList）を使い、両画面で必ず一致させる。
+  // 手入力の上書きも calcArrearsList の中で効くので、ここでは分岐しない。
+  const arrearsByUnit = useMemo(() => {
+    const m = new Map<string, { months: number; manual: boolean }>()
+    for (const a of arrears) m.set(a.unit.id, { months: a.monthsCount, manual: a.manualMonths })
     return m
-  }, [records])
-
-  const selIdx = year * 12 + (month - 1)
+  }, [arrears])
 
   // 表示行：記録があれば記録、無ければ自動計算
   const displayRows: DisplayRow[] = useMemo(() => {
     return r.rows.map((row) => {
       const u = row.unit
       const rec = recIndex.get(`${u.property_id}|${u.room}|${year}|${month}`)
+      const arr = arrearsByUnit.get(u.id)
+      // 手入力があればそれが正（0を入れた月は一覧から外れるので arrearsByUnit には載らない）
+      const manualArrears = rec?.arrears_months
+      const arrearsMonths = manualArrears ?? arr?.months ?? 0
+      const arrearsIsManual = manualArrears != null
       if (rec) {
-        const arrears = (recsByUnit.get(`${u.property_id}|${u.room}`) ?? []).filter((x) => {
-          const xi = x.year * 12 + (x.month - 1)
-          const b = Number(x.billed) || 0
-          const p = Number(x.paid) || 0
-          return xi <= selIdx && b > 0 && p < b && x.judgement !== '空室'
-        }).length
         // 記録がある月は、その時点の値だけを使う（物件情報には一切フォールバックしない）。
         // → 物件情報の契約者名を変更しても過去の表示は変わらない。
         return {
@@ -209,8 +204,8 @@ export function PaymentStatus({
           judgement: rec.judgement ?? '—',
           guarantor: rec.guarantor ?? '',
           memo: rec.memo ?? '',
-          arrears: rec.arrears_months ?? arrears, // 手入力があればそれを優先
-          arrearsManual: rec.arrears_months != null,
+          arrears: arrearsMonths,
+          arrearsManual: arrearsIsManual,
           fromRecord: true,
         }
       }
@@ -226,12 +221,12 @@ export function PaymentStatus({
         judgement: row.judgement,
         guarantor: u.guarantor ?? '',
         memo: notes[u.id] ?? '',
-        arrears: row.arrearsMonths,
-        arrearsManual: false,
+        arrears: arrearsMonths,
+        arrearsManual: arrearsIsManual,
         fromRecord: false,
       }
     })
-  }, [r.rows, recIndex, recsByUnit, year, month, notes, selIdx])
+  }, [r.rows, recIndex, arrearsByUnit, year, month, notes])
 
   // 集計（表示行ベース）
   const summary = useMemo(() => {
@@ -634,11 +629,17 @@ function ArrearsRow({
           ))}
         </div>
       </td>
-      <td className="px-3 py-2 text-right tabular-nums">
+      <td className="px-3 py-2 text-right tabular-nums whitespace-nowrap">
         {a.monthsCount >= 2 ? (
           <span className="text-rose-700 font-semibold">{a.monthsCount}ヵ月</span>
         ) : (
           `${a.monthsCount}ヵ月`
+        )}
+        {/* 月次画面で手入力された値であることを示す */}
+        {a.manualMonths && (
+          <span className="ml-1 text-[10px] text-slate-400" title="入金状況の月次画面で手入力された値">
+            手入力
+          </span>
         )}
       </td>
       <td className="px-3 py-2 text-right tabular-nums font-semibold text-rose-700 whitespace-nowrap">

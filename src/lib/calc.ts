@@ -402,6 +402,8 @@ export interface ArrearsUnitRow {
   months: ArrearsMonthDetail[] // 未入金・一部入金の月（古い順）
   monthsCount: number
   total: number // 合計滞納額
+  /** 滞納月数が手入力（payment_records.arrears_months）で上書きされているか */
+  manualMonths: boolean
 }
 
 // 判定：入金済・保証会社入金済・空室 は滞納ではない
@@ -474,14 +476,24 @@ export function calcArrearsList(
       if (shortfall > 0) months.push({ year: y, month: mo, shortfall })
     }
 
-    if (months.length > 0) {
+    // 選択月の記録に滞納月数の手入力があれば、それを月数として採用する。
+    // 明細（月ごとの不足額）と合計滞納額は実データのままにする＝上書きするのは件数だけ。
+    const selRec = recMap?.get(selIdx)
+    const manual = selRec?.arrears_months
+    const manualMonths = manual != null
+    const monthsCount = manualMonths ? manual : months.length
+
+    // 手入力があるときはその月数で載せるか決める（0を入れたら「滞納なし」として一覧から外す）。
+    // 手入力が無いときは従来どおり、計算上の滞納月がある部屋だけを載せる。
+    if (manualMonths ? monthsCount > 0 : months.length > 0) {
       out.push({
         unit: u,
         tenant,
         guarantor,
         months,
-        monthsCount: months.length,
+        monthsCount,
         total: months.reduce((s, m) => s + m.shortfall, 0),
+        manualMonths,
       })
     }
   }
