@@ -186,7 +186,8 @@ export function StatementTable({
               <th
                 key={m}
                 className={
-                  `${CELL} pt-0 text-left font-medium min-w-[6.5rem] ` +
+                  // 月は中央寄せ（左寄せは見づらかった）。年は左寄せのまま
+                  `${CELL} pt-0 text-center font-medium min-w-[6.5rem] ` +
                   (i === PREV_YEAR_COLS ? 'border-l border-slate-200' : '')
                 }
               >
