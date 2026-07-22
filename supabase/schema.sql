@@ -13,7 +13,12 @@ create table if not exists properties (
   land_area numeric, building_area numeric, zoning text,
   bcr numeric, far numeric, road text, parking text,
   acquired_date date, acquired_price numeric, sale_price numeric, loan_balance numeric,
-  notes text, created_at timestamptz default now()
+  notes text,
+  -- レントロール全体タブでのグループ名。null なら物件単独で表示。
+  -- 例：戸建ての6現場（豊野町/東中浜/大庭町/五月田町/滝井元町/東大阪松原）は
+  --     別物件として扱いつつ、全体では '戸建て賃貸' の帯にまとまる
+  group_name text,
+  created_at timestamptz default now()
 );
 
 -- 部屋

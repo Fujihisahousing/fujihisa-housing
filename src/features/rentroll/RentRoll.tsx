@@ -124,9 +124,16 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
     properties.forEach((p, i) => m.set(p.id, i))
     return m
   }, [properties])
-  const propName = useMemo(() => {
-    const m = new Map(properties.map((p) => [p.id, p.name]))
-    return (id?: string | null) => (id ? m.get(id) ?? '—' : '—')
+  // 全体タブでは group_name を持つ物件を1つの帯にまとめる（戸建ての6現場→「戸建て賃貸」）。
+  // group_name が無い物件は従来どおり物件単位。
+  const groupKeyOf = useMemo(() => {
+    const m = new Map(properties.map((p) => [p.id, p.group_name || p.id]))
+    return (propertyId: string) => m.get(propertyId) ?? propertyId
+  }, [properties])
+  const groupLabelOf = useMemo(() => {
+    const m = new Map<string, string>()
+    properties.forEach((p) => m.set(p.group_name || p.id, p.group_name || p.name))
+    return (key: string) => m.get(key) ?? '—'
   }, [properties])
 
   // 物件→（階数の高い順・同じ階は号室の小さい順）に並べ替え
@@ -141,17 +148,17 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
 
   const rr = useMemo(() => calcRentRoll(sortedUnits, propertyForCalc), [sortedUnits, propertyForCalc])
 
-  // 全体表示のときだけ物件ごとにグループ化
+  // 全体表示のときだけグループごとにまとめる（既定は物件単位、group_name があればその単位）
   const groups = useMemo(() => {
     if (activeProperty) return null
     const map = new Map<string, typeof rr.rows>()
     for (const row of rr.rows) {
-      const k = row.unit.property_id
+      const k = groupKeyOf(row.unit.property_id)
       if (!map.has(k)) map.set(k, [])
       map.get(k)!.push(row)
     }
     return Array.from(map.entries())
-  }, [activeProperty, rr.rows])
+  }, [activeProperty, rr.rows, groupKeyOf])
 
   if (loading) {
     return (
@@ -205,14 +212,14 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
             </thead>
             <tbody>
               {groups
-                ? groups.map(([pid, rows]) => (
-                    <Fragment key={pid}>
+                ? groups.map(([gkey, rows]) => (
+                    <Fragment key={gkey}>
                       <tr>
                         <td
                           colSpan={14}
                           className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white"
                         >
-                          {propName(pid)}
+                          {groupLabelOf(gkey)}
                           {(() => {
                             const g = groupStats(rows)
                             return (

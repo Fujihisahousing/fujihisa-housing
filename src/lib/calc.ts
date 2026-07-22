@@ -147,7 +147,15 @@ const KODATE_LIKE_HIDDEN = [
   '光熱費（入居者負担）', '看板',
   'BM', 'EV保守費', 'アルソック', '清掃費', 'ゴミ処理代', '通信費', '保険料（賠償責任）', '水道、電気代',
 ]
+// 戸建ての各現場（2026-07に「戸建て賃貸」1物件から6現場へ分割。全体タブでは
+// properties.group_name='戸建て賃貸' で1つの帯にまとまる）
+export const KODATE_PROPERTIES = [
+  '豊野町', '東中浜', '大庭町', '五月田町', '滝井元町', '東大阪松原',
+]
 export const PROPERTY_HIDDEN_ROWS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ...KODATE_PROPERTIES.map(
+    (name) => [name, new Set(KODATE_LIKE_HIDDEN)] as [string, ReadonlySet<string>],
+  ),
   ['プランドール守口', new Set(['ゴミ処理代', '保険料（賠償責任）'])],
   ['プランドール道頓堀', new Set(['ゴミ処理代'])],
   ['プランドール堂島', new Set(['看板', '保険料（賠償責任）'])],
@@ -156,7 +164,6 @@ export const PROPERTY_HIDDEN_ROWS: ReadonlyMap<string, ReadonlySet<string>> = ne
   ['プランドール阿波座', new Set(['光熱費（入居者負担）', '看板'])],
   ['近畿吉田ビル', new Set(['看板', 'アルソック', '清掃費', 'ゴミ処理代', '保険料（賠償責任）'])],
   ['富士マンション', new Set(KODATE_LIKE_HIDDEN)],
-  ['戸建て賃貸', new Set(KODATE_LIKE_HIDDEN)],
 ])
 
 // 収支表のこの行を、この物件の表示で出すか。画面・Excel出力の両方から使う。

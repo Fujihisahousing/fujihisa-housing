@@ -35,6 +35,9 @@ export interface Property {
   sale_price?: number | null
   loan_balance?: number | null
   notes?: string | null
+  /** レントロールの全体タブでまとめる単位。null なら物件単独で表示。
+   *  例：戸建ての6現場は別物件だが group_name='戸建て賃貸' で1つの帯にまとまる */
+  group_name?: string | null
   created_at?: string
 }
 
