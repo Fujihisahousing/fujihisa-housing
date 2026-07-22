@@ -15,8 +15,9 @@ import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { CAT_RENT, type PaymentRecord, type Transaction, type Unit } from '../../types'
 
-// 収支表の年度プルダウンに常に出す最も古い会計年度（データの有無に関わらず選べるようにする）
-const FIRST_YEAR = 2022
+// 収支表の年度プルダウンに常に出す最も古い会計年度（データの有無に関わらず選べるようにする）。
+// 年度は締める年で呼ぶので、2023年度＝2022-09〜2023-08 が最古。
+const FIRST_YEAR = 2023
 
 export function IncomeStatement({ propertyName }: { propertyName: string }) {
   const activeProperty = useAppStore((s) => s.activeProperty)

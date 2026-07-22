@@ -52,7 +52,7 @@ export function exportIncomeStatementExcel(propertyName: string, r: IncomeStatem
   // 行の出し分けは画面（IncomeStatement）と同じ判定を使う
   const keep = (label: string) => isStatementRowVisible(label, propertyName)
   const rows: (string | number | null)[][] = [
-    [`収支表（${propertyName}・${r.year}年度 ${r.year}年9月〜${r.year + 1}年8月）`],
+    [`収支表（${propertyName}・${r.year}年度 ${r.year - 1}年9月〜${r.year}年8月）`],
     [],
     header,
     ['【収入】'],
