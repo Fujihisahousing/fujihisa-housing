@@ -1,11 +1,10 @@
 // レントロール（画面）。一覧上で編集できるのは「状況」「備考」のみ。他は表示専用。
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Loader2, FileSpreadsheet } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { unitsRepo } from '../../lib/repositories'
 import { calcRentRoll } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
-import { exportRentRollExcel } from '../../reports/exportExcel'
 import { yen, percent, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { UNIT_STATUSES, type Property, type Unit } from '../../types'
@@ -80,7 +79,7 @@ const sumTotals = (rows: { unit: Unit }[]): Totals =>
     { rent: 0, kyoeki: 0, parking: 0 },
   )
 
-export function RentRoll({ properties, propertyName }: { properties: Property[]; propertyName: string }) {
+export function RentRoll({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const [units, setUnits] = useState<Unit[]>([])
   const [loading, setLoading] = useState(true)
@@ -170,16 +169,7 @@ export function RentRoll({ properties, propertyName }: { properties: Property[];
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-slate-500">状況・備考はその場で編集できます（自動保存）</span>
-        <button
-          onClick={() => void exportRentRollExcel(propertyName, rr)}
-          disabled={units.length === 0}
-          className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-        >
-          <FileSpreadsheet className="w-4 h-4" /> Excel出力
-        </button>
-      </div>
+      <div className="text-xs text-slate-500">状況・備考はその場で編集できます（自動保存）</div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <DualCard label="満室想定" monthly={rr.fullMonthly} annual={rr.fullAnnual} />
         <DualCard label="現況" monthly={rr.currentMonthly} annual={rr.currentMonthly * 12} />

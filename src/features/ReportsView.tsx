@@ -43,7 +43,7 @@ export function ReportsView({ properties }: { properties: Property[] }) {
 
       <ExportPatternBar properties={properties} />
 
-      {activeView === 'rentroll' && <RentRoll properties={properties} propertyName={propertyName} />}
+      {activeView === 'rentroll' && <RentRoll properties={properties} />}
       {activeView === 'summary' && <IncomeStatement propertyName={propertyName} />}
       {activeView === 'payments' && <PaymentStatus properties={properties} propertyName={propertyName} />}
       {activeView === 'prospectus' && <Prospectus properties={properties} />}

@@ -8,6 +8,8 @@ import { unitCompare } from '../lib/sortUnits'
 import type { PaymentRecord, Property, RentHistory, Transaction, Unit } from '../types'
 import { CAT_RENT } from '../types'
 
+type XlsxModule = typeof import('xlsx-js-style')
+
 export type ExportPattern = 'genkyo' | 'shushi' | 'hanbai'
 
 export const EXPORT_PATTERNS: { key: ExportPattern; label: string; hint: string }[] = [
@@ -17,7 +19,40 @@ export const EXPORT_PATTERNS: { key: ExportPattern; label: string; hint: string 
 ]
 
 type Cell = string | number | null
-type Sheet = { name: string; rows: Cell[][] }
+/**
+ * 書き出す1シート。rows のほかに見た目の指定を持たせ、exportPattern でまとめて装飾する。
+ * ※スタイルの書き出しには xlsx-js-style を使う（本家 xlsx のコミュニティ版は
+ *   色・太字・罫線を書き出せない）。ウィンドウ枠の固定は xlsx-js-style でも非対応。
+ */
+type Sheet = {
+  name: string
+  rows: Cell[][]
+  /** 列幅（文字数目安）。省略時は自動 */
+  cols?: number[]
+  /** 見出し行のインデックス（0始まり）。濃い背景＋白文字にする */
+  headerRow?: number
+  /** ¥表示にする列 */
+  moneyCols?: number[]
+  /** 状況の列。値ごとに色を変える */
+  statusCol?: number
+}
+
+// 画面の配色に合わせた Excel 用のパレット
+const C = {
+  ink: '0F172A',
+  headerBg: '334155',
+  headerText: 'FFFFFF',
+  border: 'E2E8F0',
+  band: 'F8FAFC',
+  sub: '64748B',
+}
+const STATUS_STYLE: Record<string, { bg: string; text: string }> = {
+  入居: { bg: 'DCFCE7', text: '166534' },
+  空室: { bg: 'FEE2E2', text: '991B1B' },
+  入予: { bg: 'DBEAFE', text: '1E40AF' },
+  退予: { bg: 'FEF3C7', text: '92400E' },
+  停止: { bg: 'F1F5F9', text: '64748B' },
+}
 
 export interface PatternInput {
   propertyName: string
@@ -92,7 +127,14 @@ function rentRollSheet(input: PatternInput, mask: boolean): Sheet {
       u.notes ?? '',
     ]
   })
-  return { name: 'レントロール', rows: [[`レントロール（${input.propertyName}）`], [], header, ...rows] }
+  return {
+    name: 'レントロール',
+    rows: [[`レントロール（${input.propertyName}）`], [], header, ...rows],
+    cols: [18, 13, 11, 8, 10, 10, 8, mask ? 10 : 20, 11, 10, 12, 13, 8, 24],
+    headerRow: 2,
+    moneyCols: [8, 9],
+    statusCol: 12,
+  }
 }
 
 // ---------------------- 収支表 ----------------------
@@ -129,7 +171,6 @@ function statementSheet(input: PatternInput, excludeLoan: boolean): Sheet {
     name: '収支表',
     rows: [
       [`収支表（${input.propertyName}・${r.year}年度 ${r.year - 1}年9月〜${r.year}年8月）`],
-      ...(excludeLoan ? [['※元金・利息は含みません']] : []),
       [],
       yearRow,
       monthRow,
@@ -210,11 +251,75 @@ export function buildPatternSheets(pattern: ExportPattern, input: PatternInput):
   return [overviewSheet(input), rentRollSheet(input, true), statementSheet(input, true), paymentSheet(input, true)]
 }
 
+/** aoa から作った worksheet に、Sheet の指定どおりの見た目を付ける */
+function decorate(XLSX: XlsxModule, sheet: Sheet) {
+  const ws = XLSX.utils.aoa_to_sheet(sheet.rows)
+  const colCount = Math.max(...sheet.rows.map((r) => r.length))
+  const thin = { style: 'thin' as const, color: { rgb: C.border } }
+  const box = { top: thin, bottom: thin, left: thin, right: thin }
+
+  if (sheet.cols) ws['!cols'] = sheet.cols.map((wch) => ({ wch }))
+  // タイトル行は全列にまたがらせる
+  if (sheet.headerRow != null && sheet.headerRow > 0) {
+    ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: colCount - 1 } }]
+  }
+  ws['!rows'] = sheet.rows.map((_, r) => ({ hpt: r === sheet.headerRow ? 22 : r === 0 ? 24 : 18 }))
+
+  for (let r = 0; r < sheet.rows.length; r++) {
+    for (let c = 0; c < colCount; c++) {
+      const ref = XLSX.utils.encode_cell({ r, c })
+      const cell = ws[ref]
+      if (!cell) continue
+      if (r === 0) {
+        cell.s = { font: { bold: true, sz: 14, color: { rgb: C.ink } }, alignment: { vertical: 'center' } }
+        continue
+      }
+      if (r === sheet.headerRow) {
+        cell.s = {
+          font: { bold: true, sz: 10, color: { rgb: C.headerText } },
+          fill: { fgColor: { rgb: C.headerBg } },
+          alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+          border: box,
+        }
+        continue
+      }
+      if (sheet.headerRow == null || r <= sheet.headerRow) continue
+
+      const isMoney = sheet.moneyCols?.includes(c)
+      const banded = (r - sheet.headerRow) % 2 === 0
+      const style: Record<string, unknown> = {
+        font: { sz: 10, color: { rgb: C.ink } },
+        border: box,
+        alignment: {
+          horizontal: isMoney ? 'right' : 'left',
+          vertical: 'center',
+        },
+      }
+      if (banded) style.fill = { fgColor: { rgb: C.band } }
+      // 状況は値ごとに色を変えて一目で分かるようにする
+      if (c === sheet.statusCol) {
+        const st = STATUS_STYLE[String(cell.v ?? '')]
+        if (st) {
+          style.fill = { fgColor: { rgb: st.bg } }
+          style.font = { sz: 10, bold: true, color: { rgb: st.text } }
+          style.alignment = { horizontal: 'center', vertical: 'center' }
+        }
+      }
+      cell.s = style
+      if (isMoney && typeof cell.v === 'number') cell.z = '¥#,##0'
+    }
+  }
+  return ws
+}
+
 export async function exportPattern(pattern: ExportPattern, input: PatternInput): Promise<void> {
-  const XLSX = await import('xlsx')
+  // xlsx-js-style は CJS のみなので、動的 import では中身が default に入る場合がある。
+  // 環境によってどちらにもなり得るので両対応にしておくこと。
+  const mod = await import('xlsx-js-style')
+  const XLSX = ((mod as unknown as { default?: XlsxModule }).default ?? mod) as XlsxModule
   const wb = XLSX.utils.book_new()
   for (const sheet of buildPatternSheets(pattern, input)) {
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheet.rows), sheet.name)
+    XLSX.utils.book_append_sheet(wb, decorate(XLSX, sheet), sheet.name)
   }
   const label = EXPORT_PATTERNS.find((p) => p.key === pattern)?.label ?? pattern
   const d = new Date()

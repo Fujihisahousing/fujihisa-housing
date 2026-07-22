@@ -1,7 +1,9 @@
-// SheetJS による Excel 書き出し（レントロール／収支表／入金状況）。
-// xlsx は重いので動的 import で遅延ロードし、初期表示を軽くする。
+// SheetJS による単票 Excel 書き出し（収支表／入金状況）。用途別のまとめ出力は exportPatterns.ts。
+// ライブラリは重いので動的 import で遅延ロードし、初期表示を軽くする。
 import { isStatementRowVisible, FISCAL_MONTHS, FISCAL_PREV_YEAR_COLS } from '../lib/calc'
-import type { RentRollResult, IncomeStatementResult, PaymentStatusResult } from '../lib/calc'
+
+type XlsxModule = typeof import('xlsx-js-style')
+import type { IncomeStatementResult, PaymentStatusResult } from '../lib/calc'
 
 function stamp(): string {
   const d = new Date()
@@ -10,7 +12,9 @@ function stamp(): string {
 }
 
 async function save(rows: (string | number | null)[][], sheetName: string, fileName: string) {
-  const XLSX = await import('xlsx')
+  // exportPatterns と同じ xlsx-js-style を使う（2つ入れるとチャンクが二重になるため）
+  const mod = await import('xlsx-js-style')
+  const XLSX = ((mod as unknown as { default?: XlsxModule }).default ?? mod) as XlsxModule
   const ws = XLSX.utils.aoa_to_sheet(rows)
   const wb = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(wb, ws, sheetName)
@@ -18,32 +22,6 @@ async function save(rows: (string | number | null)[][], sheetName: string, fileN
 }
 
 const yenNum = (v: number | null | undefined) => Math.round(Number(v ?? 0))
-
-// ---------------------- レントロール ----------------------
-export function exportRentRollExcel(propertyName: string, rr: RentRollResult): Promise<void> {
-  const rows: (string | number | null)[][] = [
-    [`レントロール（${propertyName}）`],
-    [],
-    ['満室想定(月)', yenNum(rr.fullMonthly)],
-    ['現況(月)', yenNum(rr.currentMonthly)],
-    ['稼働率', `${(rr.occupancyRate * 100).toFixed(1)}%（${rr.occupiedUnits}/${rr.totalUnits}）`],
-    ['表面利回り', rr.grossYield != null ? `${(rr.grossYield * 100).toFixed(2)}%` : '—'],
-    [],
-    ['号室', '間取', '面積(㎡)', '賃料', '共益費', '合計', '敷金', '契約満了', '状況'],
-    ...rr.rows.map(({ unit: u, total }) => [
-      u.room ?? '',
-      u.layout ?? '',
-      u.area ?? null,
-      yenNum(u.rent),
-      yenNum(u.kyoeki),
-      yenNum(total),
-      yenNum(u.deposit),
-      u.contract_end ?? '',
-      u.status ?? '',
-    ]),
-  ]
-  return save(rows, 'レントロール', `レントロール_${propertyName}_${stamp()}.xlsx`)
-}
 
 // ---------------------- 収支表 ----------------------
 /**
