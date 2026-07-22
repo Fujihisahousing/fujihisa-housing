@@ -258,6 +258,7 @@ function PropertyModal({
       type: value.type ?? '',
       structure: value.structure ?? '',
       built: value.built ?? '',
+      inspection_date: value.inspection_date ?? '',
       acquired_date: value.acquired_date ?? '',
       acquired_price: value.acquired_price != null ? String(value.acquired_price) : '',
       loan_balance: value.loan_balance != null ? String(value.loan_balance) : '',
@@ -278,6 +279,7 @@ function PropertyModal({
         type: f.type || null,
         structure: f.structure || null,
         built: f.built || null,
+        inspection_date: f.inspection_date || null,
         acquired_date: f.acquired_date || null,
         acquired_price: numOrNull(f.acquired_price),
         loan_balance: numOrNull(f.loan_balance),
@@ -318,6 +320,15 @@ function PropertyModal({
         <div className="grid grid-cols-2 gap-3">
           <TextField label="築年" value={f.built ?? ''} onChange={set('built')} />
           <TextField label="取得日" value={f.acquired_date ?? ''} onChange={set('acquired_date')} type="date" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {/* 現況報告用Excelに出力する項目。築年とは別 */}
+          <TextField
+            label="完了検査済日"
+            value={f.inspection_date ?? ''}
+            onChange={set('inspection_date')}
+            type="date"
+          />
         </div>
         <TextField label="メモ" value={f.notes ?? ''} onChange={set('notes')} />
         {error && (

@@ -30,6 +30,8 @@ export interface Property {
   far?: number | null
   road?: string | null
   parking?: string | null
+  /** 完了検査済日。築年月(built)とは別。現況報告用Excelに出力する */
+  inspection_date?: string | null
   acquired_date?: string | null
   acquired_price?: number | null
   sale_price?: number | null

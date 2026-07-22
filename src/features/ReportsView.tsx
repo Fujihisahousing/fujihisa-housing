@@ -3,6 +3,7 @@ import { RentRoll } from './rentroll/RentRoll'
 import { IncomeStatement } from './summary/IncomeStatement'
 import { PaymentStatus } from './payments/PaymentStatus'
 import { Prospectus } from './prospectus/Prospectus'
+import { ExportPatternBar } from './ExportPatternBar'
 import { useAppStore, type ViewKey } from '../state/useAppStore'
 import type { Property } from '../types'
 
@@ -39,6 +40,8 @@ export function ReportsView({ properties }: { properties: Property[] }) {
           </button>
         ))}
       </div>
+
+      <ExportPatternBar properties={properties} />
 
       {activeView === 'rentroll' && <RentRoll properties={properties} propertyName={propertyName} />}
       {activeView === 'summary' && <IncomeStatement propertyName={propertyName} />}
