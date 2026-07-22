@@ -192,11 +192,16 @@ export function PaymentStatus({
       if (rec) {
         // 記録がある月は、その時点の値だけを使う（物件情報には一切フォールバックしない）。
         // → 物件情報の契約者名を変更しても過去の表示は変わらない。
+        // ただし読み方(kana)だけは例外：記録に読み方が入っておらず、かつ契約者名が
+        // 物件情報の現在値と一致する場合に限り、物件情報の読み方を補完する。
+        // 契約者名が一致しない（＝過去の入居者の記録）場合は補完しない。
+        // これは「読み方の入力が漏れているだけ」のケースを、部屋詳細から救うためのもの。
+        const kana = rec.kana || (rec.tenant && rec.tenant === u.tenant ? u.tenant_kana : null) || ''
         return {
           unit: u,
           tenant: rec.tenant ?? '',
           tenantType: rec.tenant_type ?? '',
-          kana: rec.kana ?? '',
+          kana,
           billed: rec.billed ?? null,
           calcBilled: row.billed,
           paid: rec.paid ?? null,
