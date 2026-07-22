@@ -135,7 +135,7 @@ export const PROPERTY_HIDDEN_ROWS: ReadonlyMap<string, ReadonlySet<string>> = ne
   ['プランドール道頓堀', new Set(['ゴミ処理代'])],
   ['プランドール堂島', new Set(['看板', '保険料（賠償責任）'])],
   ['シャーメゾン新大阪', new Set(['看板', '保険料（賠償責任）'])],
-  ['ルネスプランドール守口', new Set(['看板'])],
+  ['ルネスプランドール守口', new Set(['看板', '保険料（賠償責任）'])],
   ['プランドール阿波座', new Set(['光熱費（入居者負担）', '看板'])],
   ['近畿吉田ビル', new Set(['看板', 'アルソック', '清掃費', 'ゴミ処理代', '保険料（賠償責任）'])],
   ['富士マンション', new Set(KODATE_LIKE_HIDDEN)],
