@@ -9,6 +9,8 @@ import { useAppStore } from '../../state/useAppStore'
 import { CAT_RENT, type PaymentRecord, type Transaction, type Unit } from '../../types'
 
 const MONTHS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+// 収支表の年度プルダウンに常に出す最も古い年（データの有無に関わらず選べるようにする）
+const FIRST_YEAR = 2022
 
 export function IncomeStatement({ propertyName }: { propertyName: string }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
@@ -75,8 +77,11 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
   )
   const incomeRows = useMemo(() => r.income.filter(keepRow), [r.income, keepRow])
   const expenseRows = useMemo(() => r.expense.filter(keepRow), [r.expense, keepRow])
+  // 年度の選択肢は運用開始年〜今年を常に出す。データが1件も無い物件（富士マンション等）で
+  // 今年しか選べず過去年度を開けなくなるのを防ぐ。データ側に範囲外の年があれば併せて出す。
   const years = useMemo(() => {
-    const set = new Set<number>([new Date().getFullYear()])
+    const set = new Set<number>()
+    for (let y = FIRST_YEAR; y <= new Date().getFullYear(); y++) set.add(y)
     allTxs.forEach((t) => set.add(new Date(t.date).getFullYear()))
     return Array.from(set).sort((a, b) => b - a)
   }, [allTxs])
