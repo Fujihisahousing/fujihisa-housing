@@ -7,7 +7,7 @@ import {
   fiscalYearOf,
   isStatementRowVisible,
   FISCAL_MONTHS,
-  FISCAL_START_MONTH,
+  FISCAL_PREV_YEAR_COLS,
   type IncomeStatementResult,
   type StatementRow,
 } from '../../lib/calc'
@@ -134,8 +134,8 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
 
 // 列数 = 項目 + 12ヶ月 + 年度合計
 const COL_COUNT = FISCAL_MONTHS.length + 2
-// 年度の前半（9〜12月）は前の暦年、後半（1〜8月）は年度と同じ暦年。ヘッダーの年をまとめる幅に使う。
-const PREV_YEAR_COLS = FISCAL_MONTHS.filter((m) => m >= FISCAL_START_MONTH).length
+// 年度の前半（9〜12月）は前の暦年、後半（1〜8月）は年度と同じ暦年
+const PREV_YEAR_COLS = FISCAL_PREV_YEAR_COLS
 
 // 左端（項目）と右端（年度合計）は横スクロールしても固定する。
 // 金額は whitespace-nowrap で折り返さない（折り返すと行が縦に伸びて非常に見づらい）。

@@ -190,6 +190,8 @@ export function isStatementRowVisible(label: string, propertyName: string): bool
 export const FISCAL_START_MONTH = 9
 /** 収支表の列の並び（0番目=9月 … 11番目=8月） */
 export const FISCAL_MONTHS = [9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8] as const
+/** 年度の前半（9〜12月）＝前の暦年 の列数。ヘッダーで年をまとめる幅に使う */
+export const FISCAL_PREV_YEAR_COLS = FISCAL_MONTHS.filter((m) => m >= FISCAL_START_MONTH).length
 /** その日付が属する会計年度。9〜12月は翌年の年度に入る（2025-09 → 2026年度） */
 export function fiscalYearOf(d: Date): number {
   return d.getMonth() + 1 >= FISCAL_START_MONTH ? d.getFullYear() + 1 : d.getFullYear()

@@ -1,6 +1,6 @@
 // SheetJS による Excel 書き出し（レントロール／収支表／入金状況）。
 // xlsx は重いので動的 import で遅延ロードし、初期表示を軽くする。
-import { isStatementRowVisible, FISCAL_MONTHS } from '../lib/calc'
+import { isStatementRowVisible, FISCAL_MONTHS, FISCAL_PREV_YEAR_COLS } from '../lib/calc'
 import type { RentRollResult, IncomeStatementResult, PaymentStatusResult } from '../lib/calc'
 
 function stamp(): string {
@@ -46,15 +46,31 @@ export function exportRentRollExcel(propertyName: string, rr: RentRollResult): P
 }
 
 // ---------------------- 収支表 ----------------------
-export function exportIncomeStatementExcel(propertyName: string, r: IncomeStatementResult): Promise<void> {
+/**
+ * 収支表シートの中身を組み立てる。画面（StatementTable）と同じ見出し構成にする：
+ * 1段目＝暦年（9〜12月の上に前年、1〜8月の上に年度と同じ年）、2段目＝月。
+ * 単体で検証できるよう、ファイル書き出しから分離してある。
+ */
+export function buildIncomeStatementRows(
+  propertyName: string,
+  r: IncomeStatementResult,
+): (string | number | null)[][] {
   // 列は会計年度の並び（9月〜8月）。StatementRow.months と同じ順序
-  const header = ['項目', ...FISCAL_MONTHS.map((m) => `${m}月`), '年度合計']
+  const yearRow = [
+    '',
+    ...FISCAL_MONTHS.map((_, i) =>
+      i === 0 ? `${r.year - 1}年` : i === FISCAL_PREV_YEAR_COLS ? `${r.year}年` : '',
+    ),
+    '',
+  ]
+  const monthRow = ['項目', ...FISCAL_MONTHS.map((m) => `${m}月`), '年度合計']
   // 行の出し分けは画面（IncomeStatement）と同じ判定を使う
   const keep = (label: string) => isStatementRowVisible(label, propertyName)
-  const rows: (string | number | null)[][] = [
+  return [
     [`収支表（${propertyName}・${r.year}年度 ${r.year - 1}年9月〜${r.year}年8月）`],
     [],
-    header,
+    yearRow,
+    monthRow,
     ['【収入】'],
     ...r.income.filter((row) => keep(row.label)).map((row) => [row.label, ...row.months.map(yenNum), yenNum(row.total)]),
     ['収入計', ...r.incomeTotalByMonth.map(yenNum), yenNum(r.incomeTotal)],
@@ -63,7 +79,10 @@ export function exportIncomeStatementExcel(propertyName: string, r: IncomeStatem
     ['支出計', ...r.expenseTotalByMonth.map(yenNum), yenNum(r.expenseTotal)],
     ['差引（収支）', ...r.netByMonth.map(yenNum), yenNum(r.net)],
   ]
-  return save(rows, '収支表', `収支表_${propertyName}_${r.year}_${stamp()}.xlsx`)
+}
+
+export function exportIncomeStatementExcel(propertyName: string, r: IncomeStatementResult): Promise<void> {
+  return save(buildIncomeStatementRows(propertyName, r), '収支表', `収支表_${propertyName}_${r.year}_${stamp()}.xlsx`)
 }
 
 // ---------------------- 入金状況 ----------------------
