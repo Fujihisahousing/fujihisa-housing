@@ -1,0 +1,229 @@
+/* 現況報告書（入居状況一覧）のA3横1枚レイアウト。
+   画面でも印刷と同じ見た目になるよう、mm 指定で用紙を再現する。 */
+
+.sr-page {
+  /* A3横 420mm × 297mm から余白8mmを引いた実寸 */
+  width: 404mm;
+  min-height: 281mm;
+  margin: 0 auto;
+  padding: 0;
+  background: #fff;
+  color: #0b1220;
+  font-family: 'Inter', 'Helvetica Neue', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------- ヘッダー ---------------- */
+.sr-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 10mm;
+  padding-bottom: 2.5mm;
+  margin-bottom: 3.5mm;
+  border-bottom: 1.2px solid #0b1220;
+}
+.sr-title h1 {
+  margin: 0;
+  font-size: 15pt;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+}
+.sr-kicker {
+  display: block;
+  font-size: 6pt;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: #6366f1;
+  margin-bottom: 0.6mm;
+}
+.sr-date {
+  margin-left: auto;
+  font-size: 7pt;
+  color: #64748b;
+  letter-spacing: 0.04em;
+}
+
+/* KPI：SaaSのダッシュボード風に、ラベルは小さく大文字・数値は太く */
+.sr-kpis {
+  display: flex;
+  gap: 7mm;
+}
+.sr-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3mm;
+  padding-left: 2.2mm;
+  border-left: 1.5px solid #e2e8f0;
+}
+.sr-kpi.is-accent {
+  border-left-color: #6366f1;
+}
+.sr-kpi-label {
+  font-size: 5.6pt;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: #94a3b8;
+}
+.sr-kpi-value {
+  font-size: 11pt;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.sr-kpi.is-accent .sr-kpi-value {
+  color: #4f46e5;
+}
+.sr-kpi-value i {
+  font-style: normal;
+  font-size: 6.5pt;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-left: 0.5mm;
+}
+
+/* ---------------- 段組み ---------------- */
+.sr-cols {
+  column-count: 4;
+  column-gap: 6mm;
+  column-fill: auto;
+  height: 268mm; /* ヘッダー分を引いた残り。列を端から詰める */
+}
+
+.sr-block {
+  break-inside: auto; /* 大きい物件（堂島57室）は列をまたいでよい */
+  margin-bottom: 3.4mm;
+}
+.sr-block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 2mm;
+  padding: 0 0 1mm 2mm;
+  border-left: 2px solid #6366f1;
+  break-after: avoid; /* 見出しだけ列末に残さない */
+}
+.sr-block-head h2 {
+  margin: 0;
+  font-size: 9pt;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.sr-rate {
+  margin-left: auto;
+  font-size: 6.8pt;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.sr-rate i {
+  font-style: normal;
+  font-weight: 700;
+  color: #4f46e5;
+  margin-left: 1mm;
+}
+
+/* ---------------- 表 ---------------- */
+.sr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 7pt;
+  line-height: 1.28;
+}
+.sr-table thead th {
+  padding: 0.7mm 1mm;
+  font-size: 5.7pt;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: #94a3b8;
+  text-align: left;
+  border-bottom: 1px solid #cbd5e1;
+  white-space: nowrap;
+}
+.sr-table tbody td {
+  padding: 0.6mm 1mm;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22mm;
+}
+.sr-table .r {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.sr-table .c {
+  text-align: center;
+}
+.sr-table td.rm {
+  font-weight: 700;
+  color: #0b1220;
+}
+.sr-table tbody tr:nth-child(even) td {
+  background: #fafbfc;
+}
+.sr-table tr {
+  break-inside: avoid;
+}
+
+.sr-total td {
+  border-top: 1px solid #cbd5e1;
+  border-bottom: none;
+  font-weight: 700;
+  color: #0b1220;
+  background: #fff !important;
+  padding-top: 0.9mm;
+}
+
+/* 状況のピル。印刷でも潰れないよう彩度を保つ */
+.sr-pill {
+  display: inline-block;
+  padding: 0.15mm 1.2mm;
+  border-radius: 999px;
+  font-size: 5.7pt;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+}
+.sr-pill.is-occupied {
+  background: #e7f6ee;
+  color: #0f7a4a;
+}
+.sr-pill.is-vacant {
+  background: #fdeaea;
+  color: #c02626;
+}
+.sr-pill.is-incoming {
+  background: #e8f0fe;
+  color: #1d4ed8;
+}
+.sr-pill.is-leaving {
+  background: #fdf1dc;
+  color: #b8650e;
+}
+.sr-pill.is-stopped {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* 画面プレビューでは用紙を紙らしく見せる（印刷時は解除） */
+@media screen {
+  .sr-page {
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
+    padding: 8mm;
+    width: 420mm;
+  }
+}
+
+@media print {
+  .sr-page {
+    box-shadow: none;
+    width: auto;
+    min-height: 0;
+    padding: 0;
+  }
+  .sr-cols {
+    height: auto;
+    column-fill: auto;
+  }
+}
