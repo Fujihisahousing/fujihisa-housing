@@ -370,6 +370,7 @@ function UnitModal({
       tenant_kana: value.tenant_kana ?? '',
       rent: value.rent != null ? String(value.rent) : '',
       kyoeki: value.kyoeki != null ? String(value.kyoeki) : '',
+      variation: value.variation ?? '',
       rent_effective_date: today(),
       deposit: value.deposit != null ? String(value.deposit) : '',
       hoshokin: value.hoshokin != null ? String(value.hoshokin) : '',
@@ -422,6 +423,7 @@ function UnitModal({
         tenant_kana: f.tenant_kana || null,
         rent: newRent,
         kyoeki: newKyoeki,
+        variation: f.variation || null,
         deposit: numOrNull(f.deposit) ?? 0,
         hoshokin: numOrNull(f.hoshokin),
         key_money: numOrNull(f.key_money) ?? 0,
@@ -563,6 +565,7 @@ function UnitModal({
           <TextField label="賃料（円）" value={f.rent ?? ''} onChange={set('rent')} type="number" />
           <TextField label="共益費（円）" value={f.kyoeki ?? ''} onChange={set('kyoeki')} type="number" />
         </div>
+        <TextField label="変動値（家賃変動・自由入力）" value={f.variation ?? ''} onChange={set('variation')} />
         <div>
           <TextField
             label="反映開始日（賃料・共益費・駐輪駐車の変更時のみ使用。過去日を入れれば遡って修正、将来分は今日の日付でOK）"

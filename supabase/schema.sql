@@ -43,6 +43,7 @@ alter table units add column if not exists hoshokin numeric;    -- 保証金
 alter table units add column if not exists kaiyakubiki numeric; -- 解約引
 alter table units add column if not exists tenant_kana text;    -- 契約者名の読み（カナ）
 alter table units add column if not exists sort_order numeric;   -- 表示順（小さいほど上）
+alter table units add column if not exists variation text;      -- 変動値（家賃変動・テキスト自由入力）
 
 -- 賃料・共益費の履歴（反映開始日つき）。過去からの売上比較のため、部屋編集で賃料/共益費を
 -- 変更するたびに1行追加する。ある年月時点の実効値＝effective_date が その年月以前で最大の行。

@@ -191,6 +191,7 @@ export function RentRoll({ properties }: { properties: Property[] }) {
                 <Th narrow>属性</Th>
                 <Th className="text-right">賃料</Th>
                 <Th className="text-right">共益費</Th>
+                <Th className="text-right">変動値</Th>
                 <Th className="text-right">敷金（保証金）</Th>
                 <Th className="text-right">礼金（解約引）</Th>
                 <Th className="text-right">返還金</Th>
@@ -206,7 +207,7 @@ export function RentRoll({ properties }: { properties: Property[] }) {
                     <Fragment key={gkey}>
                       <tr>
                         <td
-                          colSpan={14}
+                          colSpan={15}
                           className="bg-slate-700 px-3 py-2 text-sm font-semibold text-white"
                         >
                           {groupLabelOf(gkey)}
@@ -274,6 +275,7 @@ function UnitRow({
       <Td narrow>{u.tenant_type || '—'}</Td>
       <Td className="text-right tabular-nums">{money(u.rent)}</Td>
       <Td className="text-right tabular-nums">{money(u.kyoeki)}</Td>
+      <Td className="text-right tabular-nums">{u.variation?.trim() ? u.variation : '—'}</Td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.deposit, u.hoshokin)}</Td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.key_money, u.kaiyakubiki)}</Td>
       <Td className="text-right tabular-nums">{refundDisplay(u)}</Td>
@@ -313,12 +315,13 @@ function TotalBlock({ t }: { t: Totals }) {
         </td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.rent)}</td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.kyoeki)}</td>
+        <td />
         <td colSpan={3} />
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(t.parking)}</td>
         <td colSpan={3} />
       </tr>
       <tr className="bg-slate-50 font-semibold">
-        <td colSpan={10} className="px-3 py-1.5 text-slate-700">
+        <td colSpan={11} className="px-3 py-1.5 text-slate-700">
           合計
         </td>
         <td className="px-3 py-1.5 text-right tabular-nums">{yen(total)}</td>

@@ -54,6 +54,7 @@ export interface Unit {
   tenant_type?: string | null // 入居者属性（個人/法人）
   rent?: number | null
   kyoeki?: number | null
+  variation?: string | null // 変動値（家賃変動。テキスト自由入力）
   deposit?: number | null
   hoshokin?: number | null // 保証金
   key_money?: number | null
