@@ -1,4 +1,4 @@
-// レントロール（画面）。一覧上で編集できるのは「状況」「備考」のみ。他は表示専用。
+// レントロール（画面）。一覧上で編集できるのは「変動値」「状況」「備考」のみ。他は表示専用。
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 import { unitsRepo } from '../../lib/repositories'
@@ -275,7 +275,9 @@ function UnitRow({
       <Td narrow>{u.tenant_type || '—'}</Td>
       <Td className="text-right tabular-nums">{money(u.rent)}</Td>
       <Td className="text-right tabular-nums">{money(u.kyoeki)}</Td>
-      <Td className="text-right tabular-nums">{u.variation?.trim() ? u.variation : '—'}</Td>
+      <td className="px-1.5 py-1 text-right">
+        <TextCell value={u.variation ?? ''} onCommit={(v) => onPatch(u.id, { variation: v || null })} />
+      </td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.deposit, u.hoshokin)}</Td>
       <Td className="text-right tabular-nums whitespace-nowrap">{pairCell(u.key_money, u.kaiyakubiki)}</Td>
       <Td className="text-right tabular-nums">{refundDisplay(u)}</Td>
@@ -328,6 +330,23 @@ function TotalBlock({ t }: { t: Totals }) {
         <td colSpan={3} />
       </tr>
     </>
+  )
+}
+
+// 変動値など、その場編集する短いテキスト入力（右寄せ・自動保存）
+function TextCell({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const [s, setS] = useState(value)
+  useEffect(() => setS(value), [value])
+  return (
+    <input
+      value={s}
+      onChange={(e) => setS(e.target.value)}
+      onBlur={() => {
+        if (s !== value) onCommit(s)
+      }}
+      placeholder="—"
+      className="w-24 rounded border border-transparent bg-transparent px-2 py-1 text-right tabular-nums hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+    />
   )
 }
 
