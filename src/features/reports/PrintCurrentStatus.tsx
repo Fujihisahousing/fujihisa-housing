@@ -176,6 +176,7 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                     <th>入居者</th>
                     <th className="r">賃料</th>
                     <th className="r">共益費</th>
+                    <th className="r">変動値</th>
                     <th className="r">駐輪駐車</th>
                     <th className="c">状況</th>
                     <th>備考</th>
@@ -194,6 +195,7 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                         <td>{text(u.tenant_type)}</td>
                         <td className={'r' + (pending ? ' is-pending' : '')}>{stopped ? '' : num(u.rent)}</td>
                         <td className={'r' + (pending ? ' is-pending' : '')}>{stopped ? '' : num(u.kyoeki)}</td>
+                        <td className="r">{text(u.variation)}</td>
                         <td className="r">{parkingText(u.parking)}</td>
                         <td className="c">
                           <span className={'sr-pill ' + (STATUS_TONE[u.status ?? ''] ?? '')}>
@@ -208,13 +210,14 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                     <td colSpan={3}>計</td>
                     <td className="r">{num(sum.rent)}</td>
                     <td className="r">{num(sum.kyoeki)}</td>
+                    <td />
                     <td className="r">{num(sum.parking)}</td>
                     <td colSpan={2} />
                   </tr>
                   <tr className="sr-grand">
                     <td colSpan={3}>合計（賃料＋共益費）</td>
                     <td className="r" colSpan={2}>{num(sum.rent + sum.kyoeki)}</td>
-                    <td colSpan={3} />
+                    <td colSpan={4} />
                   </tr>
                 </tbody>
               </table>
