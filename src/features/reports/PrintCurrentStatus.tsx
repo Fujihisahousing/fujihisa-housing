@@ -206,7 +206,7 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                         <td>{text(u.tenant_type)}</td>
                         <td className={'r' + (pending ? ' is-pending' : '')}>{stopped ? '' : num(u.rent)}</td>
                         <td className={'r' + (pending ? ' is-pending' : '')}>{stopped ? '' : num(u.kyoeki)}</td>
-                        <td className="r">{text(u.variation)}</td>
+                        <td className="vr">{text(u.variation)}</td>
                         <td className="r">{parkingText(u.parking)}</td>
                         <td className="c">
                           <span className={'sr-pill ' + (STATUS_TONE[u.status ?? ''] ?? '')}>

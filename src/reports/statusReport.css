@@ -164,6 +164,12 @@
   color: #64748b;
   max-width: 16mm;
 }
+/* 変動値は備考欄と同じ字面（色・フォント）にする。列位置と右揃えは維持し、
+   数字専用の tabular-nums は使わない（備考と同じ通常フォント）。 */
+.sr-table td.vr {
+  color: #64748b;
+  text-align: right;
+}
 /* 入予・空室の賃料・共益費は「まだ確定収入ではない」ことが分かるようオレンジに */
 .sr-table td.is-pending {
   color: #c2410c;
