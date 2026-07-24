@@ -38,15 +38,14 @@ export function PropertyTabs({ properties }: { properties: Property[] }) {
   const activeView = useAppStore((s) => s.activeView)
   const stripRef = useRef<HTMLDivElement>(null)
 
-  // 決済後の物件は、過去参照が不要なビューのタブから外す。
-  //  現況報告書 → 決済月の翌月から / レントロール → 来期から。
-  //  収支表・入金状況は過去を年度/年月で参照するのでタブは残す。
+  // 決済後の物件は個別タブから外す。過去分は各ビューの「全体」タブで参照できる
+  // （DBは消していないので、収支表の過去年度・入金状況の過去月は全体タブに残る）。
+  //  現況報告書 → 決済月の翌月から / それ以外（レントロール・収支表・入金状況・販売提出）→ 来期から。
   const visibleProperties = useMemo(() => {
     const today = new Date()
     return properties.filter((p) => {
       if (activeView === 'statusreport') return !isDisposedForStatusReport(p.disposed_date, today)
-      if (activeView === 'rentroll') return !isDisposedForRentRoll(p.disposed_date, today)
-      return true
+      return !isDisposedForRentRoll(p.disposed_date, today)
     })
   }, [properties, activeView])
 
