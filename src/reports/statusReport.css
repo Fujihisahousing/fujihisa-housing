@@ -169,6 +169,7 @@
 .sr-table td.vr {
   color: #64748b;
   text-align: right;
+  font-weight: 300;
 }
 /* 入予・空室の賃料・共益費は「まだ確定収入ではない」ことが分かるようオレンジに */
 .sr-table td.is-pending {
