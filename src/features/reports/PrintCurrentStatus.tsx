@@ -169,6 +169,17 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                 </div>
               )}
               <table className="sr-table">
+                <colgroup>
+                  <col style={{ width: '12%' }} /> {/* 号室 */}
+                  <col style={{ width: '10%' }} /> {/* 用途 */}
+                  <col style={{ width: '9%' }} /> {/* 入居者 */}
+                  <col style={{ width: '13%' }} /> {/* 賃料 */}
+                  <col style={{ width: '11%' }} /> {/* 共益費 */}
+                  <col style={{ width: '11%' }} /> {/* 変動値 */}
+                  <col style={{ width: '11%' }} /> {/* 駐輪駐車 */}
+                  <col style={{ width: '10%' }} /> {/* 状況 */}
+                  <col style={{ width: '13%' }} /> {/* 備考 */}
+                </colgroup>
                 <thead>
                   <tr>
                     <th>号室</th>

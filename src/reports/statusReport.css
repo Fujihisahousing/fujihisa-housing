@@ -146,6 +146,9 @@
   border-collapse: collapse;
   font-size: 6pt;
   line-height: 1.05;
+  /* 全物件で列幅を固定（colgroupで指定）。物件ごとに幅が変わらないので
+     縦に並ぶ物件同士でも項目（用途・入居者・賃料…）の位置が揃う。 */
+  table-layout: fixed;
 }
 .sr-table thead th {
   padding: 0.35mm 0.8mm;
@@ -182,14 +185,12 @@
    （文字列=左／数字=右／状況=中央）に戻す。 */
 .sr-table .r {
   font-variant-numeric: tabular-nums;
-  width: 1%;
 }
 .sr-table tbody td.r {
   text-align: right;
 }
 .sr-table .c {
   text-align: center;
-  width: 1%;
 }
 .sr-table td.rm {
   font-weight: 700;
