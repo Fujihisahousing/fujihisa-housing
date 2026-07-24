@@ -221,8 +221,11 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                     // 入予・空室は「まだ確定収入ではない」ことが一目で分かるようオレンジ文字にする。
                     const stopped = u.status === '停止'
                     const pending = u.status === '入予' || u.status === '空室'
-                    // 階数の偶奇記号（■/□）はプランドール堂島のみ付ける
-                    const mark = property.name === 'プランドール堂島' ? floorMark(u.room, u.use_type) : ''
+                    // 階数の偶奇記号（■/□）はプランドール堂島のみ付ける。101号室は特例で付けない
+                    const mark =
+                      property.name === 'プランドール堂島' && String(u.room ?? '').trim() !== '101'
+                        ? floorMark(u.room, u.use_type)
+                        : ''
                     return (
                       <tr key={u.id}>
                         <td className="rm">{mark ? `${text(u.room)}　${mark}` : text(u.room)}</td>
