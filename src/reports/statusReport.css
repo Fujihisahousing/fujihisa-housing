@@ -170,7 +170,6 @@
   padding: 0.12mm 0.8mm;
   border-bottom: 1px solid #f1f5f9;
   color: #334155;
-  text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -178,11 +177,15 @@
 }
 /* 数値・状況の列は内容ぴったり幅に縮める。余ったスペースは
    幅指定のない文字列列（号室・用途・入居者・備考）に回るので、
-   賃料など数値列がむやみに広がらない。 */
+   賃料など数値列がむやみに広がらない。
+   ※項目（ヘッダー）は中央揃え（thead th）。データ側は従来どおり
+   （文字列=左／数字=右／状況=中央）に戻す。 */
 .sr-table .r {
-  text-align: center;
   font-variant-numeric: tabular-nums;
   width: 1%;
+}
+.sr-table tbody td.r {
+  text-align: right;
 }
 .sr-table .c {
   text-align: center;
