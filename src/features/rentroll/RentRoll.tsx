@@ -2,7 +2,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2 } from 'lucide-react'
 import { unitsRepo } from '../../lib/repositories'
-import { calcRentRoll } from '../../lib/calc'
+import { calcRentRoll, isDisposedForRentRoll } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, percent, formatDate } from '../../lib/format'
@@ -111,12 +111,22 @@ export function RentRoll({ properties }: { properties: Property[] }) {
     [load],
   )
 
-  // 全体表示時は取得価格を合算した擬似物件で集計
+  // 決済後の物件は来期（決済年度の翌年度9/1）からレントロールに出さない。DBは消さない。
+  const today = useMemo(() => new Date(), [])
+  const hiddenPropIds = useMemo(
+    () => new Set(properties.filter((p) => isDisposedForRentRoll(p.disposed_date, today)).map((p) => p.id)),
+    [properties, today],
+  )
+  const visibleUnits = useMemo(() => units.filter((u) => !hiddenPropIds.has(u.property_id)), [units, hiddenPropIds])
+
+  // 全体表示時は取得価格を合算した擬似物件で集計（非表示物件は合算からも除く）
   const propertyForCalc: Property | null = useMemo(() => {
     if (activeProperty) return properties.find((p) => p.id === activeProperty) ?? null
-    const sum = properties.reduce((s, p) => s + (Number(p.acquired_price) || 0), 0)
+    const sum = properties
+      .filter((p) => !hiddenPropIds.has(p.id))
+      .reduce((s, p) => s + (Number(p.acquired_price) || 0), 0)
     return sum > 0 ? ({ id: 'all', name: '全体', acquired_price: sum } as Property) : null
-  }, [activeProperty, properties])
+  }, [activeProperty, properties, hiddenPropIds])
 
   const propOrder = useMemo(() => {
     const m = new Map<string, number>()
@@ -137,13 +147,13 @@ export function RentRoll({ properties }: { properties: Property[] }) {
 
   // 物件→（階数の高い順・同じ階は号室の小さい順）に並べ替え
   const sortedUnits = useMemo(() => {
-    return [...units].sort((a, b) => {
+    return [...visibleUnits].sort((a, b) => {
       const pa = propOrder.get(a.property_id) ?? 9999
       const pb = propOrder.get(b.property_id) ?? 9999
       if (pa !== pb) return pa - pb
       return unitCompare(a, b)
     })
-  }, [units, propOrder])
+  }, [visibleUnits, propOrder])
 
   const rr = useMemo(() => calcRentRoll(sortedUnits, propertyForCalc), [sortedUnits, propertyForCalc])
 

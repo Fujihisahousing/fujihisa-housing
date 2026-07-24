@@ -203,6 +203,28 @@ export function fiscalMonthIndex(d: Date): number {
   return (d.getMonth() + 1 - FISCAL_START_MONTH + 12) % 12
 }
 
+// ---- 物件の決済（処分）に伴う表示制御 ----
+// properties.disposed_date（決済日 'YYYY-MM-DD'）を基準に、時間軸を持つビュー
+// （現況報告書・レントロール）から順に非表示にする。DBのデータは消さないので、
+// 収支表（年度セレクタ）・入金状況（年月セレクタ）で過去はいつでも参照できる。
+function ymd(s: string): { y: number; m: number } {
+  const [y, m] = s.split('-').map(Number)
+  return { y: y || 0, m: m || 1 }
+}
+/** 現況報告書：決済月の翌月1日以降は非表示（例 2026-07-30決済 → 2026-08-01から消える）。 */
+export function isDisposedForStatusReport(disposed: string | null | undefined, today: Date): boolean {
+  if (!disposed) return false
+  const { y, m } = ymd(disposed)
+  return today >= new Date(y, m, 1) // m は1-12なので new Date(y,m,1) が「翌月1日」
+}
+/** レントロール：決済した会計年度の翌年度開始（＝来期の9/1）以降は非表示。 */
+export function isDisposedForRentRoll(disposed: string | null | undefined, today: Date): boolean {
+  if (!disposed) return false
+  const { y, m } = ymd(disposed)
+  const fy = m >= FISCAL_START_MONTH ? y + 1 : y // その決済日が属する会計年度
+  return today >= new Date(fy, FISCAL_START_MONTH - 1, 1) // 来期開始 = fy年9月1日
+}
+
 export interface StatementRow {
   label: string
   months: number[] // 12要素（0=9月 … 11=8月。FISCAL_MONTHS と同じ並び）

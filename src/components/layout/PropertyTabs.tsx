@@ -1,7 +1,8 @@
 // 最上段の物件タブ（「全体」＋物件別の切替）。activeProperty を切り替える。
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { Property } from '../../types'
 import { useAppStore } from '../../state/useAppStore'
+import { isDisposedForStatusReport, isDisposedForRentRoll } from '../../lib/calc'
 
 // Tab はモジュール直下で定義すること。PropertyTabs の中で定義すると
 // 再レンダリングのたびに別のコンポーネント型になり、ボタンが毎回
@@ -34,7 +35,20 @@ function Tab({
 export function PropertyTabs({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const setActiveProperty = useAppStore((s) => s.setActiveProperty)
+  const activeView = useAppStore((s) => s.activeView)
   const stripRef = useRef<HTMLDivElement>(null)
+
+  // 決済後の物件は、過去参照が不要なビューのタブから外す。
+  //  現況報告書 → 決済月の翌月から / レントロール → 来期から。
+  //  収支表・入金状況は過去を年度/年月で参照するのでタブは残す。
+  const visibleProperties = useMemo(() => {
+    const today = new Date()
+    return properties.filter((p) => {
+      if (activeView === 'statusreport') return !isDisposedForStatusReport(p.disposed_date, today)
+      if (activeView === 'rentroll') return !isDisposedForRentRoll(p.disposed_date, today)
+      return true
+    })
+  }, [properties, activeView])
 
   // 物件を選ぶと（画面の切り替わりに伴うレイアウト変化で）タブの横スクロールが
   // 先頭に戻ってしまい、右側の物件を選んだときに選択中のタブが画面外へ消える。
@@ -59,7 +73,7 @@ export function PropertyTabs({ properties }: { properties: Property[] }) {
     <div className="bg-slate-50 border-b border-slate-200">
       <div ref={stripRef} className="max-w-3xl mx-auto px-5 py-2.5 flex gap-2 overflow-x-auto">
         <Tab id={null} label="全体" active={activeProperty === null} onSelect={setActiveProperty} />
-        {properties.map((p) => (
+        {visibleProperties.map((p) => (
           <Tab
             key={p.id}
             id={p.id}

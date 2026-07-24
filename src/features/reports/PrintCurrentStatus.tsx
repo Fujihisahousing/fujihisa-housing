@@ -8,6 +8,7 @@ import '../../reports/print.css'
 import '../../reports/statusReport.css'
 import { buildBlocks } from './buildBlocks'
 import type { Block } from './buildBlocks'
+import { isDisposedForStatusReport } from '../../lib/calc'
 import type { Property, Unit } from '../../types'
 
 const n = (v: unknown) => Number(v ?? 0) || 0
@@ -97,7 +98,12 @@ export function PrintCurrentStatus({ properties }: { properties: Property[] }) {
     void load()
   }, [load])
 
-  const blocks = useMemo<Block[]>(() => buildBlocks(units, properties), [units, properties])
+  // 決済後の物件は現況報告書から外す（決済月の翌月から）。DBは消さない。
+  const blocks = useMemo<Block[]>(() => {
+    const today = new Date()
+    const visible = properties.filter((p) => !isDisposedForStatusReport(p.disposed_date, today))
+    return buildBlocks(units, visible)
+  }, [units, properties])
 
   if (loading) {
     return (

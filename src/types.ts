@@ -32,6 +32,9 @@ export interface Property {
   parking?: string | null
   /** 完了検査済日。築年月(built)とは別。現況報告用Excelに出力する */
   inspection_date?: string | null
+  /** 決済日（売却の決済='YYYY-MM-DD'）。設定すると決済後に現況報告書→レントロールの順で
+   *  自動的に一覧から消える（DBデータは消さないので過去の収支表・入金状況は残る）。 */
+  disposed_date?: string | null
   acquired_date?: string | null
   acquired_price?: number | null
   sale_price?: number | null

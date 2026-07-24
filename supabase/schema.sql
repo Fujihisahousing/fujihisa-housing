@@ -18,6 +18,9 @@ create table if not exists properties (
   -- 例：戸建ての6現場（豊野町/東中浜/大庭町/五月田町/滝井元町/東大阪松原）は
   --     別物件として扱いつつ、全体では '戸建て賃貸' の帯にまとまる
   group_name text,
+  -- 決済日（売却の決済日）。設定すると決済後に現況報告書→レントロールの順で
+  -- 一覧から自動的に消える。DBのデータは消さないので過去の収支表・入金状況は残る。
+  disposed_date date,
   created_at timestamptz default now()
 );
 
