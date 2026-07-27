@@ -227,6 +227,7 @@ export const BUILDING_EXPENSE_CATEGORIES = [
   '水道、電気代', // 旧名 '水道光熱費'。2026-07 に DB の値も含めて改名済み
   '元金',
   '利息',
+  'その他', // 収支表では EXPENSE_ROW_OF 未定義カテゴリの受け皿である『その他』行に入る
 ] as const
 
 /** まとめ入金の自動振り分けで使う収入カテゴリ名（賃料は ROOM_INCOME と共通） */
