@@ -6,6 +6,7 @@ import type { ViewKey } from '../state/useAppStore'
 const WIDE_VIEWS: ReadonlySet<ViewKey> = new Set<ViewKey>([
   'rentroll',
   'summary',
+  'mgmt',
   'payments',
   'prospectus',
   'statusreport',

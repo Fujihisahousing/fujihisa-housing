@@ -4,7 +4,7 @@ import { useAuth } from '../../auth/AuthProvider'
 import { useAppStore, type ViewKey } from '../../state/useAppStore'
 import { contentWidth, isWideView } from '../../lib/layout'
 
-const REPORT_VIEWS: ViewKey[] = ['rentroll', 'summary', 'payments', 'prospectus']
+const REPORT_VIEWS: ViewKey[] = ['rentroll', 'summary', 'mgmt', 'payments', 'prospectus']
 
 export function Header() {
   const { user, role, isAdmin, signOut } = useAuth()

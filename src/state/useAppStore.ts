@@ -7,6 +7,7 @@ export type ViewKey =
   | 'properties'
   | 'rentroll'
   | 'summary'
+  | 'mgmt'
   | 'payments'
   | 'prospectus'
   | 'statusreport'

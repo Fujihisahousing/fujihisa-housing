@@ -64,6 +64,7 @@ function Shell() {
         {activeView === 'properties' && <PropertiesView onChanged={loadProperties} />}
         {(activeView === 'rentroll' ||
           activeView === 'summary' ||
+          activeView === 'mgmt' ||
           activeView === 'payments' ||
           activeView === 'prospectus' ||
           activeView === 'statusreport') && <ReportsView properties={properties} />}

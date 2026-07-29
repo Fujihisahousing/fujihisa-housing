@@ -1,6 +1,7 @@
 // 資料グループ：レントロール／収支表／入金状況／物件概要書 の切替コンテナ。
 import { RentRoll } from './rentroll/RentRoll'
 import { IncomeStatement } from './summary/IncomeStatement'
+import { ManagementTable } from './summary/ManagementTable'
 import { PaymentStatus } from './payments/PaymentStatus'
 import { Prospectus } from './prospectus/Prospectus'
 import { PrintCurrentStatus } from './reports/PrintCurrentStatus'
@@ -10,6 +11,7 @@ import type { Property } from '../types'
 const TABS: { key: ViewKey; label: string }[] = [
   { key: 'rentroll', label: 'レントロール' },
   { key: 'summary', label: '収支表' },
+  { key: 'mgmt', label: '管理表' },
   { key: 'payments', label: '入金状況' },
   { key: 'prospectus', label: '物件概要書' },
   { key: 'statusreport', label: '現況報告書' },
@@ -44,6 +46,7 @@ export function ReportsView({ properties }: { properties: Property[] }) {
 
       {activeView === 'rentroll' && <RentRoll properties={properties} />}
       {activeView === 'summary' && <IncomeStatement propertyName={propertyName} />}
+      {activeView === 'mgmt' && <ManagementTable properties={properties} />}
       {activeView === 'payments' && <PaymentStatus properties={properties} propertyName={propertyName} />}
       {activeView === 'prospectus' && <Prospectus properties={properties} />}
       {activeView === 'statusreport' && <PrintCurrentStatus properties={properties} />}

@@ -1,4 +1,5 @@
 // 集計ロジック（レントロール・利回り・収支表・入金状況）。UI から分離（SOW 設計方針）。
+import { CAT_RENT } from '../types'
 import type { PaymentRecord, Property, RentHistory, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
@@ -265,6 +266,150 @@ function sumByMonth(rows: StatementRow[]): number[] {
   const out = new Array(12).fill(0)
   for (const r of rows) for (let i = 0; i < 12; i++) out[i] += r.months[i]
   return out
+}
+
+// =====================================================================
+// 賃貸物件管理表（全物件まとめ）
+// 既存の収支表が「行=費目 / 列=12ヶ月」で1物件ぶんなのに対し、こちらは
+// 物件を縦に積む。長年 Excel（フジヒサハウジング管理.xls）で運用してきた
+// 「賃貸物件管理表」と同じ形。銀行提出・年次報告に使う。
+// =====================================================================
+
+/** 管理表の支出行。収支表の15費目をこの6つに畳む（畳み方は MGMT_ROW_OF）。 */
+export const MGMT_EXPENSE_ROWS = ['管理費', '修繕費', '光熱費', '公租公課', '保険料', '返済'] as const
+export type MgmtExpenseRow = (typeof MGMT_EXPENSE_ROWS)[number]
+
+// 収支表の行ラベル（EXPENSE_ROWS）→ 管理表の支出行。
+// 元金・利息を「返済」として支出に含める点が Excel と異なる（Excelでは
+// 借入返済・金利を合計の外に置いていたが、差引を実際の手残りに合わせる）。
+const MGMT_ROW_OF: Record<string, MgmtExpenseRow> = {
+  管理会社委託費: '管理費',
+  BM: '管理費',
+  EV保守費: '管理費',
+  アルソック: '管理費',
+  清掃費: '管理費',
+  ゴミ処理代: '管理費',
+  修繕費: '修繕費',
+  '水道、電気代': '光熱費',
+  通信費: '光熱費',
+  公租公課: '公租公課',
+  商店街組合費: '公租公課',
+  '保険料（建物）': '保険料',
+  '保険料（賠償責任）': '保険料',
+  元金: '返済',
+  利息: '返済',
+  // '町会費'（HIDDEN_ROWS）と 'その他' は下の ?? で '管理費' に入る
+}
+
+/** 物件1件ぶんの帯。income/expenses/net はいずれも12ヶ月＋年間合計を持つ */
+export interface MgmtPropertyBlock {
+  propertyId: string
+  name: string
+  /** 見出しの2段目・3段目（新築 / 購入）。無ければ空文字 */
+  built: string
+  acquired: string
+  income: StatementRow
+  expenses: StatementRow[] // MGMT_EXPENSE_ROWS と同じ並び・同じ長さ
+  net: StatementRow // 収入 −（支出6行の合計）
+}
+export interface MgmtTableResult {
+  year: number
+  blocks: MgmtPropertyBlock[]
+  /** 最下段の合計行（各物件の net を足したもの） */
+  grandTotal: StatementRow
+}
+
+const emptyRow = (label: string): StatementRow => ({
+  label,
+  months: new Array(12).fill(0),
+  total: 0,
+})
+const finishRow = (r: StatementRow): StatementRow => ({
+  ...r,
+  total: r.months.reduce((s, v) => s + v, 0),
+})
+
+/**
+ * 入金状況の月次記録（payment_records）を収支表用の収入トランザクションに変換する。
+ * 収支表と管理表で扱いが食い違わないよう共通化している。
+ * KDDI契約の部屋（units.tenant='KDDI'）の入金だけは家賃ではなくKDDI収入として計上する。
+ */
+export function paymentRecordsToTransactions(
+  records: PaymentRecord[],
+  units: Unit[],
+): Transaction[] {
+  const kddiRooms = new Set<string>()
+  for (const u of units) if (u.tenant === 'KDDI') kddiRooms.add(`${u.property_id}|${u.room}`)
+  return records
+    .filter((rec) => n(rec.paid) > 0)
+    .map((rec) => ({
+      id: `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`,
+      date: `${rec.year}-${String(rec.month).padStart(2, '0')}-15`,
+      property_id: rec.property_id,
+      type: 'income' as const,
+      category: kddiRooms.has(`${rec.property_id}|${rec.room}`) ? 'KDDI' : CAT_RENT,
+      amount: n(rec.paid),
+    }))
+}
+
+/**
+ * 賃貸物件管理表を組み立てる。year は会計年度（締める年）。
+ * properties の並びがそのまま表の縦の並びになる。
+ */
+export function calcManagementTable(
+  transactions: Transaction[],
+  properties: Property[],
+  year: number,
+): MgmtTableResult {
+  const inYear = transactions.filter((t) => fiscalYearOf(new Date(t.date)) === year)
+
+  // 物件ID → 月別の集計。物件数×行数が小さいので素直に回す
+  const byProperty = new Map<string, { income: StatementRow; expenses: StatementRow[] }>()
+  for (const p of properties) {
+    byProperty.set(p.id, {
+      income: emptyRow('収入'),
+      expenses: MGMT_EXPENSE_ROWS.map((label) => emptyRow(label)),
+    })
+  }
+
+  for (const t of inYear) {
+    const bucket = byProperty.get(t.property_id ?? '')
+    if (!bucket) continue // 決済済みなどで properties に無い物件は表に出さない
+    const m = fiscalMonthIndex(new Date(t.date))
+    if (m < 0 || m > 11) continue
+    if (t.type === 'income') {
+      bucket.income.months[m] += n(t.amount)
+    } else {
+      // 収支表の行ラベルを一度経由することで、旧カテゴリ名（水道光熱費など）の
+      // 受け皿も EXPENSE_ROW_OF 側の定義をそのまま使える
+      const statementRow = EXPENSE_ROW_OF[t.category] ?? 'その他'
+      const label = MGMT_ROW_OF[statementRow] ?? '管理費'
+      const idx = MGMT_EXPENSE_ROWS.indexOf(label)
+      bucket.expenses[idx].months[m] += n(t.amount)
+    }
+  }
+
+  const grandTotal = emptyRow('合　計')
+  const blocks: MgmtPropertyBlock[] = properties.map((p) => {
+    const b = byProperty.get(p.id)!
+    const net = emptyRow('合計')
+    for (let i = 0; i < 12; i++) {
+      const spent = b.expenses.reduce((s, r) => s + r.months[i], 0)
+      net.months[i] = b.income.months[i] - spent
+      grandTotal.months[i] += net.months[i]
+    }
+    return {
+      propertyId: p.id,
+      name: p.name,
+      built: p.built ? `${p.built}新築` : '',
+      acquired: p.acquired_date ? `${p.acquired_date}購入` : '',
+      income: finishRow(b.income),
+      expenses: b.expenses.map(finishRow),
+      net: finishRow(net),
+    }
+  })
+
+  return { year, blocks, grandTotal: finishRow(grandTotal) }
 }
 
 /** year は会計年度（締める年）。2026 を渡すと 2025-09 〜 2026-08 が対象になる */
