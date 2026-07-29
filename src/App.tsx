@@ -10,6 +10,7 @@ import { LedgerView } from './features/ledger/LedgerView'
 import { PropertiesView } from './features/properties/PropertiesView'
 import { ReportsView } from './features/ReportsView'
 import { propertiesRepo } from './lib/repositories'
+import { contentWidth, isWideView } from './lib/layout'
 import { useAppStore } from './state/useAppStore'
 import type { Property } from './types'
 
@@ -50,19 +51,14 @@ function Shell() {
     void loadProperties()
   }, [loadProperties])
 
-  // レポート系（表が広い）は枠を広く取る
-  const wide =
-    activeView === 'rentroll' ||
-    activeView === 'summary' ||
-    activeView === 'payments' ||
-    activeView === 'prospectus' ||
-    activeView === 'statusreport'
+  // レポート系（表が広い）は枠を画面の横幅いっぱいまで使う
+  const wide = isWideView(activeView)
 
   return (
     <div className="min-h-full bg-slate-50 text-slate-800 pb-8">
       <Header />
       <PropertyTabs properties={properties} />
-      <main className={(wide ? 'max-w-7xl' : 'max-w-3xl') + ' mx-auto px-5 py-5'}>
+      <main className={contentWidth(wide, 'max-w-3xl') + ' px-5 py-5'}>
         {activeView === 'entry' && <EntryView properties={properties} />}
         {activeView === 'ledger' && <LedgerView properties={properties} />}
         {activeView === 'properties' && <PropertiesView onChanged={loadProperties} />}

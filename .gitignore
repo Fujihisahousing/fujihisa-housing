@@ -16,10 +16,20 @@ dist-ssr
 .service_key.txt
 
 # 業務データ・個人情報を含むSQL（公開リポジトリに載せない）
+# このリポジトリは public。賃料・敷金・入居状況などが入るSQLは絶対に追跡しない。
+# schema.sql（構造のみ）だけを追跡し、実データを流し込む類は全て除外する。
 supabase/seed_*.sql
 supabase/import_*.sql
 supabase/*_tenants.sql
 supabase/*_payments.sql
+supabase/sync_*.sql
+supabase/migrate_*.sql
+supabase/update_*.sql
+supabase/add_*.sql
+
+# 手元の運用スクリプト・エディタ設定（service_role キーを扱うものを含む）
+scripts/
+.claude/
 
 # logs
 npm-debug.log*

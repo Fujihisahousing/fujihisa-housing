@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { Property } from '../../types'
 import { useAppStore } from '../../state/useAppStore'
 import { isDisposedForStatusReport, isDisposedForRentRoll } from '../../lib/calc'
+import { contentWidth, isWideView } from '../../lib/layout'
 
 // Tab はモジュール直下で定義すること。PropertyTabs の中で定義すると
 // 再レンダリングのたびに別のコンポーネント型になり、ボタンが毎回
@@ -70,7 +71,10 @@ export function PropertyTabs({ properties }: { properties: Property[] }) {
 
   return (
     <div className="bg-slate-50 border-b border-slate-200">
-      <div ref={stripRef} className="max-w-3xl mx-auto px-5 py-2.5 flex gap-2 overflow-x-auto">
+      <div
+        ref={stripRef}
+        className={contentWidth(isWideView(activeView), 'max-w-3xl') + ' px-5 py-2.5 flex gap-2 overflow-x-auto'}
+      >
         <Tab id={null} label="全体" active={activeProperty === null} onSelect={setActiveProperty} />
         {visibleProperties.map((p) => (
           <Tab

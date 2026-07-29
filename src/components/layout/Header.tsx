@@ -2,6 +2,7 @@
 import { Building2, LogOut, ShieldCheck, User as UserIcon, PlusCircle, BarChart3, BookOpen, Building } from 'lucide-react'
 import { useAuth } from '../../auth/AuthProvider'
 import { useAppStore, type ViewKey } from '../../state/useAppStore'
+import { contentWidth, isWideView } from '../../lib/layout'
 
 const REPORT_VIEWS: ViewKey[] = ['rentroll', 'summary', 'payments', 'prospectus']
 
@@ -36,7 +37,8 @@ export function Header() {
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
-      <div className="max-w-7xl mx-auto px-5 h-14 flex items-center gap-3">
+      {/* 本文（main）の枠と左右の端を揃える */}
+      <div className={contentWidth(isWideView(activeView), 'max-w-7xl') + ' px-5 h-14 flex items-center gap-3'}>
         <div className="flex items-center gap-2 shrink-0">
           <div className="grid place-items-center w-8 h-8 rounded-lg bg-slate-900 text-white">
             <Building2 className="w-5 h-5" />
