@@ -55,6 +55,7 @@ export function PaymentStatus({
   propertyName: string
 }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
+  const setActiveView = useAppStore((s) => s.setActiveView)
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [units, setUnits] = useState<Unit[]>([])
@@ -415,11 +416,14 @@ export function PaymentStatus({
             </option>
           ))}
         </select>
+        {/* 通帳からの取込は入力タブ（通帳から取込）に置いた。入口を2か所に増やすと
+            どちらで入れたか分からなくなるので、ここからは案内だけにする。 */}
         <button
-          onClick={() => setImporting(true)}
+          onClick={() => setActiveView('entry')}
           className="ml-auto flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+          title="入力タブの「通帳から取込」へ移動します"
         >
-          <Upload className="w-4 h-4" /> 通帳CSV取込
+          <Upload className="w-4 h-4" /> 通帳から取込（入力タブ）
         </button>
         <button
           onClick={() => setMode((m) => (m === 'arrears' ? 'monthly' : 'arrears'))}

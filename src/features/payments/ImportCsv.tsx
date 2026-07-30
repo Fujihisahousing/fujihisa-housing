@@ -1,19 +1,57 @@
 // 通帳CSV取込：Gemini等でスキャン→CSV化（日付,契約者名,金額）したものを取り込む。
 // 契約者名で号室に自動マッチ→確認→契約内訳で賃料/共益費/光熱費に自動振り分けして記帳。
-import { useEffect, useMemo, useState } from 'react'
-import { X, Upload, Loader2 } from 'lucide-react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { X, Upload, Loader2, Download } from 'lucide-react'
 import { transactionsRepo, unitsRepo } from '../../lib/repositories'
 import { yen } from '../../lib/format'
 import { CAT_RENT, CAT_KYOEKI, CAT_UTILITY, type Property, type Transaction, type Unit } from '../../types'
+import { matchTenantName, type MatchConfidence } from '../../lib/matchTenant'
 
 interface Parsed {
   date: string
   name: string
   amount: number
   unitId: string // マッチ結果（空＝未マッチ）
+  /** どうやって当てたか。人が見て承認できるように残す */
+  confidence: MatchConfidence
+  /** ambiguous のときに選ばせる候補 */
+  candidates: string[]
+  /** 人が手で選び直したら true。以後の自動再マッチで上書きしない */
+  manual: boolean
 }
 
-const norm = (s: string) => s.replace(/[\s　]/g, '')
+// 照合結果の見せ方。推測で入れたものは色を変えて必ず目に留まるようにする
+const CONF_LABEL: Record<MatchConfidence, string> = {
+  exact: '一致',
+  prefix: '推測（名前が一部違う）',
+  similar: '推測（似ている）',
+  ambiguous: '候補が複数',
+  none: '見つからず',
+}
+const CONF_CLASS: Record<MatchConfidence, string> = {
+  exact: 'bg-emerald-50 text-emerald-700',
+  prefix: 'bg-amber-50 text-amber-700',
+  similar: 'bg-amber-50 text-amber-700',
+  ambiguous: 'bg-rose-50 text-rose-700',
+  none: 'bg-rose-50 text-rose-700',
+}
+
+/** 取込用CSVの見本を書き出す。列の並びと日付の形を間違えないための雛形。
+ *  Excelで開いたときに文字化けしないよう BOM を付ける。 */
+function downloadTemplate() {
+  const csv = [
+    '日付,振込名義,金額',
+    '2026-07-30,アオキショウジ,120000',
+    '2026-07-30,カ）アオキショウジ,85000',
+    '2026-07-31,タナカタロウ,98000',
+  ].join('\r\n')
+  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = '通帳取込_見本.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 function normDate(s: string): string {
   const t = s.trim().replace(/\//g, '-')
@@ -50,11 +88,14 @@ export function ImportCsv({
   defaultPropertyId,
   onClose,
   onDone,
+  /** 入力タブに直接置く場合は true（モーダルの覆いと閉じるボタンを出さない） */
+  embedded = false,
 }: {
   properties: Property[]
   defaultPropertyId: string | null
-  onClose: () => void
+  onClose?: () => void
   onDone: () => void
+  embedded?: boolean
 }) {
   const [propertyId, setPropertyId] = useState(defaultPropertyId ?? properties[0]?.id ?? '')
   const [units, setUnits] = useState<Unit[]>([])
@@ -76,11 +117,12 @@ export function ImportCsv({
   }, [propertyId])
 
   const unitsById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units])
-  const byName = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const u of units) if (u.tenant) m.set(norm(u.tenant), u.id)
-    return m
-  }, [units])
+
+  // 通帳の名義から号室を当てる。カナの揺れ（半角・法人格・語尾の増減）を吸収する。
+  const match = useMemo(
+    () => (name: string) => matchTenantName(name, units),
+    [units],
+  )
 
   // CSVを取り込んで自動マッチ
   function ingest(text: string) {
@@ -93,16 +135,31 @@ export function ImportCsv({
       const amount = Number(c[2].replace(/[,，\s¥￥円]/g, ''))
       if (!Number.isFinite(amount) || amount === 0) continue // ヘッダー行や空行はスキップ
       const name = c[1].trim()
-      parsed.push({ date: normDate(c[0]), name, amount, unitId: byName.get(norm(name)) ?? '' })
+      const m = match(name)
+      parsed.push({
+        date: normDate(c[0]),
+        name,
+        amount,
+        unitId: m.unitId,
+        confidence: m.confidence,
+        candidates: m.candidates.map((x) => x.unitId),
+        manual: false,
+      })
     }
     if (parsed.length === 0) setError('取り込める行がありませんでした。CSVの形式（日付,契約者名,金額）を確認してください。')
     setRows(parsed)
   }
 
-  // byName が更新されたら（物件変更時）再マッチ
+  // 物件を変えたら号室が変わるので、手で選び直した行以外を再マッチする
   useEffect(() => {
-    setRows((prev) => prev.map((r) => ({ ...r, unitId: r.unitId || byName.get(norm(r.name)) || '' })))
-  }, [byName])
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.manual) return r
+        const m = match(r.name)
+        return { ...r, unitId: m.unitId, confidence: m.confidence, candidates: m.candidates.map((x) => x.unitId) }
+      }),
+    )
+  }, [match])
 
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -114,6 +171,8 @@ export function ImportCsv({
 
   const matched = rows.filter((r) => r.unitId)
   const unmatched = rows.length - matched.length
+  // 推測で入れた行。記帳前に目を通してほしいので件数を分けて出す
+  const guessed = rows.filter((r) => !r.manual && (r.confidence === 'prefix' || r.confidence === 'similar'))
 
   async function save() {
     setError(null)
@@ -146,21 +205,46 @@ export function ImportCsv({
     }
   }
 
+  // 入力タブに埋め込むときは覆いを出さず、そのまま流し込む
+  const Shell = ({ children }: { children: ReactNode }) =>
+    embedded ? (
+      <div className="rounded-2xl bg-white border border-slate-200 flex flex-col">{children}</div>
+    ) : (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
+        <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+        <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-xl">
+          {children}
+        </div>
+      </div>
+    )
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl bg-white shadow-xl">
+    <Shell>
         <div className="flex items-center justify-between px-5 h-14 border-b border-slate-200 shrink-0">
-          <h3 className="font-bold text-slate-800">通帳CSV取込</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="閉じる">
-            <X className="w-5 h-5" />
-          </button>
+          <h3 className="font-bold text-slate-800">通帳から取込</h3>
+          {!embedded && (
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700" aria-label="閉じる">
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         <div className="px-5 py-4 overflow-y-auto space-y-4">
-          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600">
-            通帳をスキャンし、Gemini等で <b>「日付,契約者名,金額」の3列CSV（入金行のみ・日付はYYYY-MM-DD）</b> に変換 →
-            下から取り込んでください。契約者名で号室に自動マッチし、契約内訳で賃料／共益費／光熱費に振り分けて記帳します。
+          <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 space-y-1.5">
+            <p>
+              通帳を <b>「日付,振込名義,金額」の3列CSV（入金行のみ）</b> にして取り込みます。
+              ネットバンキングのCSVをこの3列に整えるか、紙の通帳はスキャンしてGemini等でCSV化してください。
+            </p>
+            <p>
+              振込名義から号室を当てます。半角カナ・法人格（カ）など）・語尾の増減は吸収しますが、
+              <b>推測で当てた行は色を変えて出す</b>ので、記帳前に確認してください。
+            </p>
+            <button
+              onClick={downloadTemplate}
+              className="inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="w-3.5 h-3.5" /> CSVの見本をダウンロード
+            </button>
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -194,9 +278,17 @@ export function ImportCsv({
 
           {rows.length > 0 && (
             <>
-              <div className="text-xs text-slate-500">
-                {rows.length}件 読込／マッチ {matched.length}件
-                {unmatched > 0 && <span className="text-rose-600">／未マッチ {unmatched}件（号室を選んでください）</span>}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
+                <span>{rows.length}件 読込</span>
+                <span className="text-emerald-700">一致 {matched.length - guessed.length}件</span>
+                {guessed.length > 0 && (
+                  <span className="text-amber-700">
+                    推測 {guessed.length}件（名前が違うので合っているか確認してください）
+                  </span>
+                )}
+                {unmatched > 0 && (
+                  <span className="text-rose-600">未確定 {unmatched}件（号室を選んでください）</span>
+                )}
               </div>
               <div className="overflow-auto rounded-xl border border-slate-200">
                 <table className="w-full min-w-max text-sm">
@@ -206,6 +298,7 @@ export function ImportCsv({
                       <th className="px-3 py-2 font-medium">通帳の名前</th>
                       <th className="px-3 py-2 font-medium text-right">金額</th>
                       <th className="px-3 py-2 font-medium">号室（契約者）</th>
+                      <th className="px-3 py-2 font-medium">照合</th>
                       <th className="px-3 py-2 font-medium">振り分け</th>
                     </tr>
                   </thead>
@@ -223,12 +316,26 @@ export function ImportCsv({
                               value={r.unitId}
                               onChange={(e) =>
                                 setRows((prev) =>
-                                  prev.map((x, j) => (j === i ? { ...x, unitId: e.target.value } : x)),
+                                  prev.map((x, j) =>
+                                    // 手で選んだら manual を立て、以後の自動再マッチで上書きしない
+                                    j === i ? { ...x, unitId: e.target.value, manual: true } : x,
+                                  ),
                                 )
                               }
                               className="rounded border border-slate-300 px-2 py-1 text-sm bg-white"
                             >
                               <option value="">未選択</option>
+                              {/* 候補が複数のときは先に出して選びやすくする */}
+                              {r.candidates.length > 0 &&
+                                r.candidates.map((id) => {
+                                  const cu = unitsById.get(id)
+                                  return cu ? (
+                                    <option key={'c' + id} value={id}>
+                                      ★ {cu.room}
+                                      {cu.tenant_kana ? `（${cu.tenant_kana}）` : cu.tenant ? `（${cu.tenant}）` : ''}
+                                    </option>
+                                  ) : null
+                                })}
                               {units.map((u) => (
                                 <option key={u.id} value={u.id}>
                                   {u.room}
@@ -236,6 +343,22 @@ export function ImportCsv({
                                 </option>
                               ))}
                             </select>
+                          </td>
+                          <td className="px-3 py-2 whitespace-nowrap">
+                            <span
+                              className={
+                                'rounded px-1.5 py-0.5 text-xs font-medium ' +
+                                (r.manual ? 'bg-slate-100 text-slate-600' : CONF_CLASS[r.confidence])
+                              }
+                            >
+                              {r.manual ? '手で選択' : CONF_LABEL[r.confidence]}
+                            </span>
+                            {/* 推測のときは通帳名と契約者名を並べて出し、違いを目で確かめられるようにする */}
+                            {!r.manual && u && (r.confidence === 'prefix' || r.confidence === 'similar') && (
+                              <div className="mt-0.5 text-xs text-slate-400">
+                                通帳 {r.name} / 契約 {u.tenant_kana || u.tenant}
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">
                             {s
@@ -263,11 +386,10 @@ export function ImportCsv({
                 <Loader2 className="w-4 h-4 animate-spin" /> 記帳中…
               </span>
             ) : (
-              `マッチした ${matched.length} 件を記帳する`
+              `確定した ${matched.length} 件を記帳する`
             )}
           </button>
         </div>
-      </div>
-    </div>
+    </Shell>
   )
 }

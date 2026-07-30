@@ -6,6 +6,7 @@ import { Header } from './components/layout/Header'
 import { PropertyTabs } from './components/layout/PropertyTabs'
 import { RoomEntry } from './components/entry/RoomEntry'
 import { BuildingEntry } from './components/entry/BuildingEntry'
+import { ImportCsv } from './features/payments/ImportCsv'
 import { LedgerView } from './features/ledger/LedgerView'
 import { PropertiesView } from './features/properties/PropertiesView'
 import { ReportsView } from './features/ReportsView'
@@ -73,7 +74,7 @@ function Shell() {
   )
 }
 
-type EntryTab = 'room' | 'building'
+type EntryTab = 'room' | 'building' | 'import'
 
 function EntryView({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
@@ -113,7 +114,7 @@ function EntryView({ properties }: { properties: Property[] }) {
       )}
 
       <div className="flex rounded-xl bg-slate-100 p-1 text-sm">
-        {(['room', 'building'] as EntryTab[]).map((t) => (
+        {(['room', 'building', 'import'] as EntryTab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -122,15 +123,25 @@ function EntryView({ properties }: { properties: Property[] }) {
               (tab === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')
             }
           >
-            {t === 'room' ? '部屋ごと' : '建物まとめ'}
+            {t === 'room' ? '部屋ごと' : t === 'building' ? '建物まとめ' : '通帳から取込'}
           </button>
         ))}
       </div>
 
-      {tab === 'room' ? (
+      {tab === 'room' && (
         <RoomEntry properties={properties} defaultPropertyId={activeProperty} onSaved={onSaved} />
-      ) : (
+      )}
+      {tab === 'building' && (
         <BuildingEntry properties={properties} defaultPropertyId={activeProperty} onSaved={onSaved} />
+      )}
+      {tab === 'import' && (
+        // まとめ入金は通帳から一括で取り込むので、入力の並びに置く
+        <ImportCsv
+          properties={properties}
+          defaultPropertyId={activeProperty}
+          embedded
+          onDone={onSaved}
+        />
       )}
     </div>
   )
