@@ -261,15 +261,14 @@ function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
         </td>
         <Cells row={b.income} />
       </tr>
-      {/* 支出は合計・明細ともマイナス表記にする（明細の和と支出の符号が揃い、
-          収入＋支出＝利益になる）。ただし文字は黒のまま。赤字にするのは
+      {/* 各物件の支出・明細はプラス表記の黒。マイナス表記＋赤字にするのは
           利益がマイナスのときと、最下段の合計の支出行だけ。 */}
       <tr className="mt-row-expense">
-        <Cells row={b.expenseTotal} negate />
+        <Cells row={b.expenseTotal} />
       </tr>
       {details.map((e) => (
         <tr key={e.label} className="mt-row-detail">
-          <Cells row={e} detail negate />
+          <Cells row={e} detail />
         </tr>
       ))}
       <tr className="mt-row-profit">
