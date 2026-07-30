@@ -427,16 +427,21 @@ export function paymentRecordsToTransactions(
 }
 
 /**
- * 賃料・共益費が既に記帳されている「号室×月」の集合を作る。
+ * 賃料・共益費が既に記帳されている「号室×帰属月」の集合を作る。
  * paymentRecordsToTransactions に渡して、同じ家賃の二重計上を防ぐ。
  * キーは `${unit_id}|YYYY-MM`。号室の紐付いていない記帳は対象外。
+ *
+ * 記帳の暦月ではなく帰属月で持つのが要点。前家賃なので 6/30 の入金は7月分＝
+ * 月次記録では2026-07に載る。暦月（2026-06）で突き合わせると外れてしまい、
+ * 同じ家賃が「6月＝記帳」「7月＝記録」の2か所に出てしまう。
  */
 export function bookedRentKeys(transactions: Transaction[]): Set<string> {
   const s = new Set<string>()
   for (const t of transactions) {
     if (t.type !== 'income' || !t.unit_id) continue
     if (!RENT_CATEGORIES.has(t.category)) continue
-    s.add(`${t.unit_id}|${String(t.date).slice(0, 7)}`)
+    const { year, month } = attributionMonth(t.date)
+    s.add(`${t.unit_id}|${year}-${String(month).padStart(2, '0')}`)
   }
   return s
 }
