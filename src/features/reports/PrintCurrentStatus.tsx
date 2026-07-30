@@ -71,6 +71,18 @@ const parkingYen = (s?: string | null) => {
   return m ? parseInt(m[0].replace(/,/g, ''), 10) : 0
 }
 
+/** 変動値（自由入力）から金額を読む。「+5,000」「-3,000」「△3,000」「¥5,000円」などを想定。
+ *  マイナスは -／−（全角）／△／▲ のいずれでも表せる（会計表記に合わせる）。
+ *  数字が読めない記述（「要相談」など）は 0 として無視する。 */
+function variationYen(s?: string | null): number {
+  if (!s) return 0
+  const t = String(s).trim()
+  const m = t.match(/([+\-−△▲]?)\s*[¥￥]?\s*([0-9][0-9,]*)/)
+  if (!m) return 0
+  const v = parseInt(m[2].replace(/,/g, ''), 10)
+  return /[\-−△▲]/.test(m[1]) ? -v : v
+}
+
 export function PrintCurrentStatus({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const [units, setUnits] = useState<Unit[]>([])
@@ -174,13 +186,15 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
         {blocks.map(({ label, property, rooms }) => {
           const c = rooms.filter((u) => u.status !== '停止')
           const o = rooms.filter(isChargeable)
+          // 変動値は「合計（賃料＋共益費）」には含めない。計の行に参考として出すだけ。
           const sum = o.reduce(
             (a, u) => ({
               rent: a.rent + n(u.rent),
               kyoeki: a.kyoeki + n(u.kyoeki),
               parking: a.parking + parkingYen(u.parking),
+              variation: a.variation + variationYen(u.variation),
             }),
-            { rent: 0, kyoeki: 0, parking: 0 },
+            { rent: 0, kyoeki: 0, parking: 0, variation: 0 },
           )
           return (
             <section className="sr-block" key={property.id}>
@@ -262,7 +276,9 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                     <td colSpan={3}>計</td>
                     <td className="r">{num(sum.rent)}</td>
                     <td className="r">{num(sum.kyoeki)}</td>
-                    <td />
+                    {/* 変動値の計。各室は「+5,000」のように＋付きで入力されるが、
+                        計では＋を付けない（0 のときは空欄のまま） */}
+                    <td className="r">{sum.variation ? num(sum.variation) : ''}</td>
                     <td className="r">{num(sum.parking)}</td>
                     <td colSpan={2} />
                   </tr>
