@@ -10,6 +10,7 @@ import {
   fiscalYearOf,
   fiscalYearRange,
   paymentRecordsToTransactions,
+  bookedRentKeys,
   FISCAL_MONTHS,
   FISCAL_PREV_YEAR_COLS,
   MGMT_ROW_MEMBERS,
@@ -64,9 +65,10 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
     void load()
   }, [load])
 
-  // 入金状況の月次記録も収入に合算する（収支表と同じ扱い）
+  // 入金状況の月次記録も収入に合算する（収支表と同じ扱い）。
+  // 同じ家賃を台帳にも記帳している号室・月は、記帳のほうを採って二重計上を避ける。
   const allTxs = useMemo(
-    () => [...txs, ...paymentRecordsToTransactions(records, units)],
+    () => [...txs, ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs))],
     [txs, records, units],
   )
 

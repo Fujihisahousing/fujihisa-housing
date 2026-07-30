@@ -6,6 +6,8 @@ import {
   calcIncomeStatement,
   fiscalYearOf,
   isStatementRowVisible,
+  paymentRecordsToTransactions,
+  bookedRentKeys,
   FISCAL_MONTHS,
   FISCAL_PREV_YEAR_COLS,
   type IncomeStatementResult,
@@ -14,7 +16,7 @@ import {
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
 import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import { CAT_RENT, type PaymentRecord, type Transaction, type Unit } from '../../types'
+import type { PaymentRecord, Transaction, Unit } from '../../types'
 
 // 収支表の年度プルダウンに常に出す最も古い会計年度（データの有無に関わらず選べるようにする）。
 // 年度は締める年で呼ぶので、2023年度＝2022-09〜2023-08 が最古。
@@ -48,33 +50,13 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
     void load()
   }, [load])
 
-  // 部屋がKDDI契約（アンテナ等）かどうかの判定用（物件ID+号室→契約者名がKDDIか）
-  const kddiRooms = useMemo(() => {
-    const s = new Set<string>()
-    for (const u of units) {
-      if (u.tenant === 'KDDI') s.add(`${u.property_id}|${u.room}`)
-    }
-    return s
-  }, [units])
-
-  // 入金状況の月次記録（入金額）を家賃収入として収支表に合算する。
-  // KDDI契約の部屋の入金だけは家賃ではなくKDDI収入として計上する。
-  const recordTxs: Transaction[] = useMemo(
-    () =>
-      records
-        .filter((rec) => Number(rec.paid) > 0)
-        .map((rec) => ({
-          id: `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`,
-          date: `${rec.year}-${String(rec.month).padStart(2, '0')}-15`,
-          property_id: rec.property_id,
-          type: 'income' as const,
-          category: kddiRooms.has(`${rec.property_id}|${rec.room}`) ? 'KDDI' : CAT_RENT,
-          amount: Number(rec.paid),
-        })),
-    [records, kddiRooms],
+  // 入金状況の月次記録（入金額）を家賃収入として合算する。同じ家賃を台帳にも
+  // 記帳している号室・月は、記帳のほうを採って二重計上を避ける。
+  // 変換の中身は管理表と食い違わないよう calc.ts に共通化してある。
+  const allTxs = useMemo(
+    () => [...txs, ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs))],
+    [txs, records, units],
   )
-
-  const allTxs = useMemo(() => [...txs, ...recordTxs], [txs, recordTxs])
 
   const r = useMemo(() => calcIncomeStatement(allTxs, year), [allTxs, year])
 

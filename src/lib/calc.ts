@@ -394,15 +394,28 @@ const finishRow = (r: StatementRow): StatementRow => ({
  * 入金状況の月次記録（payment_records）を収支表用の収入トランザクションに変換する。
  * 収支表と管理表で扱いが食い違わないよう共通化している。
  * KDDI契約の部屋（units.tenant='KDDI'）の入金だけは家賃ではなくKDDI収入として計上する。
+ *
+ * 家賃は「台帳に記帳する」運用と「入金状況に記録する」運用のどちらもあり得るので、
+ * 収支表では両方を足している。ただし同じ家賃を両方に入れている月は二重計上になる。
+ * そこで booked（既に賃料が記帳されている 号室×月）に当たる記録は足さない。
+ * 記帳のほうを優先するのは、収支表が入金日ベース（現金主義）だから。
  */
 export function paymentRecordsToTransactions(
   records: PaymentRecord[],
   units: Unit[],
+  booked: ReadonlySet<string> = new Set(),
 ): Transaction[] {
   const kddiRooms = new Set<string>()
   for (const u of units) if (u.tenant === 'KDDI') kddiRooms.add(`${u.property_id}|${u.room}`)
+  const unitIdOf = new Map<string, string>()
+  for (const u of units) unitIdOf.set(`${u.property_id}|${u.room}`, u.id)
   return records
     .filter((rec) => n(rec.paid) > 0)
+    .filter((rec) => {
+      const unitId = unitIdOf.get(`${rec.property_id}|${rec.room}`)
+      if (!unitId) return true // 号室が突き合わない記録は従来どおり足す
+      return !booked.has(`${unitId}|${rec.year}-${String(rec.month).padStart(2, '0')}`)
+    })
     .map((rec) => ({
       id: `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`,
       date: `${rec.year}-${String(rec.month).padStart(2, '0')}-15`,
@@ -411,6 +424,21 @@ export function paymentRecordsToTransactions(
       category: kddiRooms.has(`${rec.property_id}|${rec.room}`) ? 'KDDI' : CAT_RENT,
       amount: n(rec.paid),
     }))
+}
+
+/**
+ * 賃料・共益費が既に記帳されている「号室×月」の集合を作る。
+ * paymentRecordsToTransactions に渡して、同じ家賃の二重計上を防ぐ。
+ * キーは `${unit_id}|YYYY-MM`。号室の紐付いていない記帳は対象外。
+ */
+export function bookedRentKeys(transactions: Transaction[]): Set<string> {
+  const s = new Set<string>()
+  for (const t of transactions) {
+    if (t.type !== 'income' || !t.unit_id) continue
+    if (!RENT_CATEGORIES.has(t.category)) continue
+    s.add(`${t.unit_id}|${String(t.date).slice(0, 7)}`)
+  }
+  return s
 }
 
 /**
