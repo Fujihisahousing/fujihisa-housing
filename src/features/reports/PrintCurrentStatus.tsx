@@ -9,6 +9,7 @@ import '../../reports/statusReport.css'
 import { buildBlocks } from './buildBlocks'
 import type { Block } from './buildBlocks'
 import { isDisposedForStatusReport } from '../../lib/calc'
+import { maxRoomDigits, padRoom } from '../../lib/format'
 import type { Property, Unit } from '../../types'
 
 const n = (v: unknown) => Number(v ?? 0) || 0
@@ -222,7 +223,9 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                   </tr>
                 </thead>
                 <tbody>
-                  {rooms.map((u) => {
+                  {/* 号室の一の位を揃える桁数は物件（この帯）単位で決める */}
+                  {rooms.map((u, _i, all) => {
+                    const roomWidth = maxRoomDigits(all.map((x) => x.room))
                     // 停止中の部屋は賃料・共益費を出さない（募集していないため）。
                     // 入予・空室は「まだ確定収入ではない」ことが一目で分かるようオレンジ文字にする。
                     const stopped = u.status === '停止'
@@ -234,7 +237,12 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                         : ''
                     return (
                       <tr key={u.id}>
-                        <td className="rm">{mark ? `${text(u.room)}　${mark}` : text(u.room)}</td>
+                        <td className="rm">
+                          {(() => {
+                            const room = padRoom(text(u.room), roomWidth)
+                            return mark ? `${room}　${mark}` : room
+                          })()}
+                        </td>
                         <td>{text(u.use_type)}</td>
                         <td>{text(u.tenant_type)}</td>
                         <td className={'r' + (pending ? ' is-pending' : '')}>{stopped ? '' : num(u.rent)}</td>

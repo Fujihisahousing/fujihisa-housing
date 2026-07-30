@@ -5,7 +5,7 @@ import { unitsRepo } from '../../lib/repositories'
 import { calcRentRoll, isDisposedForRentRoll } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
-import { yen, percent, formatDate } from '../../lib/format'
+import { yen, percent, formatDate, maxRoomDigits, padRoom } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { UNIT_STATUSES, type Property, type Unit } from '../../types'
 
@@ -236,6 +236,8 @@ export function RentRoll({ properties }: { properties: Property[] }) {
                           key={r.unit.id}
                           unit={r.unit}
                           onPatch={patchUnit}
+                          // 号室の桁揃えは物件（グループ）単位で決める
+                          roomDigits={maxRoomDigits(rows.map((x) => x.unit.room))}
                           floorBreak={i > 0 && isGroupBreak(rows[i - 1].unit, r.unit)}
                         />
                       ))}
@@ -249,6 +251,7 @@ export function RentRoll({ properties }: { properties: Property[] }) {
                           key={r.unit.id}
                           unit={r.unit}
                           onPatch={patchUnit}
+                          roomDigits={maxRoomDigits(rr.rows.map((x) => x.unit.room))}
                           floorBreak={i > 0 && isGroupBreak(rr.rows[i - 1].unit, r.unit)}
                         />
                       ))}
@@ -267,9 +270,12 @@ function UnitRow({
   unit: u,
   floorBreak,
   onPatch,
+  roomDigits,
 }: {
   unit: Unit
   floorBreak?: boolean
+  /** この物件でいちばん桁数の多い号室の桁数。号室の一の位を揃えるのに使う */
+  roomDigits: number
   onPatch: (id: string, patch: Partial<Unit>) => void
 }) {
   return (
@@ -278,7 +284,7 @@ function UnitRow({
         'border-b border-slate-100 last:border-0 ' + (floorBreak ? 'border-t-2 border-t-slate-300' : '')
       }
     >
-      <Td className="font-medium">{u.room}</Td>
+      <Td className="font-medium tabular-nums">{padRoom(u.room, roomDigits)}</Td>
       <Td>{u.layout || '—'}</Td>
       <Td className="text-right" narrow>{u.area ? `${Number(u.area).toFixed(2)}㎡` : '—'}</Td>
       <Td>{u.use_type || '—'}</Td>

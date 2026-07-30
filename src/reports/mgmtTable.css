@@ -119,6 +119,10 @@
   border-color: #1e293b;
   text-align: center;
 }
+/* 年（9〜12月／1〜8月をまとめるセル）は左寄せにして、始まりの月の上に置く */
+.mt-table thead th.yr {
+  text-align: left;
+}
 .mt-table .r {
   text-align: right;
 }

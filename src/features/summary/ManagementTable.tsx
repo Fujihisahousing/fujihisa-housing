@@ -158,7 +158,8 @@ export function MgmtSheet({
         </div>
         <div className="mt-kpis">
           <Kpi cls="income" label="収入" value={r.grandIncome.total} />
-          <Kpi cls="expense" label="支出" value={r.grandExpense.total} />
+          {/* 表の支出行と揃えてマイナス表記にする */}
+          <Kpi cls="expense" label="支出" value={-r.grandExpense.total} />
           <Kpi cls="profit" label="利益" value={r.grandNet.total} />
         </div>
         <div className="mt-date">
@@ -176,10 +177,11 @@ export function MgmtSheet({
           <tr>
             <th rowSpan={2}>物件</th>
             <th rowSpan={2}>項目</th>
-            <th className="y" colSpan={PREV}>
+            {/* 年は始まりの月の真上に来るよう左寄せ（2025年→9月／2026年→1月） */}
+            <th className="y yr" colSpan={PREV}>
               {r.year - 1}年
             </th>
-            <th className="y" colSpan={FISCAL_MONTHS.length - PREV}>
+            <th className="y yr" colSpan={FISCAL_MONTHS.length - PREV}>
               {r.year}年
             </th>
             <th rowSpan={2}>年間合計</th>
@@ -258,12 +260,14 @@ function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
         </td>
         <Cells row={b.income} />
       </tr>
+      {/* 支出は合計・明細ともマイナス表記（赤字は cell() が符号で付ける）。
+          こうしておくと明細の和と支出の符号が揃い、収入＋支出＝利益になる。 */}
       <tr className="mt-row-expense">
-        <Cells row={b.expenseTotal} />
+        <Cells row={b.expenseTotal} negate />
       </tr>
       {details.map((e) => (
         <tr key={e.label} className="mt-row-detail">
-          <Cells row={e} detail />
+          <Cells row={e} detail negate />
         </tr>
       ))}
       <tr className="mt-row-profit">
