@@ -140,12 +140,6 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
 //   収入（薄い青）／支出＝合計（薄い赤）／支出の明細7行（インデント）／利益（黄）
 const PREV = FISCAL_PREV_YEAR_COLS
 
-// 借入の無い物件では元金・利息の行を落とす（空行が並ぶのを避ける）。
-// それ以外の明細は金額0でも行を残す（物件間で行位置を揃えて比べられるように）。
-const DROPPABLE_WHEN_ZERO: readonly string[] = ['元金', '利息']
-const shownExpenses = (b: MgmtPropertyBlock) =>
-  b.expenses.filter((e) => e.total !== 0 || !DROPPABLE_WHEN_ZERO.includes(e.label))
-
 /** 印刷される本体。データ取得から切り離してあるので単体で表示確認できる */
 export function MgmtSheet({
   r,
@@ -154,16 +148,6 @@ export function MgmtSheet({
   r: MgmtTableResult
   range: { from: string; to: string }
 }) {
-  const kpi = useMemo(() => {
-    let income = 0
-    let expense = 0
-    for (const b of r.blocks) {
-      income += b.income.total
-      expense += b.expenseTotal.total
-    }
-    return { income, expense, profit: income - expense }
-  }, [r])
-
   return (
     <div className="mt-page">
       <header className="mt-head">
@@ -172,9 +156,9 @@ export function MgmtSheet({
           <h1>賃貸物件管理表</h1>
         </div>
         <div className="mt-kpis">
-          <Kpi cls="income" label="収入" value={kpi.income} />
-          <Kpi cls="expense" label="支出" value={kpi.expense} />
-          <Kpi cls="profit" label="利益" value={kpi.profit} />
+          <Kpi cls="income" label="収入" value={r.grandIncome.total} />
+          <Kpi cls="expense" label="支出" value={r.grandExpense.total} />
+          <Kpi cls="profit" label="利益" value={r.grandNet.total} />
         </div>
         <div className="mt-date">
           {r.year}年度（{range.from} 〜 {range.to}）
@@ -206,15 +190,10 @@ export function MgmtSheet({
           {r.blocks.map((b) => (
             <PropertyBlock key={b.propertyId} b={b} />
           ))}
-          <tr className="mt-row-grand">
-            <td colSpan={2}>{r.grandTotal.label}</td>
-            {r.grandTotal.months.map((v, i) => (
-              <td key={i} className={cell(v)}>
-                {money(v)}
-              </td>
-            ))}
-            <td className={cell(r.grandTotal.total)}>{money(r.grandTotal.total)}</td>
-          </tr>
+          {/* 最下段は全物件の 収入／支出／利益。行の色は各帯と同じ */}
+          <GrandRow row={r.grandIncome} cls="mt-row-income" first />
+          <GrandRow row={r.grandExpense} cls="mt-row-expense" />
+          <GrandRow row={r.grandNet} cls="mt-row-profit" last />
         </tbody>
       </table>
     </div>
@@ -230,9 +209,33 @@ function Kpi({ cls, label, value }: { cls: string; label: string; value: number 
   )
 }
 
+/** 最下段の合計行（物件名の列は「全物件」でまとめる） */
+function GrandRow({
+  row,
+  cls,
+  first,
+  last,
+}: {
+  row: StatementRow
+  cls: string
+  first?: boolean
+  last?: boolean
+}) {
+  return (
+    <tr className={`mt-grand ${cls}${last ? ' mt-grand-last' : ''}`}>
+      {first && (
+        <td className="mt-name mt-grand-name" rowSpan={3}>
+          <strong>全物件</strong>
+        </td>
+      )}
+      <Cells row={row} />
+    </tr>
+  )
+}
+
 // 物件1件ぶんの帯。印刷でページをまたいで割れないよう mt-block を付ける
 function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
-  const details = shownExpenses(b)
+  const details = b.expenses
   return (
     <>
       <tr className="mt-block mt-row-income">

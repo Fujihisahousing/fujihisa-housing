@@ -313,6 +313,15 @@ const MGMT_ROW_OF: Record<string, MgmtExpenseRow> = {
  *  レントロールの group_name による集約とは別で、この表専用の扱い。 */
 export const MGMT_KODATE_LABEL = '戸建て賃貸'
 
+// 帯ごとに出さない明細行（その物件では発生しない費目）。key は帯の名前。
+// A3横1枚に収めるため、実務上ゼロの行はあらかじめ落としておく。
+const MGMT_HIDDEN_ROWS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  [MGMT_KODATE_LABEL, new Set(['光熱費'])],
+  ['川西市久代', new Set(['管理費', '修繕費', '光熱費'])],
+])
+// 借入の無い帯では落とす行。金額が入っていれば残す。
+const MGMT_DROP_WHEN_ZERO: ReadonlySet<string> = new Set(['元金', '利息'])
+
 /** 築年月（'2022年4月' / '平成元年6月17日' の両方）から築年数を出す。取れなければ null */
 export function buildingAgeYears(built: string | null | undefined, today = new Date()): number | null {
   if (!built) return null
@@ -343,14 +352,17 @@ export interface MgmtPropertyBlock {
   income: StatementRow
   /** 支出の合計。表では収入の1つ下に出し、その下に expenses を明細として並べる */
   expenseTotal: StatementRow
-  expenses: StatementRow[] // MGMT_EXPENSE_ROWS と同じ並び・同じ長さ
+  /** 表示する明細行だけ。MGMT_EXPENSE_ROWS の並びのまま、非表示分を除いてある */
+  expenses: StatementRow[]
   net: StatementRow // 利益 = 収入 − 支出
 }
 export interface MgmtTableResult {
   year: number
   blocks: MgmtPropertyBlock[]
-  /** 最下段の合計行（各物件の利益を足したもの） */
-  grandTotal: StatementRow
+  /** 最下段の3行（全帯の合計）。収入・支出・利益 */
+  grandIncome: StatementRow
+  grandExpense: StatementRow
+  grandNet: StatementRow
 }
 
 const emptyRow = (label: string): StatementRow => ({
@@ -442,31 +454,51 @@ export function calcManagementTable(
     order.push({ key, property: key === KODATE_KEY ? null : p })
   }
 
-  const grandTotal = emptyRow('利益合計')
+  const grandIncome = emptyRow('収入')
+  const grandExpense = emptyRow('支出')
+  const grandNet = emptyRow('利益')
   const blocks: MgmtPropertyBlock[] = order.map(({ key, property: p }) => {
     const b = byBlock.get(key)!
+    const name = p ? p.name : `${MGMT_KODATE_LABEL}（${kodateCount}現場）`
     const expenseTotal = emptyRow('支出')
     const net = emptyRow('利益')
+    // 合計は非表示行も含めた全費目で出す（行を隠しても金額は落とさない）
     for (let i = 0; i < 12; i++) {
       expenseTotal.months[i] = b.expenses.reduce((s, r) => s + r.months[i], 0)
       net.months[i] = b.income.months[i] - expenseTotal.months[i]
-      grandTotal.months[i] += net.months[i]
+      grandIncome.months[i] += b.income.months[i]
+      grandExpense.months[i] += expenseTotal.months[i]
+      grandNet.months[i] += net.months[i]
     }
+    // 表示する明細行を絞る。帯ごとの非表示指定（MGMT_HIDDEN_ROWS）は
+    // 戸建ての集約帯では基準名（'戸建て賃貸'）でも引けるようにしておく。
+    const hidden = MGMT_HIDDEN_ROWS.get(name) ?? MGMT_HIDDEN_ROWS.get(p ? name : MGMT_KODATE_LABEL)
+    const shown = b.expenses.filter((e) => {
+      if (hidden?.has(e.label)) return false
+      if (MGMT_DROP_WHEN_ZERO.has(e.label) && e.months.every((v) => v === 0)) return false
+      return true
+    })
     const age = p ? buildingAgeYears(p.built, today) : null
     return {
       propertyId: key,
-      name: p ? p.name : `${MGMT_KODATE_LABEL}（${kodateCount}現場）`,
+      name,
       built: p?.built ? `${p.built} 新築` : '',
       acquired: p?.acquired_date ? `${p.acquired_date} 購入` : '',
       age: age === null ? '' : `築${age}年`,
       income: finishRow(b.income),
       expenseTotal: finishRow(expenseTotal),
-      expenses: b.expenses.map(finishRow),
+      expenses: shown.map(finishRow),
       net: finishRow(net),
     }
   })
 
-  return { year, blocks, grandTotal: finishRow(grandTotal) }
+  return {
+    year,
+    blocks,
+    grandIncome: finishRow(grandIncome),
+    grandExpense: finishRow(grandExpense),
+    grandNet: finishRow(grandNet),
+  }
 }
 
 /** year は会計年度（締める年）。2026 を渡すと 2025-09 〜 2026-08 が対象になる */
