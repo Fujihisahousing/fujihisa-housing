@@ -309,6 +309,28 @@ const MGMT_ROW_OF: Record<string, MgmtExpenseRow> = {
   // '町会費'（HIDDEN_ROWS）と 'その他' は下の ?? で '管理費' に入る
 }
 
+/** 収支管理表でだけ、戸建ての各現場を1つの帯にまとめる。表示名はこれ。
+ *  レントロールの group_name による集約とは別で、この表専用の扱い。 */
+export const MGMT_KODATE_LABEL = '戸建て賃貸'
+
+/** 築年月（'2022年4月' / '平成元年6月17日' の両方）から築年数を出す。取れなければ null */
+export function buildingAgeYears(built: string | null | undefined, today = new Date()): number | null {
+  if (!built) return null
+  const wareki = built.match(/(昭和|平成|令和)\s*(\d+|元)年/)
+  let y = 0
+  if (wareki) {
+    // 昭和1年=1926 / 平成1年=1989 / 令和1年=2019
+    const base = wareki[1] === '昭和' ? 1925 : wareki[1] === '平成' ? 1988 : 2018
+    y = base + (wareki[2] === '元' ? 1 : Number(wareki[2]))
+  } else {
+    const seireki = built.match(/(\d{4})\s*年/)
+    if (!seireki) return null
+    y = Number(seireki[1])
+  }
+  const age = today.getFullYear() - y
+  return age >= 0 && age < 200 ? age : null
+}
+
 /** 物件1件ぶんの帯。各行はいずれも12ヶ月＋年間合計を持つ */
 export interface MgmtPropertyBlock {
   propertyId: string
@@ -316,6 +338,8 @@ export interface MgmtPropertyBlock {
   /** 見出しの2段目・3段目（新築 / 購入）。無ければ空文字 */
   built: string
   acquired: string
+  /** 築年数の表示（例 '築37年'）。取れなければ空文字。集約した帯では空 */
+  age: string
   income: StatementRow
   /** 支出の合計。表では収入の1つ下に出し、その下に expenses を明細として並べる */
   expenseTotal: StatementRow
@@ -372,19 +396,27 @@ export function calcManagementTable(
   year: number,
 ): MgmtTableResult {
   const inYear = transactions.filter((t) => fiscalYearOf(new Date(t.date)) === year)
+  const today = new Date()
 
-  // 物件ID → 月別の集計。物件数×行数が小さいので素直に回す
-  const byProperty = new Map<string, { income: StatementRow; expenses: StatementRow[] }>()
-  for (const p of properties) {
-    byProperty.set(p.id, {
+  // 戸建ての6現場はこの表では1つの帯にまとめる。物件ID → 帯のキー を先に決める。
+  const isKodate = (p: Property) => KODATE_PROPERTIES.includes(p.name)
+  const KODATE_KEY = '__kodate__'
+  const keyOf = new Map<string, string>()
+  for (const p of properties) keyOf.set(p.id, isKodate(p) ? KODATE_KEY : p.id)
+
+  // 帯のキー → 月別の集計。帯数×行数が小さいので素直に回す
+  const byBlock = new Map<string, { income: StatementRow; expenses: StatementRow[] }>()
+  for (const key of new Set(keyOf.values())) {
+    byBlock.set(key, {
       income: emptyRow('収入'),
       expenses: MGMT_EXPENSE_ROWS.map((label) => emptyRow(label)),
     })
   }
 
   for (const t of inYear) {
-    const bucket = byProperty.get(t.property_id ?? '')
-    if (!bucket) continue // 決済済みなどで properties に無い物件は表に出さない
+    const key = keyOf.get(t.property_id ?? '')
+    if (!key) continue // 決済済みなどで properties に無い物件は表に出さない
+    const bucket = byBlock.get(key)!
     const m = fiscalMonthIndex(new Date(t.date))
     if (m < 0 || m > 11) continue
     if (t.type === 'income') {
@@ -399,9 +431,20 @@ export function calcManagementTable(
     }
   }
 
+  // 帯の並びは properties の順。戸建ては最初に出てきた位置に1つだけ置く。
+  const kodateCount = properties.filter(isKodate).length
+  const order: { key: string; property: Property | null }[] = []
+  const seen = new Set<string>()
+  for (const p of properties) {
+    const key = keyOf.get(p.id)!
+    if (seen.has(key)) continue
+    seen.add(key)
+    order.push({ key, property: key === KODATE_KEY ? null : p })
+  }
+
   const grandTotal = emptyRow('利益合計')
-  const blocks: MgmtPropertyBlock[] = properties.map((p) => {
-    const b = byProperty.get(p.id)!
+  const blocks: MgmtPropertyBlock[] = order.map(({ key, property: p }) => {
+    const b = byBlock.get(key)!
     const expenseTotal = emptyRow('支出')
     const net = emptyRow('利益')
     for (let i = 0; i < 12; i++) {
@@ -409,11 +452,13 @@ export function calcManagementTable(
       net.months[i] = b.income.months[i] - expenseTotal.months[i]
       grandTotal.months[i] += net.months[i]
     }
+    const age = p ? buildingAgeYears(p.built, today) : null
     return {
-      propertyId: p.id,
-      name: p.name,
-      built: p.built ? `${p.built}新築` : '',
-      acquired: p.acquired_date ? `${p.acquired_date}購入` : '',
+      propertyId: key,
+      name: p ? p.name : `${MGMT_KODATE_LABEL}（${kodateCount}現場）`,
+      built: p?.built ? `${p.built} 新築` : '',
+      acquired: p?.acquired_date ? `${p.acquired_date} 購入` : '',
+      age: age === null ? '' : `築${age}年`,
       income: finishRow(b.income),
       expenseTotal: finishRow(expenseTotal),
       expenses: b.expenses.map(finishRow),

@@ -115,19 +115,37 @@
   background: #f8fafc;
 }
 
-/* 物件名セル（縦に結合）。新築・購入を小さく添える */
+/* 物件名セル（帯の全行にまたがる）。名前は大きく、築年数・新築／購入日を添える。
+   行をまたぐので縦は中央寄せにして帯の真ん中に置く。 */
 .mt-name {
-  width: 34mm;
-  vertical-align: top;
+  width: 38mm;
+  vertical-align: middle;
   background: #f8fafc;
+  padding: 1mm 1.5mm;
+}
+.mt-name strong {
+  display: block;
+  font-size: 10pt;
   font-weight: 700;
-  font-size: 6.6pt;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+.mt-name em {
+  display: inline-block;
+  font-style: normal;
+  font-size: 6.4pt;
+  font-weight: 700;
+  color: #1e293b;
+  background: #e2e8f0;
+  border-radius: 1mm;
+  padding: 0.2mm 1.2mm;
+  margin: 0.6mm 0 0.3mm;
 }
 .mt-name i {
   display: block;
   font-style: normal;
   font-weight: 400;
-  font-size: 5.2pt;
+  font-size: 5.4pt;
   color: #64748b;
   letter-spacing: 0.01em;
 }
@@ -170,6 +188,17 @@
 }
 .mt-zero {
   color: #cbd5e1;
+}
+
+/* マイナスは赤字。表記は「¥-1,234」のまま色だけ変える。
+   行の色（黄・青・赤）の上でも読めるよう濃い赤を使い、!important で
+   行側の font-weight より確実に色を優先させる。 */
+.mt-table td.neg {
+  color: #b91c1c !important;
+}
+.mt-row-profit > td.neg,
+.mt-row-grand > td.neg {
+  color: #991b1b !important;
 }
 
 /* 印刷：物件の帯は途中で割らない */

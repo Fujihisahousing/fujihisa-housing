@@ -12,7 +12,6 @@ import {
   paymentRecordsToTransactions,
   FISCAL_MONTHS,
   FISCAL_PREV_YEAR_COLS,
-  MGMT_EXPENSE_ROWS,
   isDisposedForRentRoll,
   type MgmtPropertyBlock,
   type MgmtTableResult,
@@ -140,7 +139,12 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
 // 行の構成（物件ごと）：
 //   収入（薄い青）／支出＝合計（薄い赤）／支出の明細7行（インデント）／利益（黄）
 const PREV = FISCAL_PREV_YEAR_COLS
-const ROWS_PER_BLOCK = 3 + MGMT_EXPENSE_ROWS.length // 収入 + 支出 + 明細7 + 利益
+
+// 借入の無い物件では元金・利息の行を落とす（空行が並ぶのを避ける）。
+// それ以外の明細は金額0でも行を残す（物件間で行位置を揃えて比べられるように）。
+const DROPPABLE_WHEN_ZERO: readonly string[] = ['元金', '利息']
+const shownExpenses = (b: MgmtPropertyBlock) =>
+  b.expenses.filter((e) => e.total !== 0 || !DROPPABLE_WHEN_ZERO.includes(e.label))
 
 /** 印刷される本体。データ取得から切り離してあるので単体で表示確認できる */
 export function MgmtSheet({
@@ -168,9 +172,9 @@ export function MgmtSheet({
           <h1>賃貸物件管理表</h1>
         </div>
         <div className="mt-kpis">
-          <Kpi cls="income" label="INCOME" value={kpi.income} />
-          <Kpi cls="expense" label="EXPENSE" value={kpi.expense} />
-          <Kpi cls="profit" label="PROFIT" value={kpi.profit} />
+          <Kpi cls="income" label="収入" value={kpi.income} />
+          <Kpi cls="expense" label="支出" value={kpi.expense} />
+          <Kpi cls="profit" label="利益" value={kpi.profit} />
         </div>
         <div className="mt-date">
           {r.year}年度（{range.from} 〜 {range.to}）
@@ -205,11 +209,11 @@ export function MgmtSheet({
           <tr className="mt-row-grand">
             <td colSpan={2}>{r.grandTotal.label}</td>
             {r.grandTotal.months.map((v, i) => (
-              <td key={i} className="r">
+              <td key={i} className={cell(v)}>
                 {money(v)}
               </td>
             ))}
-            <td className="r">{money(r.grandTotal.total)}</td>
+            <td className={cell(r.grandTotal.total)}>{money(r.grandTotal.total)}</td>
           </tr>
         </tbody>
       </table>
@@ -228,11 +232,14 @@ function Kpi({ cls, label, value }: { cls: string; label: string; value: number 
 
 // 物件1件ぶんの帯。印刷でページをまたいで割れないよう mt-block を付ける
 function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
+  const details = shownExpenses(b)
   return (
     <>
       <tr className="mt-block mt-row-income">
-        <td className="mt-name" rowSpan={ROWS_PER_BLOCK}>
-          {b.name}
+        {/* 物件名は帯の全行にまたがらせ、大きく出す。築年数・新築／購入日を添える */}
+        <td className="mt-name" rowSpan={3 + details.length}>
+          <strong>{b.name}</strong>
+          {b.age && <em>{b.age}</em>}
           {b.built && <i>{b.built}</i>}
           {b.acquired && <i>{b.acquired}</i>}
         </td>
@@ -241,7 +248,7 @@ function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
       <tr className="mt-row-expense">
         <Cells row={b.expenseTotal} />
       </tr>
-      {b.expenses.map((e) => (
+      {details.map((e) => (
         <tr key={e.label} className="mt-row-detail">
           <Cells row={e} detail />
         </tr>
@@ -259,14 +266,17 @@ function Cells({ row, detail }: { row: StatementRow; detail?: boolean }) {
     <>
       <td className={detail ? 'mt-item detail' : 'mt-item'}>{row.label}</td>
       {row.months.map((v, i) => (
-        <td key={i} className="r">
+        <td key={i} className={cell(v)}>
           {money(v)}
         </td>
       ))}
-      <td className="r total">{money(row.total)}</td>
+      <td className={cell(row.total) + ' total'}>{money(row.total)}</td>
     </>
   )
 }
+
+/** マイナスは赤字にする（「−」表記のままで色だけ変える） */
+const cell = (v: number) => (v < 0 ? 'r neg' : 'r')
 
 /** 0 は薄い「—」にして、金額のある月を目で追いやすくする */
 function money(v: number) {
