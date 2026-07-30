@@ -4,6 +4,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { transactionsRepo } from '../../lib/repositories'
 import { today } from '../../lib/format'
+import { ReflectionHint } from '../common/ReflectionHint'
 import { BUILDING_INCOME_CATEGORIES, BUILDING_EXPENSE_CATEGORIES } from '../../types'
 import type { Property, Transaction } from '../../types'
 
@@ -89,6 +90,8 @@ export function BuildingEntry({
             onChange={(e) => setDate(e.target.value)}
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
           />
+          {/* 建物まとめは号室に紐づかないので入金状況には出ない */}
+          <ReflectionHint date={date} toPayments={false} />
         </Field>
       </div>
 

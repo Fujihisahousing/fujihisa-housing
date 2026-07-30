@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { transactionsRepo, unitsRepo } from '../../lib/repositories'
 import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
+import { ReflectionHint } from '../common/ReflectionHint'
 import { today } from '../../lib/format'
 import { yen } from '../../lib/format'
 import { CAT_RENT, CAT_KYOEKI, CAT_UTILITY } from '../../types'
@@ -246,6 +247,8 @@ export function RoomEntry({
             onChange={(e) => setDate(e.target.value)}
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
           />
+          {/* 入金状況に出るのは家賃（賃料・共益費）だけ。敷金・礼金などは収支表のみ */}
+          <ReflectionHint date={date} toPayments={Boolean(unitId)} />
         </Field>
         <Field label="支払方法（任意）">
           <input

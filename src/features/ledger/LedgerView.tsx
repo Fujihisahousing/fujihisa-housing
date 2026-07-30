@@ -4,6 +4,8 @@ import { Pencil, Trash2, Loader2, Download, FileJson, History } from 'lucide-rea
 import { Modal } from '../../components/common/Modal'
 import { transactionsRepo, unitsRepo, auditLogsRepo } from '../../lib/repositories'
 import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
+import { ReflectionHint } from '../../components/common/ReflectionHint'
+import { isRentCategory } from '../../lib/calc'
 import { exportTransactionsCSV, exportAllJSON } from '../../lib/csv'
 import { yen, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
@@ -424,6 +426,8 @@ function EditModal({
             onChange={(e) => setDate(e.target.value)}
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
           />
+          {/* 入金状況に出るのは家賃（賃料・共益費）で部屋を指定した記帳だけ */}
+          <ReflectionHint date={date} toPayments={Boolean(unitId) && isRentCategory(category)} />
         </Row>
         <Row label="支払方法（任意）">
           <input

@@ -453,6 +453,22 @@ export function PaymentStatus({
         />
       )}
 
+      {/* 入金額を手入力したときにどこへ出るかを明示する。台帳と違い、ここで入れた
+          入金額は選んでいる年月の家賃として扱われる（帰属月＝表示中の月）。 */}
+      {mode !== 'arrears' && (
+        <p className="text-xs text-slate-500">
+          ここで入力する入金額は{' '}
+          <b className="font-semibold text-slate-700">
+            {year}年{month}月分
+          </b>{' '}
+          の家賃として扱われ、収支表・支出表でも{' '}
+          <b className="font-semibold text-slate-700">
+            {year}年{month}月
+          </b>{' '}
+          に計上されます。台帳に同じ月の家賃の記帳がある場合は、台帳のほうが優先されます。
+        </p>
+      )}
+
       {mode === 'arrears' ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
           <StatCard label="未入金の号室" value={`${arrears.length}戸`} />

@@ -610,11 +610,38 @@ export const isRentCategory = (category: string) => RENT_CATEGORIES.has(category
  * 入金日から「何月分の入金か（帰属月）」を出す。前家賃ルール：
  * 11日以降の入金は翌月分の前払い、10日までの入金は当月分とみなす。
  * calcPaymentStatus の attrIdx と同じ規則。台帳→入金状況の反映でも使う。
+ *
+ * 'YYYY-MM-DD' の文字列はそのまま数値として読む。new Date(文字列) はUTCの0時として
+ * 解釈されるので、タイムゾーンによって日付が1日ずれる（effectiveRentKyoeki で
+ * 同じ理由の不具合があった）。日付の計算に Date を通さないこと。
  */
 export function attributionMonth(date: string | Date): { year: number; month: number } {
-  const d = typeof date === 'string' ? new Date(date) : date
-  const idx = d.getFullYear() * 12 + d.getMonth() + (d.getDate() > 10 ? 1 : 0)
+  let y: number
+  let m: number
+  let d: number
+  const iso = typeof date === 'string' ? date.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/) : null
+  if (iso) {
+    y = Number(iso[1])
+    m = Number(iso[2])
+    d = Number(iso[3])
+  } else {
+    const dt = typeof date === 'string' ? new Date(date) : date
+    if (Number.isNaN(dt.getTime())) return { year: 0, month: 1 }
+    y = dt.getFullYear()
+    m = dt.getMonth() + 1
+    d = dt.getDate()
+  }
+  const idx = y * 12 + (m - 1) + (d > 10 ? 1 : 0)
   return { year: Math.floor(idx / 12), month: (idx % 12) + 1 }
+}
+
+/** 収支表・支出表でその記帳が載る月（入金日ベースなので暦月そのまま） */
+export function ledgerMonth(date: string | Date): { year: number; month: number } {
+  const iso = typeof date === 'string' ? date.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/) : null
+  if (iso) return { year: Number(iso[1]), month: Number(iso[2]) }
+  const dt = typeof date === 'string' ? new Date(date) : date
+  if (Number.isNaN(dt.getTime())) return { year: 0, month: 1 }
+  return { year: dt.getFullYear(), month: dt.getMonth() + 1 }
 }
 
 // 請求額・入金額・入居状況・保証会社有無 から判定を導出（手入力の入金額編集で使用）。
