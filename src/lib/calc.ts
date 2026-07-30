@@ -275,13 +275,21 @@ function sumByMonth(rows: StatementRow[]): number[] {
 // 「賃貸物件管理表」と同じ形。銀行提出・年次報告に使う。
 // =====================================================================
 
-/** 管理表の支出行。収支表の15費目をこの6つに畳む（畳み方は MGMT_ROW_OF）。 */
-export const MGMT_EXPENSE_ROWS = ['管理費', '修繕費', '光熱費', '公租公課', '保険料', '返済'] as const
+/** 管理表の支出明細行。収支表の15費目をこの7つに畳む（畳み方は MGMT_ROW_OF）。 */
+export const MGMT_EXPENSE_ROWS = [
+  '管理費',
+  '修繕費',
+  '光熱費',
+  '公租公課',
+  '保険料',
+  '元金',
+  '利息',
+] as const
 export type MgmtExpenseRow = (typeof MGMT_EXPENSE_ROWS)[number]
 
-// 収支表の行ラベル（EXPENSE_ROWS）→ 管理表の支出行。
-// 元金・利息を「返済」として支出に含める点が Excel と異なる（Excelでは
-// 借入返済・金利を合計の外に置いていたが、差引を実際の手残りに合わせる）。
+// 収支表の行ラベル（EXPENSE_ROWS）→ 管理表の支出明細行。
+// 元金・利息を支出に含める点が Excel と異なる（Excelでは借入返済・金利を
+// 合計の外に置いていたが、利益を実際の手残りに合わせる）。
 const MGMT_ROW_OF: Record<string, MgmtExpenseRow> = {
   管理会社委託費: '管理費',
   BM: '管理費',
@@ -296,12 +304,12 @@ const MGMT_ROW_OF: Record<string, MgmtExpenseRow> = {
   商店街組合費: '公租公課',
   '保険料（建物）': '保険料',
   '保険料（賠償責任）': '保険料',
-  元金: '返済',
-  利息: '返済',
+  元金: '元金',
+  利息: '利息',
   // '町会費'（HIDDEN_ROWS）と 'その他' は下の ?? で '管理費' に入る
 }
 
-/** 物件1件ぶんの帯。income/expenses/net はいずれも12ヶ月＋年間合計を持つ */
+/** 物件1件ぶんの帯。各行はいずれも12ヶ月＋年間合計を持つ */
 export interface MgmtPropertyBlock {
   propertyId: string
   name: string
@@ -309,13 +317,15 @@ export interface MgmtPropertyBlock {
   built: string
   acquired: string
   income: StatementRow
+  /** 支出の合計。表では収入の1つ下に出し、その下に expenses を明細として並べる */
+  expenseTotal: StatementRow
   expenses: StatementRow[] // MGMT_EXPENSE_ROWS と同じ並び・同じ長さ
-  net: StatementRow // 収入 −（支出6行の合計）
+  net: StatementRow // 利益 = 収入 − 支出
 }
 export interface MgmtTableResult {
   year: number
   blocks: MgmtPropertyBlock[]
-  /** 最下段の合計行（各物件の net を足したもの） */
+  /** 最下段の合計行（各物件の利益を足したもの） */
   grandTotal: StatementRow
 }
 
@@ -389,13 +399,14 @@ export function calcManagementTable(
     }
   }
 
-  const grandTotal = emptyRow('合　計')
+  const grandTotal = emptyRow('利益合計')
   const blocks: MgmtPropertyBlock[] = properties.map((p) => {
     const b = byProperty.get(p.id)!
-    const net = emptyRow('合計')
+    const expenseTotal = emptyRow('支出')
+    const net = emptyRow('利益')
     for (let i = 0; i < 12; i++) {
-      const spent = b.expenses.reduce((s, r) => s + r.months[i], 0)
-      net.months[i] = b.income.months[i] - spent
+      expenseTotal.months[i] = b.expenses.reduce((s, r) => s + r.months[i], 0)
+      net.months[i] = b.income.months[i] - expenseTotal.months[i]
       grandTotal.months[i] += net.months[i]
     }
     return {
@@ -404,6 +415,7 @@ export function calcManagementTable(
       built: p.built ? `${p.built}新築` : '',
       acquired: p.acquired_date ? `${p.acquired_date}購入` : '',
       income: finishRow(b.income),
+      expenseTotal: finishRow(expenseTotal),
       expenses: b.expenses.map(finishRow),
       net: finishRow(net),
     }

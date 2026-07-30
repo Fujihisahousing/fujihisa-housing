@@ -1,0 +1,184 @@
+/* 収支管理表のA3横レイアウト。現況報告書（statusReport.css）と同じ方針で、
+   画面でも印刷と同じ見た目になるよう mm 指定で用紙を再現する。
+   物件数が多いと1枚に収まらないので、物件の帯単位でページを送る。 */
+
+.mt-page {
+  /* A3横 420mm × 297mm から余白8mmを引いた実寸 */
+  width: 404mm;
+  min-height: 281mm;
+  margin: 0 auto;
+  background: #fff;
+  color: #0b1220;
+  font-family: 'Inter', 'Helvetica Neue', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------- ヘッダー ---------------- */
+.mt-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 10mm;
+  padding-bottom: 2.5mm;
+  margin-bottom: 3mm;
+  border-bottom: 1.2px solid #0b1220;
+}
+.mt-title h1 {
+  margin: 0;
+  font-size: 15pt;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+}
+.mt-kicker {
+  display: block;
+  font-size: 6pt;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: #6366f1;
+  margin-bottom: 0.6mm;
+}
+.mt-date {
+  margin-left: auto;
+  font-size: 7pt;
+  color: #64748b;
+  letter-spacing: 0.04em;
+}
+
+/* KPI：収入計・支出計・利益を紙面上部に出す（画面の要約カードの代わり） */
+.mt-kpis {
+  display: flex;
+  gap: 7mm;
+}
+.mt-kpi {
+  line-height: 1.1;
+}
+.mt-kpi span {
+  display: block;
+  font-size: 5.6pt;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: #94a3b8;
+}
+.mt-kpi b {
+  font-size: 11pt;
+  font-weight: 700;
+}
+.mt-kpi.income b {
+  color: #1d4ed8;
+}
+.mt-kpi.expense b {
+  color: #b91c1c;
+}
+.mt-kpi.profit b {
+  color: #a16207;
+}
+
+/* ---------------- 本表 ---------------- */
+/* 物件数×10行あるので、A3横に収まる枚数を減らすため行はかなり詰める
+   （現況報告書も 5〜6.5pt で運用しているので、この紙面では許容範囲） */
+.mt-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 5.8pt;
+  line-height: 1.15;
+}
+.mt-table th,
+.mt-table td {
+  border: 0.5px solid #cbd5e1;
+  padding: 0.35mm 0.9mm;
+  white-space: nowrap;
+}
+.mt-table thead th {
+  background: #0b1220;
+  color: #fff;
+  font-weight: 600;
+  font-size: 6pt;
+  letter-spacing: 0.02em;
+  border-color: #0b1220;
+}
+.mt-table thead th.y {
+  background: #1e293b;
+  border-color: #1e293b;
+  text-align: center;
+}
+.mt-table .r {
+  text-align: right;
+}
+/* 年間合計の列。行の色（青・赤・黄）が途切れないよう背景は塗らず、
+   左の罫線と太字だけで区切る。明細行は白地なので薄く灰を敷く。 */
+.mt-table .total {
+  font-weight: 700;
+  border-left: 1px solid #94a3b8;
+}
+.mt-row-detail > td.total {
+  background: #f8fafc;
+}
+
+/* 物件名セル（縦に結合）。新築・購入を小さく添える */
+.mt-name {
+  width: 34mm;
+  vertical-align: top;
+  background: #f8fafc;
+  font-weight: 700;
+  font-size: 6.6pt;
+}
+.mt-name i {
+  display: block;
+  font-style: normal;
+  font-weight: 400;
+  font-size: 5.2pt;
+  color: #64748b;
+  letter-spacing: 0.01em;
+}
+.mt-item {
+  width: 20mm;
+  font-weight: 600;
+}
+/* 支出の明細行は項目名を1字ぶん下げる（全角スペース相当） */
+.mt-item.detail {
+  font-weight: 400;
+  padding-left: 3.2mm;
+  color: #475569;
+}
+
+/* 行の色分け：収入=薄い青 / 支出=薄い赤 / 利益=黄 */
+.mt-row-income > td {
+  background: #dbeafe;
+  font-weight: 600;
+}
+.mt-row-expense > td {
+  background: #fee2e2;
+  font-weight: 600;
+}
+.mt-row-detail > td {
+  background: #fff;
+}
+.mt-row-profit > td {
+  background: #fef08a;
+  font-weight: 700;
+  border-top: 0.8px solid #a16207;
+  border-bottom: 1.2px solid #0b1220;
+}
+/* 最下段の全物件合計 */
+.mt-row-grand > td {
+  background: #fde68a;
+  font-weight: 700;
+  font-size: 7pt;
+  border-top: 1.4px solid #0b1220;
+  border-bottom: 1.4px solid #0b1220;
+}
+.mt-zero {
+  color: #cbd5e1;
+}
+
+/* 印刷：物件の帯は途中で割らない */
+@media print {
+  .mt-block {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .mt-page {
+    min-height: 0;
+  }
+}

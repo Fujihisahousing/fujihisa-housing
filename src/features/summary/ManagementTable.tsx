@@ -20,6 +20,7 @@ import {
 } from '../../lib/calc'
 import { yen } from '../../lib/format'
 import '../../reports/print.css'
+import '../../reports/mgmtTable.css'
 import type { PaymentRecord, Property, Transaction, Unit } from '../../types'
 
 // 収支表と同じ運用開始年度（データが無くても過去年度を開けるように）
@@ -122,116 +123,76 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
           <Loader2 className="w-4 h-4 animate-spin" /> 読み込み中…
         </div>
       ) : (
-        <div id="print-root" className="space-y-3">
-          <h2 className="text-center text-lg font-bold text-slate-800">
-            フジヒサハウジング 賃貸物件管理表
-          </h2>
-          <p className="text-center text-xs text-slate-500 -mt-2">
-            {year}年度（{range.from} 〜 {range.to}）
-          </p>
-          <Summary r={r} />
-          <MgmtTable r={r} />
+        // 画面でも印刷と同じ紙面を出す（現況報告書と同じ方針）。用紙幅が画面より
+        // 広いことがあるので、はみ出す分だけ横スクロールさせる。
+        <div className="overflow-x-auto">
+          <div id="print-root">
+            <MgmtSheet r={r} range={range} />
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-// ---------------------------------------------------------------- サマリー
-function Summary({ r }: { r: MgmtTableResult }) {
-  const s = useMemo(() => {
+
+// ================================================================== 紙面
+// 行の構成（物件ごと）：
+//   収入（薄い青）／支出＝合計（薄い赤）／支出の明細7行（インデント）／利益（黄）
+const PREV = FISCAL_PREV_YEAR_COLS
+const ROWS_PER_BLOCK = 3 + MGMT_EXPENSE_ROWS.length // 収入 + 支出 + 明細7 + 利益
+
+/** 印刷される本体。データ取得から切り離してあるので単体で表示確認できる */
+export function MgmtSheet({
+  r,
+  range,
+}: {
+  r: MgmtTableResult
+  range: { from: string; to: string }
+}) {
+  const kpi = useMemo(() => {
     let income = 0
-    const byExpense = MGMT_EXPENSE_ROWS.map(() => 0)
+    let expense = 0
     for (const b of r.blocks) {
       income += b.income.total
-      b.expenses.forEach((e, i) => (byExpense[i] += e.total))
+      expense += b.expenseTotal.total
     }
-    const expense = byExpense.reduce((a, v) => a + v, 0)
-    return { income, expense, net: income - expense, byExpense }
+    return { income, expense, profit: income - expense }
   }, [r])
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
-      <div className="grid grid-cols-3 gap-3">
-        <Stat label="収入計" value={s.income} tone="text-emerald-700" />
-        <Stat label="支出計" value={s.expense} tone="text-rose-700" />
-        <Stat label="差引（収支）" value={s.net} tone="text-slate-900" big />
-      </div>
-      <div className="flex flex-wrap gap-x-5 gap-y-1 border-t border-slate-100 pt-2 text-xs text-slate-600">
-        <span className="font-medium text-slate-500">支出の内訳</span>
-        {MGMT_EXPENSE_ROWS.map((label, i) => (
-          <span key={label} className="tabular-nums">
-            {label} <span className="font-medium text-slate-800">{yen(s.byExpense[i])}</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  )
-}
+    <div className="mt-page">
+      <header className="mt-head">
+        <div className="mt-title">
+          <span className="mt-kicker">FUJIHISA HOUSING</span>
+          <h1>賃貸物件管理表</h1>
+        </div>
+        <div className="mt-kpis">
+          <Kpi cls="income" label="INCOME" value={kpi.income} />
+          <Kpi cls="expense" label="EXPENSE" value={kpi.expense} />
+          <Kpi cls="profit" label="PROFIT" value={kpi.profit} />
+        </div>
+        <div className="mt-date">
+          {r.year}年度（{range.from} 〜 {range.to}）
+        </div>
+      </header>
 
-function Stat({
-  label,
-  value,
-  tone,
-  big,
-}: {
-  label: string
-  value: number
-  tone: string
-  big?: boolean
-}) {
-  return (
-    <div className="rounded-lg bg-slate-50 px-3 py-2">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className={`tabular-nums font-bold ${tone} ${big ? 'text-xl' : 'text-lg'}`}>
-        {yen(value)}
-      </div>
-    </div>
-  )
-}
-
-// ------------------------------------------------------------------ 本表
-const PREV = FISCAL_PREV_YEAR_COLS
-// 左2列（物件名・項目）は横スクロールしても固定する。印刷では sticky は効かないので影響なし。
-const C_NAME = 'sticky left-0 z-10 bg-white border-r border-slate-200 align-top'
-const C_ITEM = 'sticky left-[9.5rem] z-10 bg-white border-r border-slate-200 whitespace-nowrap'
-const C_TOTAL = 'sticky right-0 z-10 bg-slate-50 border-l border-slate-200 whitespace-nowrap'
-const CELL = 'px-2 py-1 whitespace-nowrap'
-
-function MgmtTable({ r }: { r: MgmtTableResult }) {
-  return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-      <table className="text-xs border-collapse w-max">
+      <table className="mt-table">
         <thead>
-          <tr className="text-slate-500">
-            <th rowSpan={2} className={`${CELL} ${C_NAME} z-20 text-left font-medium min-w-[9.5rem]`}>
-              物件
-            </th>
-            <th rowSpan={2} className={`${CELL} ${C_ITEM} z-20 text-left font-medium min-w-[4.5rem]`}>
-              項目
-            </th>
-            <th colSpan={PREV} className={`${CELL} pb-0 text-left font-medium`}>
+          <tr>
+            <th rowSpan={2}>物件</th>
+            <th rowSpan={2}>項目</th>
+            <th className="y" colSpan={PREV}>
               {r.year - 1}年
             </th>
-            <th
-              colSpan={FISCAL_MONTHS.length - PREV}
-              className={`${CELL} pb-0 text-left font-medium border-l border-slate-200`}
-            >
+            <th className="y" colSpan={FISCAL_MONTHS.length - PREV}>
               {r.year}年
             </th>
-            <th rowSpan={2} className={`${CELL} ${C_TOTAL} z-20 text-right font-medium`}>
-              年間合計
-            </th>
+            <th rowSpan={2}>年間合計</th>
           </tr>
-          <tr className="text-slate-500 border-b border-slate-300">
-            {FISCAL_MONTHS.map((m, i) => (
-              <th
-                key={m}
-                className={
-                  `${CELL} pt-0 text-center font-medium min-w-[5.5rem] ` +
-                  (i === PREV ? 'border-l border-slate-200' : '')
-                }
-              >
+          <tr>
+            {FISCAL_MONTHS.map((m) => (
+              <th key={m} className="y">
                 {m}月
               </th>
             ))}
@@ -241,18 +202,14 @@ function MgmtTable({ r }: { r: MgmtTableResult }) {
           {r.blocks.map((b) => (
             <PropertyBlock key={b.propertyId} b={b} />
           ))}
-          <tr className="border-t-2 border-slate-400 bg-slate-100 font-bold">
-            <td className={`${CELL} ${C_NAME} !bg-slate-100 text-slate-900`} colSpan={2}>
-              合　計
-            </td>
+          <tr className="mt-row-grand">
+            <td colSpan={2}>{r.grandTotal.label}</td>
             {r.grandTotal.months.map((v, i) => (
-              <td key={i} className={`${CELL} text-right tabular-nums text-slate-900`}>
-                {v ? yen(v) : '—'}
+              <td key={i} className="r">
+                {money(v)}
               </td>
             ))}
-            <td className={`${CELL} ${C_TOTAL} !bg-slate-200 text-right tabular-nums text-slate-900`}>
-              {yen(r.grandTotal.total)}
-            </td>
+            <td className="r">{money(r.grandTotal.total)}</td>
           </tr>
         </tbody>
       </table>
@@ -260,54 +217,58 @@ function MgmtTable({ r }: { r: MgmtTableResult }) {
   )
 }
 
-// 物件1件ぶんの帯（8行）。印刷でページをまたいで割れないよう report-block を付ける
+function Kpi({ cls, label, value }: { cls: string; label: string; value: number }) {
+  return (
+    <div className={`mt-kpi ${cls}`}>
+      <span>{label}</span>
+      <b>{yen(value)}</b>
+    </div>
+  )
+}
+
+// 物件1件ぶんの帯。印刷でページをまたいで割れないよう mt-block を付ける
 function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
-  const ROWS = 2 + MGMT_EXPENSE_ROWS.length // 収入 + 支出6 + 合計
   return (
     <>
-      <tr className="report-block border-t-2 border-slate-300">
-        <td rowSpan={ROWS} className={`${CELL} ${C_NAME} py-2`}>
-          <div className="font-semibold text-slate-800 leading-tight">{b.name}</div>
-          {b.built && <div className="text-[10px] text-slate-500 leading-tight">{b.built}</div>}
-          {b.acquired && <div className="text-[10px] text-slate-500 leading-tight">{b.acquired}</div>}
+      <tr className="mt-block mt-row-income">
+        <td className="mt-name" rowSpan={ROWS_PER_BLOCK}>
+          {b.name}
+          {b.built && <i>{b.built}</i>}
+          {b.acquired && <i>{b.acquired}</i>}
         </td>
-        <ItemCells row={b.income} tone="text-emerald-700" />
+        <Cells row={b.income} />
+      </tr>
+      <tr className="mt-row-expense">
+        <Cells row={b.expenseTotal} />
       </tr>
       {b.expenses.map((e) => (
-        <tr key={e.label} className="border-b border-slate-100">
-          <ItemCells row={e} tone="text-slate-600" />
+        <tr key={e.label} className="mt-row-detail">
+          <Cells row={e} detail />
         </tr>
       ))}
-      <tr className="border-b border-slate-200 bg-slate-50 font-semibold">
-        <ItemCells row={b.net} tone="text-slate-900" strong />
+      <tr className="mt-row-profit">
+        <Cells row={b.net} />
       </tr>
     </>
   )
 }
 
-// 項目名セル＋12ヶ月＋年間合計。<tr> 直下に置く前提
-function ItemCells({
-  row,
-  tone,
-  strong,
-}: {
-  row: StatementRow
-  tone: string
-  strong?: boolean
-}) {
-  const bg = strong ? '!bg-slate-50' : ''
+/** 項目名セル＋12ヶ月＋年間合計。<tr> 直下に置く前提 */
+function Cells({ row, detail }: { row: StatementRow; detail?: boolean }) {
   return (
     <>
-      <td className={`${CELL} ${C_ITEM} ${bg} ${tone}`}>{row.label}</td>
+      <td className={detail ? 'mt-item detail' : 'mt-item'}>{row.label}</td>
       {row.months.map((v, i) => (
-        <td key={i} className={`${CELL} text-right tabular-nums ${tone}`}>
-          {v ? yen(v) : '—'}
+        <td key={i} className="r">
+          {money(v)}
         </td>
       ))}
-      {/* 発生の無い費目は月・年間合計とも「—」で揃える（合計だけ ¥0 と出るのを防ぐ） */}
-      <td className={`${CELL} ${C_TOTAL} ${strong ? '!bg-slate-100' : ''} text-right tabular-nums font-medium ${tone}`}>
-        {row.total ? yen(row.total) : '—'}
-      </td>
+      <td className="r total">{money(row.total)}</td>
     </>
   )
+}
+
+/** 0 は薄い「—」にして、金額のある月を目で追いやすくする */
+function money(v: number) {
+  return v ? yen(v) : <span className="mt-zero">—</span>
 }
