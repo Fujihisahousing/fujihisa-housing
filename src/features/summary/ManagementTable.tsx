@@ -92,7 +92,8 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
   return (
     <div className="space-y-4">
       <div className="no-print flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <span className="text-sm font-medium text-slate-700">賃貸物件管理表</span>
+        {/* 画面のラベルはタブ名に合わせる。印刷の表題は Excel 由来の「賃貸物件管理表」のまま */}
+        <span className="text-sm font-medium text-slate-700">収支管理表</span>
         <label className="text-sm text-slate-600 ml-2">年度</label>
         <select
           value={year}
