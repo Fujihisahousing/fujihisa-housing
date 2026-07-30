@@ -11,6 +11,15 @@ export const USE_TYPES = [
 ] as const
 /** 入居者属性の選択肢 */
 export const TENANT_TYPES = ['個人', '法人'] as const
+
+/** 支払方法の選択肢。「誰から入金されるか」を表す。
+ *  通帳・PDFからの自動読み取りで、どう照合するかがこれで決まる：
+ *    振込     … 通帳に契約者名（カナ）が出るので、名前で突き合わせる
+ *    保証会社 … 通帳には保証会社名しか出ないので、金額で突き合わせる
+ *               （どの会社かは units.guarantor に持つ）
+ *  isGuarantor（calc.ts）が '保証' を含むかで判定するので、
+ *  '保証会社' の表記はこのまま変えないこと。 */
+export const PAYMENT_METHODS = ['振込', '保証会社'] as const
 export type LeaseStatus = '入居' | '退去'
 export type Role = 'admin' | 'staff'
 

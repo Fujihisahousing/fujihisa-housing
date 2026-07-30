@@ -9,7 +9,7 @@ import { unitCompare } from '../../lib/sortUnits'
 import { effectiveRentKyoeki, deriveJudgement } from '../../lib/calc'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, formatDate, today } from '../../lib/format'
-import { UNIT_STATUSES, USE_TYPES, type Property, type RentHistory, type Unit } from '../../types'
+import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type Property, type RentHistory, type Unit } from '../../types'
 
 export function PropertiesView({ onChanged }: { onChanged: () => void }) {
   const [properties, setProperties] = useState<Property[]>([])
@@ -659,7 +659,33 @@ function UnitModal({
         </div>
         <div className="grid grid-cols-2 gap-3">
           <TextField label="保証会社" value={f.guarantor ?? ''} onChange={set('guarantor')} />
-          <TextField label="支払方法" value={f.payment_method ?? ''} onChange={set('payment_method')} />
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1">支払方法</label>
+            <select
+              value={f.payment_method ?? ''}
+              onChange={(e) => set('payment_method')(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
+            >
+              <option value="">未設定</option>
+              {PAYMENT_METHODS.map((o) => (
+                <option key={o} value={o}>
+                  {o}
+                </option>
+              ))}
+              {/* 移行前の自由入力（「日本管理サポート㈱から毎月入金」など）を消さないため、
+                  選択肢に無い現在値はそのまま候補に残す。選び直せば新しい表記になる。 */}
+              {f.payment_method && !PAYMENT_METHODS.includes(f.payment_method as never) && (
+                <option value={f.payment_method}>{f.payment_method}（旧表記）</option>
+              )}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              {f.payment_method === '保証会社'
+                ? '通帳には保証会社名が出るため、金額で照合します。会社名は左の「保証会社」に入れてください。'
+                : f.payment_method === '振込'
+                  ? '通帳の契約者名（カナ）で照合します。読み方が未入力だと突き合わせられません。'
+                  : '通帳・PDFの自動読み取りで、契約者名で照合するか金額で照合するかの判断に使います。'}
+            </p>
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <TextField label="入居開始日" value={f.contract_start ?? ''} onChange={set('contract_start')} type="date" />
