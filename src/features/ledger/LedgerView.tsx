@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { Pencil, Trash2, Loader2, Download, FileJson, History } from 'lucide-react'
 import { Modal } from '../../components/common/Modal'
 import { transactionsRepo, unitsRepo, auditLogsRepo } from '../../lib/repositories'
+import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
 import { exportTransactionsCSV, exportAllJSON } from '../../lib/csv'
 import { yen, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
@@ -53,7 +54,10 @@ export function LedgerView({ properties }: { properties: Property[] }) {
 
   async function onDelete(id: string) {
     if (!window.confirm('この記帳を削除しますか？\n（論理削除。履歴には残ります）')) return
+    const deleted = rows.find((r) => r.id === id)
     await transactionsRepo.remove(id)
+    // 削除した月の入金状況も貼り直す（家賃の記帳だけが対象）
+    if (deleted) await syncPaymentRecordsFromLedger([deleted])
     void load()
   }
 
@@ -337,6 +341,12 @@ function EditModal({
         method: method || null,
         memo: memo || null,
       })
+      // 入金状況にも反映する。日付や号室を動かした場合は移動前・移動後の
+      // 両方の月を貼り直す必要があるので、変更前後の内容を両方渡す。
+      await syncPaymentRecordsFromLedger([
+        tx,
+        { ...tx, amount: amt, date, category, unit_id: unitId || null },
+      ])
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存に失敗しました。')

@@ -598,6 +598,19 @@ export interface PaymentStatusResult {
 
 const RENT_CATEGORIES = new Set(['賃料', '共益費'])
 const isGuarantor = (s?: string | null) => Boolean(s && /保証/.test(s))
+/** その記帳が賃料系（入金状況で扱う対象）か */
+export const isRentCategory = (category: string) => RENT_CATEGORIES.has(category)
+
+/**
+ * 入金日から「何月分の入金か（帰属月）」を出す。前家賃ルール：
+ * 11日以降の入金は翌月分の前払い、10日までの入金は当月分とみなす。
+ * calcPaymentStatus の attrIdx と同じ規則。台帳→入金状況の反映でも使う。
+ */
+export function attributionMonth(date: string | Date): { year: number; month: number } {
+  const d = typeof date === 'string' ? new Date(date) : date
+  const idx = d.getFullYear() * 12 + d.getMonth() + (d.getDate() > 10 ? 1 : 0)
+  return { year: Math.floor(idx / 12), month: (idx % 12) + 1 }
+}
 
 // 請求額・入金額・入居状況・保証会社有無 から判定を導出（手入力の入金額編集で使用）。
 export function deriveJudgement(

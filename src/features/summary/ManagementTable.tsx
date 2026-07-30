@@ -1,6 +1,6 @@
-// 賃貸物件管理表（全物件まとめ）。画面表示＋A3横の印刷／PDF。
-// 長年 Excel（フジヒサハウジング管理.xls「賃貸物件管理表」）で作ってきた形をそのまま踏襲する：
-//   縦＝物件ごとの帯（収入・支出6行・合計）／横＝9月〜8月＋年間合計／最下段＝全物件の合計。
+// 収支管理表（全物件まとめ）。画面表示＋A3横の印刷／PDF。紙面の表題は「賃貸物件支出表」。
+// 長年 Excel（フジヒサハウジング管理.xls「賃貸物件管理表」）で作ってきた形を踏襲する：
+//   縦＝物件ごとの帯（収入・支出・明細・利益）／横＝9月〜8月＋年間合計／最下段＝全物件の合計。
 // 既存の収支表（行=費目・1物件ぶん）とは別物なので、画面も別タブに分けている。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, Printer } from 'lucide-react'
@@ -95,7 +95,7 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
   return (
     <div className="space-y-4">
       <div className="no-print flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
-        {/* 画面のラベルはタブ名に合わせる。印刷の表題は Excel 由来の「賃貸物件管理表」のまま */}
+        {/* 画面のラベルはタブ名（収支管理表）に合わせる。印刷の表題は「賃貸物件支出表」で別 */}
         <span className="text-sm font-medium text-slate-700">収支管理表</span>
         <label className="text-sm text-slate-600 ml-2">年度</label>
         <select

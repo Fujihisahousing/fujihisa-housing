@@ -186,16 +186,18 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
         {blocks.map(({ label, property, rooms }) => {
           const c = rooms.filter((u) => u.status !== '停止')
           const o = rooms.filter(isChargeable)
-          // 変動値は「合計（賃料＋共益費）」には含めない。計の行に参考として出すだけ。
+          // 賃料・共益費・駐輪駐車の計は課金対象（入居・退予）だけを足す。
           const sum = o.reduce(
             (a, u) => ({
               rent: a.rent + n(u.rent),
               kyoeki: a.kyoeki + n(u.kyoeki),
               parking: a.parking + parkingYen(u.parking),
-              variation: a.variation + variationYen(u.variation),
             }),
-            { rent: 0, kyoeki: 0, parking: 0, variation: 0 },
+            { rent: 0, kyoeki: 0, parking: 0 },
           )
+          // 変動値だけは停止中・空室も含めて全部屋を足す（家賃の増減の総額を見るため）。
+          // 「合計（賃料＋共益費）」には含めない。計の行に参考として出すだけ。
+          const variationSum = rooms.reduce((a, u) => a + variationYen(u.variation), 0)
           return (
             <section className="sr-block" key={property.id}>
               <div className="sr-block-head">
@@ -278,7 +280,7 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                     <td className="r">{num(sum.kyoeki)}</td>
                     {/* 変動値の計。各室は「+5,000」のように＋付きで入力されるが、
                         計では＋を付けない（0 のときは空欄のまま） */}
-                    <td className="r">{sum.variation ? num(sum.variation) : ''}</td>
+                    <td className="r">{variationSum ? num(variationSum) : ''}</td>
                     <td className="r">{num(sum.parking)}</td>
                     <td colSpan={2} />
                   </tr>

@@ -66,6 +66,12 @@ export const unitsRepo = {
       .order('room')
     return unwrap(data, error)
   },
+  /** 1件だけ取得。見つからなければ null（台帳→入金状況の反映で使う） */
+  async getById(id: string): Promise<Unit | null> {
+    const { data, error } = await supabase.from('units').select('*').eq('id', id).maybeSingle()
+    if (error) throw new Error(error.message)
+    return data ?? null
+  },
   async create(u: Partial<Unit>): Promise<Unit> {
     const { data, error } = await supabase.from('units').insert(u).select().single()
     return unwrap(data, error)

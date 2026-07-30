@@ -2,6 +2,7 @@
 // 「まとめ入金」モードでは、入居者からの合算振込を契約内訳（賃料・共益費・光熱費）に自動で振り分ける。
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { transactionsRepo, unitsRepo } from '../../lib/repositories'
+import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
 import { today } from '../../lib/format'
 import { yen } from '../../lib/format'
 import { CAT_RENT, CAT_KYOEKI, CAT_UTILITY } from '../../types'
@@ -121,6 +122,8 @@ export function RoomEntry({
     setSaving(true)
     try {
       await transactionsRepo.createMany(rows)
+      // 家賃を記帳したら入金状況にも反映する（賃料・共益費で号室のある行だけが対象）
+      await syncPaymentRecordsFromLedger(rows)
       // 入力欄をリセット（物件・号室・日付は残す）
       setDeposit('')
       setKeyMoney('')
