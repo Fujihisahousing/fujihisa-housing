@@ -199,10 +199,10 @@ export function MgmtSheet({
             <PropertyBlock key={b.propertyId} b={b} />
           ))}
           {/* 最下段は全物件の 収入／支出／利益。行の色は各帯と同じ。
-              支出だけは出ていく金額であることが分かるよう、赤字＋マイナス表記にする */}
+              支出は出ていく金額なので常に赤字＋マイナス表記、利益は赤字になったときだけ赤。 */}
           <GrandRow row={r.grandIncome} cls="mt-row-income" first />
-          <GrandRow row={r.grandExpense} cls="mt-row-expense" negate />
-          <GrandRow row={r.grandNet} cls="mt-row-profit" last />
+          <GrandRow row={r.grandExpense} cls="mt-row-expense" tone="red" negate />
+          <GrandRow row={r.grandNet} cls="mt-row-profit" tone="negRed" last />
         </tbody>
       </table>
     </div>
@@ -218,19 +218,20 @@ function Kpi({ cls, label, value }: { cls: string; label: string; value: number 
   )
 }
 
-/** 最下段の合計行（物件名の列は「合計」でまとめる）
- *  negate＝出ていく金額としてマイナス表記にする（赤字は cell() 側で付く） */
+/** 最下段の合計行（物件名の列は「合計」でまとめる） */
 function GrandRow({
   row,
   cls,
   first,
   last,
+  tone,
   negate,
 }: {
   row: StatementRow
   cls: string
   first?: boolean
   last?: boolean
+  tone?: Tone
   negate?: boolean
 }) {
   return (
@@ -240,7 +241,7 @@ function GrandRow({
           <strong>合計</strong>
         </td>
       )}
-      <Cells row={row} negate={negate} />
+      <Cells row={row} tone={tone} negate={negate} />
     </tr>
   )
 }
@@ -260,8 +261,9 @@ function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
         </td>
         <Cells row={b.income} />
       </tr>
-      {/* 支出は合計・明細ともマイナス表記（赤字は cell() が符号で付ける）。
-          こうしておくと明細の和と支出の符号が揃い、収入＋支出＝利益になる。 */}
+      {/* 支出は合計・明細ともマイナス表記にする（明細の和と支出の符号が揃い、
+          収入＋支出＝利益になる）。ただし文字は黒のまま。赤字にするのは
+          利益がマイナスのときと、最下段の合計の支出行だけ。 */}
       <tr className="mt-row-expense">
         <Cells row={b.expenseTotal} negate />
       </tr>
@@ -271,11 +273,17 @@ function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
         </tr>
       ))}
       <tr className="mt-row-profit">
-        <Cells row={b.net} />
+        <Cells row={b.net} tone="negRed" />
       </tr>
     </>
   )
 }
+
+/** 文字色の付け方。マイナス表記（negate）とは独立に決める。
+ *  plain  … 常に黒。マイナスでも黒のまま
+ *  negRed … マイナスのときだけ赤（各物件と合計の利益行）
+ *  red    … 常に赤（合計の支出行） */
+type Tone = 'plain' | 'negRed' | 'red'
 
 /** 項目名セル＋12ヶ月＋年間合計。<tr> 直下に置く前提。
  *  negate＝符号を反転して表示する（支出を「出ていく金額」として−で見せる用） */
@@ -283,12 +291,16 @@ function Cells({
   row,
   detail,
   negate,
+  tone = 'plain',
 }: {
   row: StatementRow
   detail?: boolean
   negate?: boolean
+  tone?: Tone
 }) {
   const sign = (v: number) => (negate ? -v : v)
+  const cell = (v: number) =>
+    'r' + (tone === 'red' || (tone === 'negRed' && v < 0) ? ' neg' : '')
   return (
     <>
       <td className={detail ? 'mt-item detail' : 'mt-item'}>{row.label}</td>
@@ -301,9 +313,6 @@ function Cells({
     </>
   )
 }
-
-/** マイナスは赤字にする（「−」表記のままで色だけ変える） */
-const cell = (v: number) => (v < 0 ? 'r neg' : 'r')
 
 /** 0 は薄い「—」にして、金額のある月を目で追いやすくする */
 function money(v: number) {
