@@ -15,17 +15,25 @@ import type { AuditLog, Property, Transaction, Unit } from '../../types'
 type TypeFilter = 'all' | 'income' | 'expense'
 
 /**
- * 家賃の記帳に付ける「何月分か」のラベル。前家賃なので入金日と対象月がずれる
- * （11日以降の入金は翌月分＝6/30の入金は7月分）。判定は入金状況と同じ規則。
+ * 家賃の記帳に付ける「何月分か」のラベル。系統によって月が違うので両方出す。
+ *   収支表・支出表 … 入金日の月（長年のExcelと同じ入金日ベース）。7/30 は7月
+ *   入金状況       … 前家賃の帰属月（11日以降の入金は翌月分）。7/30 は8月分
+ * 片方だけ出すと「台帳では8月分なのに収支表は7月」と食い違って見えるため併記する。
  * 家賃以外（敷金・礼金・支出など）は月の概念が無いので付けない。
  */
-function rentMonthLabel(t: Transaction): string {
-  if (t.type !== 'income' || !isRentCategory(t.category)) return ''
-  const attr = attributionMonth(t.date)
-  if (!attr.year) return ''
-  // 12/20 の入金は翌年1月分。年をまたぐときは年も出さないと紛らわしい
+function rentMonthLabel(t: Transaction): { ledger: string; payment: string } | null {
+  if (t.type !== 'income' || !isRentCategory(t.category)) return null
   const led = ledgerMonth(t.date)
-  return attr.year === led.year ? `${attr.month}月分` : `${attr.year}年${attr.month}月分`
+  if (!led.year) return null
+  const attr = attributionMonth(t.date)
+  return {
+    ledger: `収支表${led.month}月分`,
+    // 12/20 の入金は翌年1月分。年をまたぐときは年も出さないと紛らわしい
+    payment:
+      attr.year === led.year
+        ? `家賃入金${attr.month}月分`
+        : `家賃入金${attr.year}年${attr.month}月分`,
+  }
 }
 
 export function LedgerView({ properties }: { properties: Property[] }) {
@@ -123,15 +131,21 @@ export function LedgerView({ properties }: { properties: Property[] }) {
               className="flex items-center gap-3 rounded-xl bg-white border border-slate-200 px-4 py-3"
             >
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-slate-800 truncate">{r.category}</span>
-                  {/* 家賃は前家賃なので入金日と対象月がずれる（6/30の入金は7月分）。
-                      どの月の家賃かをここに出しておくと、直すときに迷わない。 */}
-                  {rentMonthLabel(r) && (
-                    <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">
-                      {rentMonthLabel(r)}
-                    </span>
-                  )}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="text-sm font-medium text-slate-800">{r.category}</span>
+                  {/* 収支表と入金状況で月がずれるので両方出す（rentMonthLabel 参照）。
+                      収支表＝入金日の月、家賃入金＝前家賃の帰属月。 */}
+                  {(() => {
+                    const m = rentMonthLabel(r)
+                    if (!m) return null
+                    return (
+                      <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">
+                        {m.ledger}
+                        <span className="mx-1 text-slate-300">/</span>
+                        {m.payment}
+                      </span>
+                    )
+                  })()}
                   <span className="text-xs text-slate-400">{formatDate(r.date)}</span>
                 </div>
                 <div className="text-xs text-slate-500 truncate">
