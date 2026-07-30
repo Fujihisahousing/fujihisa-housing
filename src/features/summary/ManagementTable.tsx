@@ -12,6 +12,7 @@ import {
   paymentRecordsToTransactions,
   FISCAL_MONTHS,
   FISCAL_PREV_YEAR_COLS,
+  MGMT_ROW_MEMBERS,
   isDisposedForRentRoll,
   type MgmtPropertyBlock,
   type MgmtTableResult,
@@ -153,7 +154,7 @@ export function MgmtSheet({
       <header className="mt-head">
         <div className="mt-title">
           <span className="mt-kicker">FUJIHISA HOUSING</span>
-          <h1>賃貸物件管理表</h1>
+          <h1>賃貸物件支出表</h1>
         </div>
         <div className="mt-kpis">
           <Kpi cls="income" label="収入" value={r.grandIncome.total} />
@@ -164,6 +165,11 @@ export function MgmtSheet({
           {r.year}年度（{range.from} 〜 {range.to}）
         </div>
       </header>
+
+      {/* 「管理費」に何を畳んでいるかの凡例。横1行で、罫線のすぐ下に置く */}
+      <p className="mt-legend">
+        管理費の内訳：{MGMT_ROW_MEMBERS['管理費'].join('・')}
+      </p>
 
       <table className="mt-table">
         <thead>
@@ -190,9 +196,10 @@ export function MgmtSheet({
           {r.blocks.map((b) => (
             <PropertyBlock key={b.propertyId} b={b} />
           ))}
-          {/* 最下段は全物件の 収入／支出／利益。行の色は各帯と同じ */}
+          {/* 最下段は全物件の 収入／支出／利益。行の色は各帯と同じ。
+              支出だけは出ていく金額であることが分かるよう、赤字＋マイナス表記にする */}
           <GrandRow row={r.grandIncome} cls="mt-row-income" first />
-          <GrandRow row={r.grandExpense} cls="mt-row-expense" />
+          <GrandRow row={r.grandExpense} cls="mt-row-expense" negate />
           <GrandRow row={r.grandNet} cls="mt-row-profit" last />
         </tbody>
       </table>
@@ -209,26 +216,29 @@ function Kpi({ cls, label, value }: { cls: string; label: string; value: number 
   )
 }
 
-/** 最下段の合計行（物件名の列は「全物件」でまとめる） */
+/** 最下段の合計行（物件名の列は「合計」でまとめる）
+ *  negate＝出ていく金額としてマイナス表記にする（赤字は cell() 側で付く） */
 function GrandRow({
   row,
   cls,
   first,
   last,
+  negate,
 }: {
   row: StatementRow
   cls: string
   first?: boolean
   last?: boolean
+  negate?: boolean
 }) {
   return (
     <tr className={`mt-grand ${cls}${last ? ' mt-grand-last' : ''}`}>
       {first && (
         <td className="mt-name mt-grand-name" rowSpan={3}>
-          <strong>全物件</strong>
+          <strong>合計</strong>
         </td>
       )}
-      <Cells row={row} />
+      <Cells row={row} negate={negate} />
     </tr>
   )
 }
@@ -263,17 +273,27 @@ function PropertyBlock({ b }: { b: MgmtPropertyBlock }) {
   )
 }
 
-/** 項目名セル＋12ヶ月＋年間合計。<tr> 直下に置く前提 */
-function Cells({ row, detail }: { row: StatementRow; detail?: boolean }) {
+/** 項目名セル＋12ヶ月＋年間合計。<tr> 直下に置く前提。
+ *  negate＝符号を反転して表示する（支出を「出ていく金額」として−で見せる用） */
+function Cells({
+  row,
+  detail,
+  negate,
+}: {
+  row: StatementRow
+  detail?: boolean
+  negate?: boolean
+}) {
+  const sign = (v: number) => (negate ? -v : v)
   return (
     <>
       <td className={detail ? 'mt-item detail' : 'mt-item'}>{row.label}</td>
       {row.months.map((v, i) => (
-        <td key={i} className={cell(v)}>
-          {money(v)}
+        <td key={i} className={cell(sign(v))}>
+          {money(sign(v))}
         </td>
       ))}
-      <td className={cell(row.total) + ' total'}>{money(row.total)}</td>
+      <td className={cell(sign(row.total)) + ' total'}>{money(sign(row.total))}</td>
     </>
   )
 }

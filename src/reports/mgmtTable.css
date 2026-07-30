@@ -7,6 +7,10 @@
   width: 404mm;
   min-height: 281mm;
   margin: 0 auto;
+  /* 表を紙面の高さいっぱいに伸ばして下の余白をなくす。行数が変わっても
+     余った高さが各行に配られるので、フォントを詰め直す必要がない。 */
+  display: flex;
+  flex-direction: column;
   background: #fff;
   color: #0b1220;
   font-family: 'Inter', 'Helvetica Neue', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
@@ -79,11 +83,22 @@
 /* 全帯＋合計3行を A3横1枚に収めるため、行はかなり詰めている。
    現況報告書も 5〜6.5pt で運用しているので、この紙面では許容範囲。
    行数が増えて1枚に入らなくなったら、まず font-size と padding を下げる。 */
+/* 罫線のすぐ下に置く凡例（管理費の内訳）。目立たせないのでグレー・横1行 */
+.mt-legend {
+  margin: 0 0 1mm;
+  font-size: 5.4pt;
+  color: #94a3b8;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
 .mt-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 5.6pt;
   line-height: 1.02;
+  /* .mt-page の flex 子として、余った高さを吸収して下端まで伸びる */
+  flex: 1 0 auto;
 }
 .mt-table th,
 .mt-table td {
@@ -216,7 +231,6 @@
     break-inside: avoid;
     page-break-inside: avoid;
   }
-  .mt-page {
-    min-height: 0;
-  }
+  /* min-height は 281mm のまま残す。ここで 0 にすると flex の伸びが効かず、
+     紙の下に余白が戻ってしまう（画面と印刷で見た目がずれる）。 */
 }

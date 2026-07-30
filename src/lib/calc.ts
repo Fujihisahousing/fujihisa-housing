@@ -308,6 +308,15 @@ const MGMT_ROW_OF: Record<string, MgmtExpenseRow> = {
   利息: '利息',
   // '町会費'（HIDDEN_ROWS）と 'その他' は下の ?? で '管理費' に入る
 }
+/** 明細行ごとに、そこへ畳まれる収支表の費目名。紙面の凡例に出す。
+ *  MGMT_ROW_OF から導出しているので、対応を変えれば凡例も自動で追従する。 */
+export const MGMT_ROW_MEMBERS: Record<string, string[]> = (() => {
+  const out: Record<string, string[]> = {}
+  for (const row of MGMT_EXPENSE_ROWS) out[row] = []
+  for (const [cat, row] of Object.entries(MGMT_ROW_OF)) out[row].push(cat)
+  out['管理費'].push('その他') // 未対応カテゴリの受け皿（MGMT_ROW_OF の ?? 側）
+  return out
+})()
 
 /** 収支管理表でだけ、戸建ての各現場を1つの帯にまとめる。表示名はこれ。
  *  レントロールの group_name による集約とは別で、この表専用の扱い。 */
