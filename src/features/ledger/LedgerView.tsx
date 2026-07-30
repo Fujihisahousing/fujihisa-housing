@@ -5,7 +5,7 @@ import { Modal } from '../../components/common/Modal'
 import { transactionsRepo, unitsRepo, auditLogsRepo } from '../../lib/repositories'
 import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
 import { ReflectionHint } from '../../components/common/ReflectionHint'
-import { isRentCategory } from '../../lib/calc'
+import { isRentCategory, attributionMonth, ledgerMonth } from '../../lib/calc'
 import { exportTransactionsCSV, exportAllJSON } from '../../lib/csv'
 import { yen, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
@@ -13,6 +13,20 @@ import { useAuth } from '../../auth/AuthProvider'
 import type { AuditLog, Property, Transaction, Unit } from '../../types'
 
 type TypeFilter = 'all' | 'income' | 'expense'
+
+/**
+ * 家賃の記帳に付ける「何月分か」のラベル。前家賃なので入金日と対象月がずれる
+ * （11日以降の入金は翌月分＝6/30の入金は7月分）。判定は入金状況と同じ規則。
+ * 家賃以外（敷金・礼金・支出など）は月の概念が無いので付けない。
+ */
+function rentMonthLabel(t: Transaction): string {
+  if (t.type !== 'income' || !isRentCategory(t.category)) return ''
+  const attr = attributionMonth(t.date)
+  if (!attr.year) return ''
+  // 12/20 の入金は翌年1月分。年をまたぐときは年も出さないと紛らわしい
+  const led = ledgerMonth(t.date)
+  return attr.year === led.year ? `${attr.month}月分` : `${attr.year}年${attr.month}月分`
+}
 
 export function LedgerView({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
@@ -111,6 +125,13 @@ export function LedgerView({ properties }: { properties: Property[] }) {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-slate-800 truncate">{r.category}</span>
+                  {/* 家賃は前家賃なので入金日と対象月がずれる（6/30の入金は7月分）。
+                      どの月の家賃かをここに出しておくと、直すときに迷わない。 */}
+                  {rentMonthLabel(r) && (
+                    <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600">
+                      {rentMonthLabel(r)}
+                    </span>
+                  )}
                   <span className="text-xs text-slate-400">{formatDate(r.date)}</span>
                 </div>
                 <div className="text-xs text-slate-500 truncate">
