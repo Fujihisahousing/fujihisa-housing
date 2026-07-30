@@ -6,6 +6,7 @@ import { LeaseManager } from '../leases/LeaseManager'
 import { useAuth } from '../../auth/AuthProvider'
 import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo } from '../../lib/repositories'
 import { unitCompare } from '../../lib/sortUnits'
+import { effectiveRentKyoeki, deriveJudgement } from '../../lib/calc'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, formatDate, today } from '../../lib/format'
 import { UNIT_STATUSES, USE_TYPES, type Property, type RentHistory, type Unit } from '../../types'
@@ -227,6 +228,47 @@ function TextField({
       />
     </div>
   )
+}
+
+/**
+ * 賃料履歴を変えたあと、入金状況の月次記録（payment_records）の請求額を貼り直す。
+ *
+ * 記録がある月は物件情報にフォールバックしない設計なので、記録に固まっている
+ * 請求額を上書きしない限り、履歴を直しても入金状況の表示は変わらない。
+ * 触るのは請求額と判定だけで、入金額・契約者名・備考・滞納月数には手を付けない。
+ * 対象は反映開始日の月以降だけ（それより前の月は当時の請求額のまま残す）。
+ */
+async function repriceRecords(
+  propertyId: string,
+  room: string,
+  unitId: string,
+  history: RentHistory[],
+  effectiveDate: string,
+) {
+  const [fromYear, fromMonth] = effectiveDate.split('-').map(Number)
+  if (!fromYear || !fromMonth) return
+  const records = await paymentRecordsRepo.listFrom(propertyId, room, fromYear, fromMonth)
+  for (const rec of records) {
+    // effectiveRentKyoeki は units の現在値をフォールバックに使うが、ここでは
+    // 履歴だけで決めたいので rent/kyoeki は 0 の器を渡す（履歴が無ければ 0 になり、
+    // その月は貼り直しの対象外として下で弾く）。
+    const eff = effectiveRentKyoeki(
+      { id: unitId, rent: 0, kyoeki: 0 } as Unit,
+      history,
+      rec.year,
+      rec.month,
+    )
+    const billed = eff.rent + eff.kyoeki
+    if (billed === 0) continue // その月をカバーする履歴が無い＝据え置き
+    if (Number(rec.billed ?? -1) === billed) continue // 変化なし
+    const judgement = deriveJudgement(
+      rec.judgement !== '空室',
+      billed,
+      Number(rec.paid ?? 0),
+      Boolean(rec.guarantor),
+    )
+    await paymentRecordsRepo.setBilled(propertyId, room, rec.year, rec.month, billed, judgement)
+  }
 }
 
 function numOrNull(v: string): number | null {
@@ -475,6 +517,10 @@ function UnitModal({
         ) {
           await unitsRepo.update(unitId, { rent: current.rent, kyoeki: current.kyoeki, parking: current.parking ?? null })
         }
+        // 入金状況の月次記録は、作られた時点の請求額を持ったまま固まっている
+        // （記録がある月は物件情報にフォールバックしない設計）。賃料履歴を直しても
+        // 画面が変わらないのを防ぐため、反映開始日以降の記録の請求額を貼り直す。
+        await repriceRecords(propertyId, payload.room!, unitId, allHistory, f.rent_effective_date || todayStr)
       }
       onSaved()
     } catch (e) {

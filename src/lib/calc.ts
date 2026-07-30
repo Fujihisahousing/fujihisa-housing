@@ -7,7 +7,12 @@ const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予' /
 const isStopped = (u: Unit) => u.status === '停止' // 募集停止：空室率の総数に含めない
 
 // 指定年月時点で有効な賃料・共益費を履歴から求める（履歴が無い/その年月以前の履歴が無い場合は units の現在値にフォールバック）。
-// 「新しい日付の開始日ほど優先」＝ effective_date が対象年月以前で最大の行を採用する。
+// 「新しい日付の開始日ほど優先」＝ effective_date が対象月の1日以前で最大の行を採用する。
+// 月初を反映開始日にした履歴は、その月から効く（例：2026-03-01 → 3月分から660,000円）。
+//
+// 判定は 'YYYY-MM-DD' の文字列同士の比較で行う。Date に変換して比べてはいけない：
+// new Date('2026-03-01') は UTC の0時として解釈されるため JST では 3/1 9時になり、
+// 対象月の1日0時（new Date(2026,2,1)）より後ろに回って、その月に適用されなくなる。
 export function effectiveRentKyoeki(
   unit: Unit,
   history: RentHistory[] | undefined,
@@ -16,11 +21,12 @@ export function effectiveRentKyoeki(
 ): { rent: number; kyoeki: number } {
   const fallback = { rent: n(unit.rent), kyoeki: n(unit.kyoeki) }
   if (!history || history.length === 0) return fallback
-  const asOf = new Date(year, month - 1, 1).getTime()
+  const asOf = `${year}-${String(month).padStart(2, '0')}-01`
+  const startOf = (h: RentHistory) => String(h.effective_date).slice(0, 10)
   let best: RentHistory | null = null
   for (const h of history) {
-    const t = new Date(h.effective_date).getTime()
-    if (t <= asOf && (!best || t > new Date(best.effective_date).getTime())) best = h
+    const d = startOf(h)
+    if (d <= asOf && (!best || d > startOf(best))) best = h
   }
   return best ? { rent: n(best.rent), kyoeki: n(best.kyoeki) } : fallback
 }

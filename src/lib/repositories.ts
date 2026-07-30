@@ -260,6 +260,40 @@ export const paymentRecordsRepo = {
     if (error) throw new Error(error.message)
   },
   /**
+   * この号室の、指定年月以降の月次記録を取得する。賃料履歴を変更したときに
+   * 請求額を貼り直す対象を拾うのに使う。
+   */
+  async listFrom(
+    property_id: string,
+    room: string,
+    year: number,
+    month: number,
+  ): Promise<PaymentRecord[]> {
+    const { data, error } = await supabase
+      .from('payment_records')
+      .select('*')
+      .match({ property_id, room })
+      // (year, month) >= (year, month) を1本の条件で書けないので、
+      // 「翌年以降」または「同年かつ当月以降」で拾う
+      .or(`year.gt.${year},and(year.eq.${year},month.gte.${month})`)
+    return unwrap(data, error)
+  },
+  /** 請求額と判定だけを差し替える（入金額・契約者名・備考には触らない） */
+  async setBilled(
+    property_id: string,
+    room: string,
+    year: number,
+    month: number,
+    billed: number,
+    judgement: string,
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('payment_records')
+      .update({ billed, judgement, updated_at: new Date().toISOString() })
+      .match({ property_id, room, year, month })
+    if (error) throw new Error(error.message)
+  },
+  /**
    * 部屋詳細で契約者情報を入力・更新したときに呼ぶ。この号室の月次記録のうち
    * 「契約者名が未入力（null/空文字）」のものだけ、契約者名・属性・読み方を
    * 埋める。既に契約者名が入っている記録（前の入居者の分など）は一切触らない
