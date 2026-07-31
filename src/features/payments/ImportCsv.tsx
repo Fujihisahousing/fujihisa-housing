@@ -7,6 +7,7 @@ import { yen } from '../../lib/format'
 import { CAT_RENT, CAT_KYOEKI, CAT_UTILITY, type Property, type Transaction, type Unit } from '../../types'
 import { matchTenantName, type MatchConfidence } from '../../lib/matchTenant'
 import { allocateDeposit, contractAmount } from '../../lib/allocateDeposit'
+import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
 
 interface Parsed {
   date: string
@@ -55,11 +56,30 @@ function downloadTemplate() {
   URL.revokeObjectURL(url)
 }
 
-function normDate(s: string): string {
-  const t = s.trim().replace(/\//g, '-')
-  const m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
-  return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : t
+/**
+ * 通帳の日付を 'YYYY-MM-DD' にする。読めなければ空文字を返す（=取り込ませない）。
+ *
+ * 通帳は和暦のことが多い。「08-07-31」は令和8年7月31日で、これをそのまま
+ * DBに渡すと Postgres が 2031-08-07（月=08 日=07 年=31）と解釈してしまう。
+ * 2桁以下の年は必ず和暦（令和）として読む。西暦だと 08年=2008年になり、
+ * 通帳に出るはずのない年になるので取り違えの心配はない。
+ */
+export function normDate(s: string): string {
+  const t = s.trim().replace(/[/.年月]/g, '-').replace(/日/g, '')
+  // 令和の記号付き（R8-7-31 / 令和8年7月31日）
+  const wareki = t.match(/^(?:R|令和)-?(\d{1,2})-(\d{1,2})-(\d{1,2})$/i)
+  if (wareki) return reiwa(+wareki[1], +wareki[2], +wareki[3])
+  const m = t.match(/^(\d{1,4})-(\d{1,2})-(\d{1,2})$/)
+  if (!m) return ''
+  const [y, mo, d] = [+m[1], +m[2], +m[3]]
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return ''
+  // 4桁は西暦、2桁以下は令和
+  if (m[1].length === 4) return `${y}-${pad(mo)}-${pad(d)}`
+  return reiwa(y, mo, d)
 }
+const pad = (n: number) => String(n).padStart(2, '0')
+/** 令和 → 西暦。令和1年 = 2019年 */
+const reiwa = (y: number, m: number, d: number) => `${2018 + y}-${pad(m)}-${pad(d)}`
 
 function splitLine(line: string): string[] {
   const out: string[] = []
@@ -111,6 +131,28 @@ export function ImportCsv({
 
   const unitsById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units])
 
+  // 既にある賃料の記帳。同じCSVを二度取り込んだときに気づけるようにする
+  const [booked, setBooked] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (!propertyId) return setBooked(new Set())
+    let active = true
+    transactionsRepo
+      .list({ propertyId })
+      .then((ts) => {
+        if (!active) return
+        const s = new Set<string>()
+        for (const t of ts) {
+          if (t.type !== 'income' || !t.unit_id || t.category !== CAT_RENT) continue
+          s.add(`${String(t.date).slice(0, 10)}|${t.unit_id}`)
+        }
+        setBooked(s)
+      })
+      .catch(() => active && setBooked(new Set()))
+    return () => {
+      active = false
+    }
+  }, [propertyId])
+
   // 通帳の名義から号室を当てる。カナの揺れ（半角・法人格・語尾の増減）を吸収する。
   const match = useMemo(
     () => (name: string) => matchTenantName(name, units),
@@ -122,15 +164,23 @@ export function ImportCsv({
     setError(null)
     const lines = text.replace(/^﻿/, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
     const parsed: Parsed[] = []
+    const badDates: string[] = []
     for (const line of lines) {
       const c = splitLine(line)
       if (c.length < 3) continue
       const amount = Number(c[2].replace(/[,，\s¥￥円]/g, ''))
       if (!Number.isFinite(amount) || amount === 0) continue // ヘッダー行や空行はスキップ
       const name = c[1].trim()
+      const date = normDate(c[0])
+      // 日付が読めないまま記帳すると、DB側で別の日付に化ける（08-07-31 → 2031-08-07）。
+      // 取り込まずに知らせて、CSVを直してもらう。
+      if (!date) {
+        badDates.push(`${c[0]}（${name}）`)
+        continue
+      }
       const m = match(name)
       parsed.push({
-        date: normDate(c[0]),
+        date,
         name,
         amount,
         unitIds: m.unitId ? [m.unitId] : [],
@@ -139,7 +189,16 @@ export function ImportCsv({
         manual: false,
       })
     }
-    if (parsed.length === 0) setError('取り込める行がありませんでした。CSVの形式（日付,契約者名,金額）を確認してください。')
+    if (badDates.length > 0) {
+      setError(
+        `日付を読めない行が ${badDates.length} 件あったので除きました：${badDates.slice(0, 3).join('、')}` +
+          (badDates.length > 3 ? ' ほか' : '') +
+          '。西暦（2026-07-31）か和暦（R8-07-31）で書いてください。',
+      )
+    }
+    if (parsed.length === 0 && badDates.length === 0) {
+      setError('取り込める行がありませんでした。CSVの形式（日付,振込名義,金額）を確認してください。')
+    }
     setRows(parsed)
   }
 
@@ -196,6 +255,10 @@ export function ImportCsv({
     setSaving(true)
     try {
       await transactionsRepo.createMany(tx)
+      // 入金状況にも反映する（入力タブ・台帳からの記帳と同じ扱い）。
+      // これが無いと取り込んでも入金状況が空のままになる。
+      await syncPaymentRecordsFromLedger(tx)
+      setRows([])
       onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : '記帳に失敗しました。')
@@ -313,6 +376,8 @@ export function ImportCsv({
                         .filter((x): x is Unit => Boolean(x))
                       const u = picked[0] ?? null
                       const alloc = picked.length > 0 ? allocateDeposit(picked, r.amount) : null
+                      // 同じ日・同じ号室に同額の賃料が既にあるなら、二重取込の疑いを出す
+                      const dup = picked.some((pu) => booked.has(`${r.date}|${pu.id}`))
                       // 号室を差し替える／増やす／外す。いずれも手動扱いにする
                       const setUnitAt = (k: number, id: string) =>
                         setRows((prev) =>
@@ -337,7 +402,22 @@ export function ImportCsv({
                           key={i}
                           className={'border-b border-slate-100 ' + (picked.length ? '' : 'bg-rose-50/40')}
                         >
-                          <td className="px-3 py-2 whitespace-nowrap align-top">{r.date}</td>
+                          <td className="px-3 py-2 whitespace-nowrap align-top">
+                            {/* 和暦の解釈を目で確かめられるよう、直せる形で出す */}
+                            <input
+                              type="date"
+                              value={r.date}
+                              onChange={(e) =>
+                                setRows((prev) =>
+                                  prev.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)),
+                                )
+                              }
+                              className="rounded border border-slate-300 px-2 py-1 text-sm"
+                            />
+                            {dup && (
+                              <div className="mt-0.5 text-xs text-rose-600">記帳済みかも</div>
+                            )}
+                          </td>
                           <td className="px-3 py-2 whitespace-nowrap align-top">{r.name}</td>
                           <td className="px-3 py-2 text-right tabular-nums align-top">{yen(r.amount)}</td>
                           <td className="px-3 py-2 align-top">
