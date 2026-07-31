@@ -185,14 +185,20 @@
   color: #94a3b8;
 }
 
-/* 合計行 */
+/* 合計行（月収計・年収計の2行） */
 .rc-table tfoot td {
-  border-top: 1.2px solid #cbd5e1;
   border-bottom: none;
-  padding: 0.8mm 1mm;
+  padding: 0.7mm 1mm;
   font-weight: 700;
   color: #0b1220;
   background: #fff;
+}
+/* 明細との境目は太く、月収計と年収計の間は細く */
+.rc-table tfoot tr:first-child td {
+  border-top: 1.2px solid #0b1220;
+}
+.rc-table tfoot tr.is-year td {
+  border-top: 1px solid #cbd5e1;
 }
 .rc-table tfoot td.now {
   background: #eef2ff;

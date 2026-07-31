@@ -151,7 +151,12 @@ export function RentComparisonSheet({
         </div>
         <div className="rc-kpis">
           <Kpi label="変動戸数" value={String(changed)} unit={`/ ${rows.length}戸`} />
-          <Kpi label="変動値" value={diffTotal === 0 ? '±0' : signed(diffTotal)} unit="円" accent />
+          <Kpi
+            label="変動値"
+            value={diffTotal === 0 ? '±0' : signed(diffTotal)}
+            unit="円/月"
+            accent
+          />
         </div>
         <div className="rc-date">
           {today.toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })}
@@ -221,24 +226,51 @@ export function RentComparisonSheet({
           })}
         </tbody>
         <tfoot>
-          <tr>
-            <td>計</td>
-            <td colSpan={3} className="r">
-              {yen(baseTotal)}
-            </td>
-            <td className="rc-split now">計</td>
-            <td colSpan={3} className="r now">
-              {yen(nowTotal)}
-            </td>
-            <td className={'r dv' + (diffTotal < 0 ? ' is-down' : '')}>{signed(diffTotal)}</td>
-          </tr>
+          {/* 月収計＝各室の合計の総和、年収計＝その12倍。変動値も同じ並びで出す */}
+          <TotalRow label="月収計" base={baseTotal} now={nowTotal} diff={diffTotal} />
+          <TotalRow
+            label="年収計"
+            base={baseTotal * 12}
+            now={nowTotal * 12}
+            diff={diffTotal * 12}
+            year
+          />
         </tfoot>
       </table>
 
       <p className="rc-note">
-        元家賃＝{BASE_LABEL}の賃料履歴。現在＝部屋情報の賃料・共益費。変動値は合計（賃料＋共益費）の差額。
+        元家賃＝{BASE_LABEL}の賃料履歴。現在＝部屋情報の賃料・共益費。変動値は合計（賃料＋共益費）の差額。年収計は月収計の12か月分。
       </p>
     </div>
+  )
+}
+
+/** 合計行（月収計・年収計）。左＝元家賃／右＝現在／末尾＝変動値 */
+function TotalRow({
+  label,
+  base,
+  now,
+  diff,
+  year,
+}: {
+  label: string
+  base: number
+  now: number
+  diff: number
+  year?: boolean
+}) {
+  return (
+    <tr className={year ? 'is-year' : undefined}>
+      <td>{label}</td>
+      <td colSpan={3} className="r">
+        {yen(base)}
+      </td>
+      <td className="rc-split now">{label}</td>
+      <td colSpan={3} className="r now">
+        {yen(now)}
+      </td>
+      <td className={'r dv' + (diff < 0 ? ' is-down' : '')}>{signed(diff)}</td>
+    </tr>
   )
 }
 
