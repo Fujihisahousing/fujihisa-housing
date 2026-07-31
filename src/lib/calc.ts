@@ -209,6 +209,36 @@ export const fiscalYearRange = (year: number) => ({ from: `${year - 1}-09`, to: 
 export function fiscalMonthIndex(d: Date): number {
   return (d.getMonth() + 1 - FISCAL_START_MONTH + 12) % 12
 }
+/** 年月から会計年度・月インデックスを出す（日付を経由しない版） */
+const fiscalYearOfYM = (y: number, m: number) => (m >= FISCAL_START_MONTH ? y + 1 : y)
+const fiscalMonthIndexOfM = (m: number) => (m - FISCAL_START_MONTH + 12) % 12
+
+/** 収入のうち、入金した月の収入として扱う費目。月々の家賃と違い一時金なので寄せない */
+const INCOME_SAME_MONTH = new Set(['礼金', '敷金'])
+
+/**
+ * 収支表・支出表で、その記帳を「何年何月の欄に載せるか」。
+ *
+ * 収入（礼金・敷金を除く）は前家賃なので、入金した月ではなく対象月に寄せる。
+ * 判定は入金状況とまったく同じ規則（11日以降の入金は翌月分）なので、
+ * 入金状況の「○月分」と収支表の列が必ず一致する。
+ * 支出と礼金・敷金は入金日の月のまま（現金の動きどおり）。
+ */
+export function accountingMonth(t: {
+  type?: string
+  category?: string
+  date: string
+}): { year: number; month: number } {
+  if (t.type === 'income' && !INCOME_SAME_MONTH.has(t.category ?? '')) {
+    return attributionMonth(t.date)
+  }
+  return ledgerMonth(t.date)
+}
+/** その記帳が属する会計年度（accountingMonth 基準） */
+export function accountingFiscalYear(t: { type?: string; category?: string; date: string }): number {
+  const a = accountingMonth(t)
+  return fiscalYearOfYM(a.year, a.month)
+}
 
 // ---- 物件の決済（処分）に伴う表示制御 ----
 // properties.disposed_date（決済日 'YYYY-MM-DD'）を基準に、時間軸を持つビュー
@@ -259,7 +289,7 @@ function buildRows(
   for (const t of txs) {
     const row = mapOf[t.category] ?? 'その他'
     const arr = table.get(row) ?? table.get('その他')!
-    const m = fiscalMonthIndex(new Date(t.date))
+    const m = fiscalMonthIndexOfM(accountingMonth(t).month)
     if (m >= 0 && m <= 11) arr[m] += n(t.amount)
   }
   return labels.map((l) => {
@@ -418,7 +448,9 @@ export function paymentRecordsToTransactions(
     })
     .map((rec) => ({
       id: `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`,
-      date: `${rec.year}-${String(rec.month).padStart(2, '0')}-15`,
+      // 月次記録は既に「何月分か」で持っているので、これ以上ずらしてはいけない。
+      // accountingMonth は11日以降を翌月に寄せるため、日は必ず10日以前にする。
+      date: `${rec.year}-${String(rec.month).padStart(2, '0')}-01`,
       property_id: rec.property_id,
       type: 'income' as const,
       category: kddiRooms.has(`${rec.property_id}|${rec.room}`) ? 'KDDI' : CAT_RENT,
@@ -455,7 +487,7 @@ export function calcManagementTable(
   properties: Property[],
   year: number,
 ): MgmtTableResult {
-  const inYear = transactions.filter((t) => fiscalYearOf(new Date(t.date)) === year)
+  const inYear = transactions.filter((t) => accountingFiscalYear(t) === year)
   const today = new Date()
 
   // 戸建ての6現場はこの表では1つの帯にまとめる。物件ID → 帯のキー を先に決める。
@@ -477,7 +509,7 @@ export function calcManagementTable(
     const key = keyOf.get(t.property_id ?? '')
     if (!key) continue // 決済済みなどで properties に無い物件は表に出さない
     const bucket = byBlock.get(key)!
-    const m = fiscalMonthIndex(new Date(t.date))
+    const m = fiscalMonthIndexOfM(accountingMonth(t).month)
     if (m < 0 || m > 11) continue
     if (t.type === 'income') {
       bucket.income.months[m] += n(t.amount)
@@ -551,7 +583,7 @@ export function calcManagementTable(
 
 /** year は会計年度（締める年）。2026 を渡すと 2025-09 〜 2026-08 が対象になる */
 export function calcIncomeStatement(transactions: Transaction[], year: number): IncomeStatementResult {
-  const inYear = transactions.filter((t) => fiscalYearOf(new Date(t.date)) === year)
+  const inYear = transactions.filter((t) => accountingFiscalYear(t) === year)
   const income = buildRows(INCOME_ROWS, INCOME_ROW_OF, inYear.filter((t) => t.type === 'income'))
   const expense = buildRows(EXPENSE_ROWS, EXPENSE_ROW_OF, inYear.filter((t) => t.type === 'expense'))
   const incomeTotalByMonth = sumByMonth(income)

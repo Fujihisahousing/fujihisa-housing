@@ -8,6 +8,7 @@ import { transactionsRepo, paymentRecordsRepo, unitsRepo } from '../../lib/repos
 import {
   calcManagementTable,
   fiscalYearOf,
+  accountingFiscalYear,
   fiscalYearRange,
   paymentRecordsToTransactions,
   bookedRentKeys,
@@ -86,7 +87,7 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
   const years = useMemo(() => {
     const set = new Set<number>()
     for (let y = FIRST_YEAR; y <= fiscalYearOf(new Date()); y++) set.add(y)
-    allTxs.forEach((t) => set.add(fiscalYearOf(new Date(t.date))))
+    allTxs.forEach((t) => set.add(accountingFiscalYear(t)))
     return Array.from(set).sort((a, b) => b - a)
   }, [allTxs])
 

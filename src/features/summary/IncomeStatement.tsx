@@ -5,6 +5,7 @@ import { transactionsRepo, paymentRecordsRepo, unitsRepo } from '../../lib/repos
 import {
   calcIncomeStatement,
   fiscalYearOf,
+  accountingFiscalYear,
   isStatementRowVisible,
   paymentRecordsToTransactions,
   bookedRentKeys,
@@ -72,7 +73,7 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
   const years = useMemo(() => {
     const set = new Set<number>()
     for (let y = FIRST_YEAR; y <= fiscalYearOf(new Date()); y++) set.add(y)
-    allTxs.forEach((t) => set.add(fiscalYearOf(new Date(t.date))))
+    allTxs.forEach((t) => set.add(accountingFiscalYear(t)))
     return Array.from(set).sort((a, b) => b - a)
   }, [allTxs])
 
