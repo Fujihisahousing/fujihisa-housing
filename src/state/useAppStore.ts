@@ -11,6 +11,7 @@ export type ViewKey =
   | 'payments'
   | 'prospectus'
   | 'statusreport'
+  | 'rentcompare'
 
 interface AppState {
   /** 選択中の物件ID。null = 「全体」（合算表示） */

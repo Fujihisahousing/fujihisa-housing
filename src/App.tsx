@@ -68,7 +68,8 @@ function Shell() {
           activeView === 'mgmt' ||
           activeView === 'payments' ||
           activeView === 'prospectus' ||
-          activeView === 'statusreport') && <ReportsView properties={properties} />}
+          activeView === 'statusreport' ||
+          activeView === 'rentcompare') && <ReportsView properties={properties} />}
       </main>
     </div>
   )

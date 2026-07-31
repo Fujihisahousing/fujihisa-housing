@@ -7,8 +7,10 @@ import { ManagementTable } from './summary/ManagementTable'
 import { PaymentStatus } from './payments/PaymentStatus'
 import { Prospectus } from './prospectus/Prospectus'
 import { PrintCurrentStatus } from './reports/PrintCurrentStatus'
+import { RentComparison } from './reports/RentComparison'
 import { useAppStore, type ViewKey } from '../state/useAppStore'
 import type { Property } from '../types'
+import { useEffect } from 'react'
 
 const TABS_ROW1: { key: ViewKey; label: string }[] = [
   { key: 'rentroll', label: 'レントロール' },
@@ -21,6 +23,8 @@ const TABS_ROW2: { key: ViewKey; label: string }[] = [
   { key: 'mgmt', label: '収支管理表' },
   { key: 'statusreport', label: '現況報告書' },
 ]
+/** 元家賃比較は元家賃（賃料履歴）を入れてあるプランドール堂島でだけ出す */
+const RENT_COMPARE_PROPERTY = 'プランドール堂島'
 
 const TAB_BASE = 'whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors '
 const TONE = {
@@ -42,6 +46,17 @@ export function ReportsView({ properties }: { properties: Property[] }) {
     ? (properties.find((p) => p.id === activeProperty)?.name ?? '物件')
     : '全体'
 
+  // 元家賃比較は堂島専用。他の物件・全体に切り替えたらタブごと消えるので、
+  // 開いたまま取り残されないようレントロールへ戻す。
+  const canCompare = propertyName === RENT_COMPARE_PROPERTY
+  useEffect(() => {
+    if (!canCompare && activeView === 'rentcompare') setActiveView('rentroll')
+  }, [canCompare, activeView, setActiveView])
+
+  const row2 = canCompare
+    ? [...TABS_ROW2, { key: 'rentcompare' as ViewKey, label: '元家賃比較' }]
+    : TABS_ROW2
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -57,7 +72,7 @@ export function ReportsView({ properties }: { properties: Property[] }) {
           ))}
         </div>
         <div className="flex gap-2 overflow-x-auto">
-          {TABS_ROW2.map((t) => (
+          {row2.map((t) => (
             <button
               key={t.key}
               onClick={() => setActiveView(t.key)}
@@ -75,6 +90,7 @@ export function ReportsView({ properties }: { properties: Property[] }) {
       {activeView === 'payments' && <PaymentStatus properties={properties} propertyName={propertyName} />}
       {activeView === 'prospectus' && <Prospectus properties={properties} />}
       {activeView === 'statusreport' && <PrintCurrentStatus properties={properties} />}
+      {activeView === 'rentcompare' && canCompare && <RentComparison properties={properties} />}
     </div>
   )
 }

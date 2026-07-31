@@ -10,6 +10,7 @@ const WIDE_VIEWS: ReadonlySet<ViewKey> = new Set<ViewKey>([
   'payments',
   'prospectus',
   'statusreport',
+  'rentcompare',
 ])
 
 export function isWideView(view: ViewKey): boolean {

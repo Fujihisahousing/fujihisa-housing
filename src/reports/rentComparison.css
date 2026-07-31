@@ -1,0 +1,216 @@
+/* 元家賃比較（家賃変動）のA4縦1枚レイアウト。
+   画面でも印刷と同じ見た目になるよう、mm 指定で用紙を再現する。
+   57室ぶんを1枚に収めるため行の高さを詰めてある（フォントや余白を触るときは
+   「1ページに収まっているか」を必ず実測すること）。 */
+
+.rc-page {
+  /* A4縦 210mm × 297mm から余白12mm（print.css の @page）を引いた実寸 */
+  width: 186mm;
+  min-height: 273mm;
+  margin: 0 auto;
+  background: #fff;
+  color: #0b1220;
+  font-family: 'Inter', 'Helvetica Neue', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------- ヘッダー ---------------- */
+.rc-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 6mm;
+  padding-bottom: 2mm;
+  margin-bottom: 2.5mm;
+  border-bottom: 1.2px solid #0b1220;
+}
+.rc-title h1 {
+  margin: 0;
+  font-size: 13pt;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+}
+.rc-kicker {
+  display: block;
+  font-size: 6pt;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  color: #6366f1;
+  margin-bottom: 0.6mm;
+}
+.rc-kpis {
+  display: flex;
+  gap: 6mm;
+  margin-left: auto;
+}
+.rc-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3mm;
+  padding-left: 2.2mm;
+  border-left: 1.5px solid #e2e8f0;
+}
+.rc-kpi.is-accent {
+  border-left-color: #6366f1;
+}
+.rc-kpi-label {
+  font-size: 5.6pt;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: #94a3b8;
+  white-space: nowrap;
+}
+.rc-kpi-value {
+  font-size: 10.5pt;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.rc-kpi.is-accent .rc-kpi-value {
+  color: #4f46e5;
+}
+.rc-kpi-value i {
+  font-style: normal;
+  font-size: 6.5pt;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-left: 0.5mm;
+}
+.rc-date {
+  font-size: 7pt;
+  color: #64748b;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* ---------------- 表 ---------------- */
+.rc-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 7pt;
+  line-height: 1.15;
+}
+/* 左（元家賃）と右（現在）を分ける仕切り。境目の列に左罫線を引く */
+.rc-table .rc-split {
+  border-left: 1.2px solid #94a3b8;
+}
+
+/* 1段目＝ブロック見出し（元家賃／現在） */
+.rc-table thead tr.rc-group th {
+  padding: 0.6mm 1mm;
+  font-size: 6.6pt;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: center;
+  border-bottom: 1px solid #cbd5e1;
+}
+.rc-table thead tr.rc-group th.rc-past {
+  background: #f1f5f9;
+  color: #475569;
+}
+.rc-table thead tr.rc-group th.rc-now {
+  background: #eef2ff;
+  color: #4338ca;
+}
+.rc-table thead tr.rc-group th small {
+  font-size: 5.4pt;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.75;
+  margin-left: 1mm;
+}
+/* 2段目＝項目名 */
+.rc-table thead tr.rc-cols th {
+  padding: 0.4mm 1mm;
+  font-size: 5.6pt;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  text-align: center;
+  border-bottom: 1px solid #cbd5e1;
+  white-space: nowrap;
+}
+
+.rc-table tbody td {
+  padding: 0.45mm 1mm;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+  white-space: nowrap;
+}
+.rc-table tbody tr:nth-child(even) td {
+  background: #fafbfc;
+}
+.rc-table tr {
+  break-inside: avoid;
+}
+.rc-table .r {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.rc-table td.rm {
+  font-weight: 700;
+  color: #0b1220;
+  text-align: center;
+}
+/* 合計列は少し濃くして視線の止まりどころにする */
+.rc-table td.sum {
+  font-weight: 700;
+  color: #0b1220;
+}
+/* 変動値。増額＝藍、減額＝赤。0は空欄 */
+.rc-table td.dv {
+  font-weight: 700;
+  color: #4338ca;
+}
+.rc-table td.dv.is-down {
+  color: #c02626;
+}
+/* 空室など現在が課金対象でない行は号室を灰色にして区別する */
+.rc-table td.rm.is-idle {
+  color: #94a3b8;
+}
+
+/* 合計行 */
+.rc-table tfoot td {
+  border-top: 1.2px solid #cbd5e1;
+  border-bottom: none;
+  padding: 0.8mm 1mm;
+  font-weight: 700;
+  color: #0b1220;
+  background: #fff;
+}
+.rc-table tfoot td.dv {
+  background: #eef2ff;
+  color: #4338ca;
+}
+.rc-table tfoot td.dv.is-down {
+  color: #c02626;
+}
+
+.rc-note {
+  margin-top: 2mm;
+  font-size: 5.8pt;
+  color: #94a3b8;
+  letter-spacing: 0.02em;
+}
+
+/* 画面プレビューでは用紙を紙らしく見せる（印刷時は解除） */
+@media screen {
+  .rc-page {
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
+    padding: 12mm;
+    width: 210mm;
+  }
+}
+
+@media print {
+  .rc-page {
+    box-shadow: none;
+    width: auto;
+    min-height: 0;
+    padding: 0;
+  }
+}
