@@ -6,12 +6,14 @@ import { transactionsRepo, unitsRepo } from '../../lib/repositories'
 import { yen } from '../../lib/format'
 import { CAT_RENT, CAT_KYOEKI, CAT_UTILITY, type Property, type Transaction, type Unit } from '../../types'
 import { matchTenantName, type MatchConfidence } from '../../lib/matchTenant'
+import { allocateDeposit, contractAmount } from '../../lib/allocateDeposit'
 
 interface Parsed {
   date: string
   name: string
   amount: number
-  unitId: string // マッチ結果（空＝未マッチ）
+  /** 割り当てる号室。保証会社のまとめ入金では複数戸になる（空＝未確定） */
+  unitIds: string[]
   /** どうやって当てたか。人が見て承認できるように残す */
   confidence: MatchConfidence
   /** ambiguous のときに選ばせる候補 */
@@ -74,15 +76,6 @@ function splitLine(line: string): string[] {
   return out
 }
 
-// 契約内訳で賃料→共益費→光熱費の順に充当
-function splitDeposit(u: Unit, total: number) {
-  const rent = Math.min(total, Number(u.rent) || 0)
-  const afterRent = Math.max(0, total - rent)
-  const kyoeki = Math.min(afterRent, Number(u.kyoeki) || 0)
-  const utility = Math.max(0, afterRent - kyoeki)
-  return { rent, kyoeki, utility }
-}
-
 export function ImportCsv({
   properties,
   defaultPropertyId,
@@ -140,7 +133,7 @@ export function ImportCsv({
         date: normDate(c[0]),
         name,
         amount,
-        unitId: m.unitId,
+        unitIds: m.unitId ? [m.unitId] : [],
         confidence: m.confidence,
         candidates: m.candidates.map((x) => x.unitId),
         manual: false,
@@ -156,7 +149,7 @@ export function ImportCsv({
       prev.map((r) => {
         if (r.manual) return r
         const m = match(r.name)
-        return { ...r, unitId: m.unitId, confidence: m.confidence, candidates: m.candidates.map((x) => x.unitId) }
+        return { ...r, unitIds: m.unitId ? [m.unitId] : [], confidence: m.confidence, candidates: m.candidates.map((x) => x.unitId) }
       }),
     )
   }, [match])
@@ -169,7 +162,7 @@ export function ImportCsv({
     reader.readAsText(file, 'utf-8')
   }
 
-  const matched = rows.filter((r) => r.unitId)
+  const matched = rows.filter((r) => r.unitIds.length > 0)
   const unmatched = rows.length - matched.length
   // 推測で入れた行。記帳前に目を通してほしいので件数を分けて出す
   const guessed = rows.filter((r) => !r.manual && (r.confidence === 'prefix' || r.confidence === 'similar'))
@@ -178,22 +171,28 @@ export function ImportCsv({
     setError(null)
     const tx: Partial<Transaction>[] = []
     for (const r of matched) {
-      const u = unitsById.get(r.unitId)
-      if (!u) continue
-      const s = splitDeposit(u, r.amount)
-      const base = {
-        date: r.date,
-        property_id: u.property_id,
-        unit_id: u.id,
-        type: 'income' as const,
-        method: '通帳CSV取込',
-        memo: '通帳CSV取込',
+      const us = r.unitIds.map((id) => unitsById.get(id)).filter((u): u is Unit => Boolean(u))
+      if (us.length === 0) continue
+      // 複数戸のまとめ入金は契約額で割り振る。1戸なら全額をその戸に充てる（従来どおり）
+      const { rows: alloc } = allocateDeposit(us, r.amount)
+      // まとめ入金は元が1件の振込なので、摘要に何戸ぶんかを残しておく
+      const memo = us.length > 1 ? `通帳取込 まとめ入金${us.length}戸（${r.name}）` : '通帳取込'
+      for (const a of alloc) {
+        const u = unitsById.get(a.unitId)!
+        const base = {
+          date: r.date,
+          property_id: u.property_id,
+          unit_id: u.id,
+          type: 'income' as const,
+          method: '通帳取込',
+          memo,
+        }
+        if (a.rent > 0) tx.push({ ...base, category: CAT_RENT, amount: a.rent })
+        if (a.kyoeki > 0) tx.push({ ...base, category: CAT_KYOEKI, amount: a.kyoeki })
+        if (a.utility > 0) tx.push({ ...base, category: CAT_UTILITY, amount: a.utility })
       }
-      if (s.rent > 0) tx.push({ ...base, category: CAT_RENT, amount: s.rent })
-      if (s.kyoeki > 0) tx.push({ ...base, category: CAT_KYOEKI, amount: s.kyoeki })
-      if (s.utility > 0) tx.push({ ...base, category: CAT_UTILITY, amount: s.utility })
     }
-    if (tx.length === 0) return setError('記帳する行がありません（号室がマッチした行が必要です）。')
+    if (tx.length === 0) return setError('記帳する行がありません（号室を選んだ行が必要です）。')
     setSaving(true)
     try {
       await transactionsRepo.createMany(tx)
@@ -238,6 +237,11 @@ export function ImportCsv({
             <p>
               振込名義から号室を当てます。半角カナ・法人格（カ）など）・語尾の増減は吸収しますが、
               <b>推測で当てた行は色を変えて出す</b>ので、記帳前に確認してください。
+            </p>
+            <p>
+              保証会社などが複数戸をまとめて振り込んでくる場合は、<b>号室を追加で選べます</b>。
+              選んだ戸の契約額（賃料＋共益費）で自動的に割り振ります。
+              合計が契約額と合わないときは差額を赤で出します。
             </p>
             <button
               onClick={downloadTemplate}
@@ -304,30 +308,67 @@ export function ImportCsv({
                   </thead>
                   <tbody>
                     {rows.map((r, i) => {
-                      const u = r.unitId ? unitsById.get(r.unitId) : null
-                      const s = u ? splitDeposit(u, r.amount) : null
+                      const picked = r.unitIds
+                        .map((id) => unitsById.get(id))
+                        .filter((x): x is Unit => Boolean(x))
+                      const u = picked[0] ?? null
+                      const alloc = picked.length > 0 ? allocateDeposit(picked, r.amount) : null
+                      // 号室を差し替える／増やす／外す。いずれも手動扱いにする
+                      const setUnitAt = (k: number, id: string) =>
+                        setRows((prev) =>
+                          prev.map((x, j) => {
+                            if (j !== i) return x
+                            const next = [...x.unitIds]
+                            if (id) next[k] = id
+                            else next.splice(k, 1) // 未選択にしたら外す
+                            return { ...x, unitIds: next, manual: true }
+                          }),
+                        )
+                      const addUnit = (id: string) =>
+                        setRows((prev) =>
+                          prev.map((x, j) =>
+                            j === i && id && !x.unitIds.includes(id)
+                              ? { ...x, unitIds: [...x.unitIds, id], manual: true }
+                              : x,
+                          ),
+                        )
                       return (
-                        <tr key={i} className={'border-b border-slate-100 ' + (r.unitId ? '' : 'bg-rose-50/40')}>
-                          <td className="px-3 py-2 whitespace-nowrap">{r.date}</td>
-                          <td className="px-3 py-2 whitespace-nowrap">{r.name}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{yen(r.amount)}</td>
-                          <td className="px-3 py-2">
-                            <select
-                              value={r.unitId}
-                              onChange={(e) =>
-                                setRows((prev) =>
-                                  prev.map((x, j) =>
-                                    // 手で選んだら manual を立て、以後の自動再マッチで上書きしない
-                                    j === i ? { ...x, unitId: e.target.value, manual: true } : x,
-                                  ),
-                                )
-                              }
-                              className="rounded border border-slate-300 px-2 py-1 text-sm bg-white"
-                            >
-                              <option value="">未選択</option>
-                              {/* 候補が複数のときは先に出して選びやすくする */}
-                              {r.candidates.length > 0 &&
-                                r.candidates.map((id) => {
+                        <tr
+                          key={i}
+                          className={'border-b border-slate-100 ' + (picked.length ? '' : 'bg-rose-50/40')}
+                        >
+                          <td className="px-3 py-2 whitespace-nowrap align-top">{r.date}</td>
+                          <td className="px-3 py-2 whitespace-nowrap align-top">{r.name}</td>
+                          <td className="px-3 py-2 text-right tabular-nums align-top">{yen(r.amount)}</td>
+                          <td className="px-3 py-2 align-top">
+                            <div className="space-y-1">
+                              {/* 保証会社のまとめ入金は複数戸。選んだぶんだけ行が増える */}
+                              {r.unitIds.map((id, k) => (
+                                <select
+                                  key={k}
+                                  value={id}
+                                  onChange={(e) => setUnitAt(k, e.target.value)}
+                                  className="block rounded border border-slate-300 px-2 py-1 text-sm bg-white"
+                                >
+                                  <option value="">— 外す —</option>
+                                  {units.map((x) => (
+                                    <option key={x.id} value={x.id}>
+                                      {x.room}
+                                      {x.tenant ? `（${x.tenant}）` : ''} {yen(contractAmount(x))}
+                                    </option>
+                                  ))}
+                                </select>
+                              ))}
+                              <select
+                                value=""
+                                onChange={(e) => addUnit(e.target.value)}
+                                className="block rounded border border-dashed border-slate-300 px-2 py-1 text-sm bg-white text-slate-500"
+                              >
+                                <option value="">
+                                  {r.unitIds.length === 0 ? '＋ 号室を選ぶ' : '＋ 号室を追加'}
+                                </option>
+                                {/* 候補が複数のときは先に出して選びやすくする */}
+                                {r.candidates.map((id) => {
                                   const cu = unitsById.get(id)
                                   return cu ? (
                                     <option key={'c' + id} value={id}>
@@ -336,15 +377,18 @@ export function ImportCsv({
                                     </option>
                                   ) : null
                                 })}
-                              {units.map((u) => (
-                                <option key={u.id} value={u.id}>
-                                  {u.room}
-                                  {u.tenant ? `（${u.tenant}）` : ''}
-                                </option>
-                              ))}
-                            </select>
+                                {units
+                                  .filter((x) => !r.unitIds.includes(x.id))
+                                  .map((x) => (
+                                    <option key={x.id} value={x.id}>
+                                      {x.room}
+                                      {x.tenant ? `（${x.tenant}）` : ''} {yen(contractAmount(x))}
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
                           </td>
-                          <td className="px-3 py-2 whitespace-nowrap">
+                          <td className="px-3 py-2 whitespace-nowrap align-top">
                             <span
                               className={
                                 'rounded px-1.5 py-0.5 text-xs font-medium ' +
@@ -360,10 +404,32 @@ export function ImportCsv({
                               </div>
                             )}
                           </td>
-                          <td className="px-3 py-2 text-xs text-slate-500 whitespace-nowrap">
-                            {s
-                              ? `賃料 ${yen(s.rent)}／共益 ${yen(s.kyoeki)}／光熱 ${yen(s.utility)}`
-                              : '—'}
+                          <td className="px-3 py-2 text-xs whitespace-nowrap align-top">
+                            {!alloc ? (
+                              <span className="text-slate-400">—</span>
+                            ) : (
+                              <div className="space-y-0.5">
+                                {alloc.rows.map((a) => {
+                                  const au = unitsById.get(a.unitId)!
+                                  return (
+                                    <div key={a.unitId} className="text-slate-500">
+                                      {picked.length > 1 && (
+                                        <b className="text-slate-700">{au.room}　</b>
+                                      )}
+                                      賃料 {yen(a.rent)}／共益 {yen(a.kyoeki)}／光熱 {yen(a.utility)}
+                                    </div>
+                                  )
+                                })}
+                                {/* 合計が契約額と合わないときは必ず気づけるようにする */}
+                                {alloc.diff !== 0 && (
+                                  <div className="text-rose-600">
+                                    契約額の合計 {yen(alloc.expected)}／差額{' '}
+                                    {alloc.diff > 0 ? '+' : ''}
+                                    {yen(alloc.diff)}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )
