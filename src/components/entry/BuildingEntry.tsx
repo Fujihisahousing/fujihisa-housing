@@ -13,6 +13,9 @@ const n = (s: string) => {
   return Number.isFinite(v) ? v : 0
 }
 
+/** 入力欄のキー。収入と支出に同名の費目（『その他』）があるので必ず種別で分ける */
+const keyOf = (type: 'income' | 'expense', cat: string) => `${type}:${cat}`
+
 export function BuildingEntry({
   properties,
   defaultPropertyId,
@@ -33,7 +36,9 @@ export function BuildingEntry({
     setPropertyId(defaultPropertyId ?? properties[0]?.id ?? '')
   }, [defaultPropertyId, properties])
 
-  const set = (cat: string, v: string) => setValues((prev) => ({ ...prev, [cat]: v }))
+  // 「その他」は収入・支出の両方にあるので、費目名だけをキーにすると入力欄が
+  // つながってしまう（片方に入れると両方に記帳される）。収入／支出で分ける。
+  const set = (key: string, v: string) => setValues((prev) => ({ ...prev, [key]: v }))
 
   const filledCount = useMemo(
     () => Object.values(values).filter((v) => n(v) > 0).length,
@@ -47,10 +52,12 @@ export function BuildingEntry({
     const rows: Partial<Transaction>[] = []
     const base = { date, property_id: propertyId, unit_id: null, method: method || null }
     for (const cat of BUILDING_INCOME_CATEGORIES) {
-      if (n(values[cat]) > 0) rows.push({ ...base, type: 'income', category: cat, amount: n(values[cat]) })
+      const v = n(values[keyOf('income', cat)])
+      if (v > 0) rows.push({ ...base, type: 'income', category: cat, amount: v })
     }
     for (const cat of BUILDING_EXPENSE_CATEGORIES) {
-      if (n(values[cat]) > 0) rows.push({ ...base, type: 'expense', category: cat, amount: n(values[cat]) })
+      const v = n(values[keyOf('expense', cat)])
+      if (v > 0) rows.push({ ...base, type: 'expense', category: cat, amount: v })
     }
     if (rows.length === 0) return setError('金額を1つ以上入力してください。')
 
@@ -96,15 +103,17 @@ export function BuildingEntry({
       </div>
 
       <Section title="収入" accent="text-emerald-700">
-        {BUILDING_INCOME_CATEGORIES.map((cat) => (
-          <Line key={cat} label={cat} value={values[cat] ?? ''} onChange={(v) => set(cat, v)} />
-        ))}
+        {BUILDING_INCOME_CATEGORIES.map((cat) => {
+          const k = keyOf('income', cat)
+          return <Line key={k} label={cat} value={values[k] ?? ''} onChange={(v) => set(k, v)} />
+        })}
       </Section>
 
       <Section title="支出" accent="text-rose-700">
-        {BUILDING_EXPENSE_CATEGORIES.map((cat) => (
-          <Line key={cat} label={cat} value={values[cat] ?? ''} onChange={(v) => set(cat, v)} />
-        ))}
+        {BUILDING_EXPENSE_CATEGORIES.map((cat) => {
+          const k = keyOf('expense', cat)
+          return <Line key={k} label={cat} value={values[k] ?? ''} onChange={(v) => set(k, v)} />
+        })}
       </Section>
 
       <Field label="支払方法・摘要（任意）">
