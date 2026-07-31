@@ -9,6 +9,7 @@ import '../../reports/statusReport.css'
 import { buildBlocks } from './buildBlocks'
 import type { Block } from './buildBlocks'
 import { isDisposedForStatusReport } from '../../lib/calc'
+import { floorMark } from '../../lib/sortUnits'
 import { maxRoomDigits, padRoom } from '../../lib/format'
 import type { Property, Unit } from '../../types'
 
@@ -33,28 +34,6 @@ function parkingText(s?: string | null): string {
   const t = String(s).trim()
   const m = t.match(/^[¥￥]?\s*([0-9][0-9,]*)\s*$/)
   return m ? Number(m[1].replace(/,/g, '')).toLocaleString('ja-JP') : t
-}
-
-// 現況報告書だけのルール：号室のうしろに階数の偶奇で記号を付ける
-//   奇数階 → ■ / 偶数階 → □（号室と記号の間は全角スペース）。例「1501　■」
-// 階が取れない区画（戸建て・屋上・地下室・階段下・駐車場など）には付けない。
-function floorMark(room?: string | null, useType?: string | null): string {
-  const raw = (room ?? '').trim()
-  if (!raw) return ''
-  if ((useType ?? '').includes('駐車')) return '' // 駐車場は階ではない
-  // 全角数字→半角にしてから判定（「７F」等の全角対策）
-  const half = raw.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
-  if (!/^\d/.test(half)) return '' // 数字始まりでない（戸建て・屋上・地下等）は対象外
-  let floor = 0
-  const fm = half.match(/^(\d+)\s*[FＦ]/i) // 「7F」「3F-C」など
-  if (fm) floor = parseInt(fm[1], 10)
-  else {
-    // 「101」→1階、「1501」→15階（下2桁を号室、上位を階とみなす）
-    const n = parseInt(half.match(/^\d+/)![0], 10)
-    floor = n >= 100 ? Math.floor(n / 100) : n
-  }
-  if (!floor) return ''
-  return floor % 2 === 1 ? '■' : '□'
 }
 
 // 検査済証（和暦の年月。例「昭和63年4月」）から築年数を出す
@@ -214,16 +193,27 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                 </div>
               )}
               <table className="sr-table">
+                {/* colgroup の直下は <col> だけ並べる。同じ行にコメントを置くと
+                    空白がテキストノードとして colgroup の子になり React が警告する */}
                 <colgroup>
-                  <col style={{ width: '12%' }} /> {/* 号室 */}
-                  <col style={{ width: '10%' }} /> {/* 用途 */}
-                  <col style={{ width: '9%' }} /> {/* 入居者 */}
-                  <col style={{ width: '13%' }} /> {/* 賃料 */}
-                  <col style={{ width: '11%' }} /> {/* 共益費 */}
-                  <col style={{ width: '11%' }} /> {/* 変動値 */}
-                  <col style={{ width: '11%' }} /> {/* 駐輪駐車 */}
-                  <col style={{ width: '10%' }} /> {/* 状況 */}
-                  <col style={{ width: '13%' }} /> {/* 備考 */}
+                  {/* 号室 */}
+                  <col style={{ width: '12%' }} />
+                  {/* 用途 */}
+                  <col style={{ width: '10%' }} />
+                  {/* 入居者 */}
+                  <col style={{ width: '9%' }} />
+                  {/* 賃料 */}
+                  <col style={{ width: '13%' }} />
+                  {/* 共益費 */}
+                  <col style={{ width: '11%' }} />
+                  {/* 変動値 */}
+                  <col style={{ width: '11%' }} />
+                  {/* 駐輪駐車 */}
+                  <col style={{ width: '11%' }} />
+                  {/* 状況 */}
+                  <col style={{ width: '10%' }} />
+                  {/* 備考 */}
+                  <col style={{ width: '13%' }} />
                 </colgroup>
                 <thead>
                   <tr>
@@ -249,7 +239,7 @@ export function CurrentStatusSheet({ blocks, today }: { blocks: Block[]; today: 
                     // 階数の偶奇記号（■/□）はプランドール堂島のみ付ける。101号室は特例で付けない
                     const mark =
                       property.name === 'プランドール堂島' && String(u.room ?? '').trim() !== '101'
-                        ? floorMark(u.room, u.use_type)
+                        ? floorMark(u)
                         : ''
                     return (
                       <tr key={u.id}>

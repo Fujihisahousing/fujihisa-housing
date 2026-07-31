@@ -143,8 +143,20 @@
 .rc-table tbody tr:nth-child(even) td {
   background: #fafbfc;
 }
+/* 現在のブロックは背景ごと色を変えて、元家賃と一目で見分けられるようにする。
+   縞模様（偶数行）より詳細度を高くしてあるので !important は要らない。 */
+.rc-table tbody td.now {
+  background: #eef2ff;
+}
+.rc-table tbody tr:nth-child(even) td.now {
+  background: #e5eafc;
+}
 .rc-table tr {
   break-inside: avoid;
+}
+/* 階の変わり目に黒線。border-collapse では tr の罫線が出ないので td に引く */
+.rc-table tbody td.is-fbreak {
+  border-top: 1.1px solid #0b1220;
 }
 .rc-table .r {
   text-align: right;
@@ -182,8 +194,11 @@
   color: #0b1220;
   background: #fff;
 }
-.rc-table tfoot td.dv {
+.rc-table tfoot td.now {
   background: #eef2ff;
+}
+.rc-table tfoot td.dv {
+  background: #dfe5fb;
   color: #4338ca;
 }
 .rc-table tfoot td.dv.is-down {

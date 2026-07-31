@@ -9,7 +9,7 @@ import { Loader2, Printer } from 'lucide-react'
 import { unitsRepo, rentHistoryRepo } from '../../lib/repositories'
 import { useAppStore } from '../../state/useAppStore'
 import { effectiveRentKyoeki } from '../../lib/calc'
-import { unitCompare } from '../../lib/sortUnits'
+import { floorMark, isGroupBreak, unitCompare } from '../../lib/sortUnits'
 import { maxRoomDigits, padRoom } from '../../lib/format'
 import '../../reports/print.css'
 import '../../reports/rentComparison.css'
@@ -32,6 +32,8 @@ export interface CompareRow {
   nowRent: number
   nowKyoeki: number
   diff: number
+  /** この行から階が変わる（＝行の上に区切り線を引く）。先頭行は false */
+  floorBreak: boolean
 }
 
 /** 部屋と賃料履歴から比較表の行を組み立てる。CSS を読まないので単体で検証できる */
@@ -42,7 +44,8 @@ export function buildCompareRows(units: Unit[], history: RentHistory[]): Compare
     if (!byUnit.has(h.unit_id)) byUnit.set(h.unit_id, [])
     byUnit.get(h.unit_id)!.push(h)
   }
-  return [...units].sort(unitCompare).map((u) => {
+  const sorted = [...units].sort(unitCompare)
+  return sorted.map((u, i) => {
     const base = effectiveRentKyoeki(u, byUnit.get(u.id), BASE_YEAR, BASE_MONTH)
     const nowRent = n(u.rent)
     const nowKyoeki = n(u.kyoeki)
@@ -53,6 +56,7 @@ export function buildCompareRows(units: Unit[], history: RentHistory[]): Compare
       nowRent,
       nowKyoeki,
       diff: nowRent + nowKyoeki - (n(base.rent) + n(base.kyoeki)),
+      floorBreak: i > 0 && isGroupBreak(sorted[i - 1], u),
     }
   })
 }
@@ -157,13 +161,13 @@ export function RentComparisonSheet({
       <table className="rc-table">
         <colgroup>
           {/* 元家賃：号室・賃料・共益費・合計 */}
-          <col style={{ width: '10%' }} />
-          <col style={{ width: '12%' }} />
+          <col style={{ width: '11%' }} />
+          <col style={{ width: '11%' }} />
           <col style={{ width: '10%' }} />
           <col style={{ width: '12%' }} />
           {/* 現在：号室・賃料・共益費・合計・変動値 */}
-          <col style={{ width: '10%' }} />
-          <col style={{ width: '12%' }} />
+          <col style={{ width: '11%' }} />
+          <col style={{ width: '11%' }} />
           <col style={{ width: '10%' }} />
           <col style={{ width: '12%' }} />
           <col style={{ width: '12%' }} />
@@ -194,19 +198,24 @@ export function RentComparisonSheet({
         <tbody>
           {rows.map((r) => {
             const room = padRoom(String(r.unit.room ?? ''), roomWidth)
+            // 号室のうしろの階数記号（奇数階=■／偶数階=□）。現況報告書と同じ規則で、
+            // 101号室だけは特例で付けない。
+            const mark = String(r.unit.room ?? '').trim() !== '101' ? floorMark(r.unit) : ''
+            const label = mark ? `${room}　${mark}` : room
             // 空室・停止など現在が課金対象でない部屋は号室を灰色にして区別する
             const idle = !(r.unit.status === '入居' || r.unit.status === '退予')
+            const br = r.floorBreak ? ' is-fbreak' : ''
             return (
-              <tr key={r.unit.id}>
-                <td className="rm">{room}</td>
-                <td className="r">{yen(r.baseRent)}</td>
-                <td className="r">{yen(r.baseKyoeki)}</td>
-                <td className="r sum">{yen(r.baseRent + r.baseKyoeki)}</td>
-                <td className={'rm rc-split' + (idle ? ' is-idle' : '')}>{room}</td>
-                <td className="r">{yen(r.nowRent)}</td>
-                <td className="r">{yen(r.nowKyoeki)}</td>
-                <td className="r sum">{yen(r.nowRent + r.nowKyoeki)}</td>
-                <td className={'r dv' + (r.diff < 0 ? ' is-down' : '')}>{signed(r.diff)}</td>
+              <tr key={r.unit.id} className={r.floorBreak ? 'is-fbreak' : undefined}>
+                <td className={'rm' + br}>{label}</td>
+                <td className={'r' + br}>{yen(r.baseRent)}</td>
+                <td className={'r' + br}>{yen(r.baseKyoeki)}</td>
+                <td className={'r sum' + br}>{yen(r.baseRent + r.baseKyoeki)}</td>
+                <td className={'rm now rc-split' + br + (idle ? ' is-idle' : '')}>{label}</td>
+                <td className={'r now' + br}>{yen(r.nowRent)}</td>
+                <td className={'r now' + br}>{yen(r.nowKyoeki)}</td>
+                <td className={'r sum now' + br}>{yen(r.nowRent + r.nowKyoeki)}</td>
+                <td className={'r dv now' + br + (r.diff < 0 ? ' is-down' : '')}>{signed(r.diff)}</td>
               </tr>
             )
           })}
@@ -217,8 +226,8 @@ export function RentComparisonSheet({
             <td colSpan={3} className="r">
               {yen(baseTotal)}
             </td>
-            <td className="rc-split">計</td>
-            <td colSpan={3} className="r">
+            <td className="rc-split now">計</td>
+            <td colSpan={3} className="r now">
               {yen(nowTotal)}
             </td>
             <td className={'r dv' + (diffTotal < 0 ? ' is-down' : '')}>{signed(diffTotal)}</td>

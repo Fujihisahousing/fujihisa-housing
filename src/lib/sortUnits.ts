@@ -45,3 +45,14 @@ function groupId(u: Unit): string {
 export function isGroupBreak(prev: Unit, cur: Unit): boolean {
   return groupId(prev) !== groupId(cur)
 }
+
+/** 号室のうしろに付ける階数の記号。奇数階=■ / 偶数階=□。
+ *  階が取れない区画（屋上・地下室・戸建てなど数字始まりでないもの）と駐車場は付けない。
+ *  現況報告書と元家賃比較で同じ規則を使うのでここに置いてある。 */
+export function floorMark(u: Unit): string {
+  // 数字で始まらない区画（屋上・B1・戸建ての地名など）は階として扱わない
+  if (!/^\d/.test(toHalf(String(u.room ?? '')).trim())) return ''
+  const k = unitKey(u)
+  if (k.rank !== 0 || !k.floor) return ''
+  return k.floor % 2 === 1 ? '■' : '□'
+}
