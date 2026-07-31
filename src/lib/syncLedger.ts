@@ -49,11 +49,14 @@ export async function syncPaymentRecordsFromLedger(affected: Partial<Transaction
     // この号室の生きている賃料記帳を全部集めて、帰属月ごとに合計する
     const txs = await transactionsRepo.list({ propertyId: unit.property_id })
     const paidByMonth = new Map<string, number>()
+    const paidOnByMonth = new Map<string, string>() // その月の最後の入金日
     for (const t of txs) {
       if (t.unit_id !== unitId || t.type !== 'income' || !isRentCategory(t.category)) continue
       const { year, month } = attributionMonth(t.date)
       const k = keyOf(year, month)
       paidByMonth.set(k, (paidByMonth.get(k) ?? 0) + n(t.amount))
+      const d = String(t.date).slice(0, 10)
+      if (!paidOnByMonth.has(k) || d > paidOnByMonth.get(k)!) paidOnByMonth.set(k, d)
     }
 
     const history = await rentHistoryRepo.listByUnit(unitId)
@@ -74,16 +77,25 @@ export async function syncPaymentRecordsFromLedger(affected: Partial<Transaction
       const eff = effectiveRentKyoeki(unit, history, year, month)
       const billed = rec?.billed != null ? n(rec.billed) : eff.rent + eff.kyoeki
       const guarantor = rec?.guarantor ?? unit.guarantor ?? null
+      // 記録を新しく作るときは、契約者名・読み方・属性・保証会社を部屋の情報から埋める。
+      // ここを空のまま作ると、入金状況に金額だけ並んで誰の入金か分からなくなる。
+      // 既にある記録はそのまま活かす（当時の契約者名を書き換えない）。
       const base: PaymentRecord = rec ?? {
         property_id: unit.property_id,
         room,
         year,
         month,
+        tenant: unit.tenant ?? null,
+        tenant_type: unit.tenant_type ?? null,
+        kana: unit.tenant_kana ?? null,
+        guarantor: unit.guarantor ?? null,
       }
       await paymentRecordsRepo.upsert({
         ...base,
         billed,
         paid,
+        // 入金日は記帳の日付から入れる。記帳が消えて0になった月は日付も外す
+        paid_on: paid > 0 ? (paidOnByMonth.get(k) ?? base.paid_on ?? null) : null,
         judgement: deriveJudgement(occupied, billed, paid, Boolean(guarantor)),
       })
     }
