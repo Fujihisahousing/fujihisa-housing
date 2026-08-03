@@ -204,6 +204,128 @@ create table if not exists leases (
   pii_purge_at date
 );
 
+-- =====================================================================
+-- 物件概要書（売買資料版）のスペック列・付随テーブル
+-- 手本＝「台帳_プランドール守口.xlsx」の7シート構成。
+-- レントロールは units を正とするので、ここにテーブルは作らない。
+-- =====================================================================
+-- ---------------------------------------------------------------------
+-- 1) properties に売買資料で必要になるスペック列を追加
+--    ※ 竣工年月は既存の built、構造・規模は既存の structure を使う（新設しない）
+-- ---------------------------------------------------------------------
+alter table properties add column if not exists chiban text;              -- 地番（住居表示=address とは別）
+alter table properties add column if not exists main_use text;            -- 主要用途（共同住宅+事務所 等）
+alter table properties add column if not exists fire_zone text;           -- 防火指定（防火地域 等）
+alter table properties add column if not exists height_district text;     -- 高度地区
+alter table properties add column if not exists building_cert_no text;    -- 建築確認番号
+alter table properties add column if not exists building_cert text;       -- 確認済証（有り/無し）
+alter table properties add column if not exists inspection_cert text;     -- 検査済証（有り/無し）
+alter table properties add column if not exists standard_floor_area numeric; -- 基準階面積（㎡）
+alter table properties add column if not exists max_height numeric;       -- 最高高さ（m）
+alter table properties add column if not exists parking_count int;         -- 駐車場台数
+alter table properties add column if not exists basement text;            -- 地下室有無
+alter table properties add column if not exists unit_count_label text;    -- 総戸数／区画数（例「18戸4事務所」）
+alter table properties add column if not exists mgmt_company text;        -- 管理会社
+alter table properties add column if not exists mgmt_contact text;        -- 担当者
+alter table properties add column if not exists mgmt_phone text;          -- 担当者連絡先
+
+-- ---------------------------------------------------------------------
+-- 2) 公的書類・確認書類（Excel「公的書類詳細」シート）
+--    category='公的書類' … 確認済証・検査済証・定期報告・図面・謄本 等の有無
+--    category='特殊設備' … 避雷設備・非常用発電機 等の法定対象設備
+-- ---------------------------------------------------------------------
+create table if not exists property_documents (
+  id uuid primary key default gen_random_uuid(),
+  property_id uuid references properties(id) on delete cascade,
+  category text not null default '公的書類',
+  name text not null,               -- 書類名／設備名
+  status text,                      -- 有 / 無 / 確認中
+  file_name text,                   -- 現物のファイル名（保管場所の手がかり）
+  law text,                         -- 根拠法令（特殊設備で使う）
+  requirement text,                 -- 義務内容・頻度（特殊設備で使う）
+  note text,
+  sort_order numeric,
+  updated_at timestamptz default now()
+);
+create index if not exists property_documents_property_idx on property_documents(property_id, sort_order);
+alter table property_documents enable row level security;
+drop policy if exists "auth all property_documents" on property_documents;
+create policy "auth all property_documents" on property_documents for all to authenticated using (true) with check (true);
+
+-- ---------------------------------------------------------------------
+-- 3) 法定点検・維持管理スケジュール（Excel「法定点検・維持管理」シート）
+--    売買時の遵法性開示に使う。judgement に指摘・要修繕を残せる。
+-- ---------------------------------------------------------------------
+create table if not exists property_inspections (
+  id uuid primary key default gen_random_uuid(),
+  property_id uuid references properties(id) on delete cascade,
+  category text,                    -- 建築基準法定期調査 / 消防法定期点検 / 水道法・衛生管理 等
+  item text not null,               -- 点検項目名
+  law text,                         -- 根拠法令・条文
+  frequency text,                   -- 頻度（1年以内・3年以内 等）
+  target text,                      -- 対象 / 非対象 / 確認中
+  last_date date,                   -- 前回実施日
+  next_date date,                   -- 次回実施日
+  judgement text,                   -- ○適合 / △指摘あり / ×要修繕
+  vendor text,                      -- 実施業者
+  note text,                        -- 備考・指摘事項
+  sort_order numeric,
+  updated_at timestamptz default now()
+);
+create index if not exists property_inspections_property_idx on property_inspections(property_id, sort_order);
+alter table property_inspections enable row level security;
+drop policy if exists "auth all property_inspections" on property_inspections;
+create policy "auth all property_inspections" on property_inspections for all to authenticated using (true) with check (true);
+
+-- ---------------------------------------------------------------------
+-- 4) 年間運営費内訳（Excel「運営費内訳」シート）
+--    収支表(transactions)は「実際に払った額」、こちらは「買主に示す想定運営費」。
+--    支払先・支払サイクル・法定義務の別は transactions に無いのでここで持つ。
+-- ---------------------------------------------------------------------
+create table if not exists property_opex (
+  id uuid primary key default gen_random_uuid(),
+  property_id uuid references properties(id) on delete cascade,
+  category text,                    -- 管理費 / 法定点検費 / 修繕費 / 光熱費（共用） / 通信費 / 保険・税 / その他
+  name text not null,               -- 費目名称
+  payee text,                       -- 支払先
+  cycle text,                       -- 支払サイクル（月次 / 年次 / 年2回 / なし）
+  monthly numeric,                  -- 月額（円）
+  annual numeric,                   -- 年額（円）
+  mandatory text,                   -- 義務 / 任意 / 義務（◯◯有）
+  note text,
+  sort_order numeric,
+  updated_at timestamptz default now()
+);
+create index if not exists property_opex_property_idx on property_opex(property_id, sort_order);
+alter table property_opex enable row level security;
+drop policy if exists "auth all property_opex" on property_opex;
+create policy "auth all property_opex" on property_opex for all to authenticated using (true) with check (true);
+
+-- ---------------------------------------------------------------------
+-- 5) 修繕履歴（Excel「修繕費(専有部)」「修繕費(共用部)」シート）
+--    transactions の修繕費は金額だけなので、箇所・内容・業者はここで持つ。
+--    major=true が大規模改修（原本では赤文字）。売買資料の売り材料になる。
+-- ---------------------------------------------------------------------
+create table if not exists property_repairs (
+  id uuid primary key default gen_random_uuid(),
+  property_id uuid references properties(id) on delete cascade,
+  scope text not null default '共用部',  -- 専有部 / 共用部
+  repaired_on date,
+  kind text,                        -- 分類（居室 / 設備 / 防水 / 全体 / 一部階）
+  place text,                       -- 修繕箇所
+  content text,                     -- 修繕内容
+  vendor text,                      -- 会社名
+  cost numeric,
+  major boolean not null default false, -- 大規模改修
+  note text,
+  sort_order numeric,
+  updated_at timestamptz default now()
+);
+create index if not exists property_repairs_property_idx on property_repairs(property_id, scope, repaired_on);
+alter table property_repairs enable row level security;
+drop policy if exists "auth all property_repairs" on property_repairs;
+create policy "auth all property_repairs" on property_repairs for all to authenticated using (true) with check (true);
+
 -- 役割判定ヘルパー
 create or replace function is_admin() returns boolean
 language sql security definer stable set search_path = '' as $$

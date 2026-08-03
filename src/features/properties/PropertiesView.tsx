@@ -271,6 +271,13 @@ async function repriceRecords(
   }
 }
 
+/** 物件モーダルの項目が増えたので、区切りの小見出しを入れて探しやすくする */
+function FormSection({ title }: { title: string }) {
+  return (
+    <div className="pt-2 text-xs font-bold text-slate-500 border-b border-slate-200 pb-1">{title}</div>
+  )
+}
+
 function numOrNull(v: string): number | null {
   if (v.trim() === '') return null
   const n = Number(v)
@@ -294,16 +301,41 @@ function PropertyModal({
 
   useEffect(() => {
     if (!value) return
+    const s = (v: unknown) => (v == null ? '' : String(v))
     setF({
       name: value.name ?? '',
       address: value.address ?? '',
+      chiban: value.chiban ?? '',
+      access: value.access ?? '',
       type: value.type ?? '',
+      main_use: value.main_use ?? '',
       structure: value.structure ?? '',
       built: value.built ?? '',
       inspection_date: value.inspection_date ?? '',
+      land_area: s(value.land_area),
+      building_area: s(value.building_area),
+      standard_floor_area: s(value.standard_floor_area),
+      max_height: s(value.max_height),
+      zoning: value.zoning ?? '',
+      bcr: s(value.bcr),
+      far: s(value.far),
+      fire_zone: value.fire_zone ?? '',
+      height_district: value.height_district ?? '',
+      road: value.road ?? '',
+      unit_count_label: value.unit_count_label ?? '',
+      parking: value.parking ?? '',
+      parking_count: s(value.parking_count),
+      basement: value.basement ?? '',
+      building_cert: value.building_cert ?? '',
+      building_cert_no: value.building_cert_no ?? '',
+      inspection_cert: value.inspection_cert ?? '',
+      mgmt_company: value.mgmt_company ?? '',
+      mgmt_contact: value.mgmt_contact ?? '',
+      mgmt_phone: value.mgmt_phone ?? '',
       acquired_date: value.acquired_date ?? '',
-      acquired_price: value.acquired_price != null ? String(value.acquired_price) : '',
-      loan_balance: value.loan_balance != null ? String(value.loan_balance) : '',
+      acquired_price: s(value.acquired_price),
+      sale_price: s(value.sale_price),
+      loan_balance: s(value.loan_balance),
       notes: value.notes ?? '',
     })
     setError(null)
@@ -318,12 +350,36 @@ function PropertyModal({
       const payload: Partial<Property> = {
         name: f.name.trim(),
         address: f.address || null,
+        chiban: f.chiban || null,
+        access: f.access || null,
         type: f.type || null,
+        main_use: f.main_use || null,
         structure: f.structure || null,
         built: f.built || null,
         inspection_date: f.inspection_date || null,
+        land_area: numOrNull(f.land_area),
+        building_area: numOrNull(f.building_area),
+        standard_floor_area: numOrNull(f.standard_floor_area),
+        max_height: numOrNull(f.max_height),
+        zoning: f.zoning || null,
+        bcr: numOrNull(f.bcr),
+        far: numOrNull(f.far),
+        fire_zone: f.fire_zone || null,
+        height_district: f.height_district || null,
+        road: f.road || null,
+        unit_count_label: f.unit_count_label || null,
+        parking: f.parking || null,
+        parking_count: numOrNull(f.parking_count),
+        basement: f.basement || null,
+        building_cert: f.building_cert || null,
+        building_cert_no: f.building_cert_no || null,
+        inspection_cert: f.inspection_cert || null,
+        mgmt_company: f.mgmt_company || null,
+        mgmt_contact: f.mgmt_contact || null,
+        mgmt_phone: f.mgmt_phone || null,
         acquired_date: f.acquired_date || null,
         acquired_price: numOrNull(f.acquired_price),
+        sale_price: numOrNull(f.sale_price),
         loan_balance: numOrNull(f.loan_balance),
         notes: f.notes || null,
       }
@@ -354,24 +410,63 @@ function PropertyModal({
     >
       <div className="space-y-3">
         <TextField label="物件名" value={f.name ?? ''} onChange={set('name')} />
-        <TextField label="住所" value={f.address ?? ''} onChange={set('address')} />
+        <TextField label="所在地（住居表示）" value={f.address ?? ''} onChange={set('address')} />
+        <TextField label="地番" value={f.chiban ?? ''} onChange={set('chiban')} />
+        <TextField label="交通" value={f.access ?? ''} onChange={set('access')} />
+
+        <FormSection title="建物" />
         <div className="grid grid-cols-2 gap-3">
           <TextField label="種別" value={f.type ?? ''} onChange={set('type')} />
-          <TextField label="構造" value={f.structure ?? ''} onChange={set('structure')} />
+          <TextField label="主要用途" value={f.main_use ?? ''} onChange={set('main_use')} />
+        </div>
+        <TextField label="構造・規模" value={f.structure ?? ''} onChange={set('structure')} />
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="築年月（竣工）" value={f.built ?? ''} onChange={set('built')} />
+          {/* 検査済証は年月までしか無く和暦管理なので、日付入力ではなくテキスト（例「昭和63年4月」） */}
+          <TextField label="完了検査済日" value={f.inspection_date ?? ''} onChange={set('inspection_date')} />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <TextField label="築年" value={f.built ?? ''} onChange={set('built')} />
+          <TextField label="土地面積（㎡・公簿）" value={f.land_area ?? ''} onChange={set('land_area')} type="number" />
+          <TextField label="建物面積（㎡・公簿）" value={f.building_area ?? ''} onChange={set('building_area')} type="number" />
+          <TextField label="基準階面積（㎡）" value={f.standard_floor_area ?? ''} onChange={set('standard_floor_area')} type="number" />
+          <TextField label="最高高さ（m）" value={f.max_height ?? ''} onChange={set('max_height')} type="number" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="総戸数／区画数" value={f.unit_count_label ?? ''} onChange={set('unit_count_label')} />
+          <TextField label="地下室有無" value={f.basement ?? ''} onChange={set('basement')} />
+          <TextField label="駐車場" value={f.parking ?? ''} onChange={set('parking')} />
+          <TextField label="駐車場台数" value={f.parking_count ?? ''} onChange={set('parking_count')} type="number" />
+        </div>
+
+        <FormSection title="法規" />
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="用途地域" value={f.zoning ?? ''} onChange={set('zoning')} />
+          <TextField label="前面道路" value={f.road ?? ''} onChange={set('road')} />
+          <TextField label="建ぺい率（%）" value={f.bcr ?? ''} onChange={set('bcr')} type="number" />
+          <TextField label="容積率（%）" value={f.far ?? ''} onChange={set('far')} type="number" />
+          <TextField label="防火指定" value={f.fire_zone ?? ''} onChange={set('fire_zone')} />
+          <TextField label="高度地区" value={f.height_district ?? ''} onChange={set('height_district')} />
+          <TextField label="確認済証（有り/無し）" value={f.building_cert ?? ''} onChange={set('building_cert')} />
+          <TextField label="検査済証（有り/無し）" value={f.inspection_cert ?? ''} onChange={set('inspection_cert')} />
+        </div>
+        <TextField label="建築確認番号" value={f.building_cert_no ?? ''} onChange={set('building_cert_no')} />
+
+        <FormSection title="管理" />
+        <TextField label="管理会社" value={f.mgmt_company ?? ''} onChange={set('mgmt_company')} />
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="担当者" value={f.mgmt_contact ?? ''} onChange={set('mgmt_contact')} />
+          <TextField label="担当者連絡先" value={f.mgmt_phone ?? ''} onChange={set('mgmt_phone')} />
+        </div>
+
+        <FormSection title="取得・売却" />
+        <div className="grid grid-cols-2 gap-3">
           <TextField label="取得日" value={f.acquired_date ?? ''} onChange={set('acquired_date')} type="date" />
+          <TextField label="取得価格（円）" value={f.acquired_price ?? ''} onChange={set('acquired_price')} type="number" />
+          {/* 物件概要書の利回りはこの想定売価を分母に使う（概要書の画面からも保存できる） */}
+          <TextField label="想定売却価格（円）" value={f.sale_price ?? ''} onChange={set('sale_price')} type="number" />
+          <TextField label="ローン残債（円）" value={f.loan_balance ?? ''} onChange={set('loan_balance')} type="number" />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          {/* 現況報告用Excelに出力する項目。築年とは別 */}
-          <TextField
-            label="完了検査済日"
-            value={f.inspection_date ?? ''}
-            onChange={set('inspection_date')}
-            type="date"
-          />
-        </div>
+
         <TextField label="メモ" value={f.notes ?? ''} onChange={set('notes')} />
         {error && (
           <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm p-3">{error}</div>

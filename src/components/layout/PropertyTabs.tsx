@@ -69,8 +69,27 @@ export function PropertyTabs({ properties }: { properties: Property[] }) {
     return () => timers.forEach(clearTimeout)
   }, [activeProperty, properties])
 
+  // 物件概要書は縦に長く、下までスクロールするとどの物件を見ているか分からなくなる。
+  // この画面のときだけ、sticky ヘッダー(h-14=3.5rem)の直下に物件タブも貼り付ける。
+  // 他の画面（収支表など）は表側に sticky な見出し行を持っていて重なるため、そのまま。
+  const stick = activeView === 'prospectus' ? ' sticky top-14 z-20' : ''
+
+  // 物件概要書のタブは、この物件タブのすぐ下に貼り付ける。高さは物件数や横スクロールバーの
+  // 有無で変わるので決め打ちにせず、実測値を CSS 変数 --rb-tabs-bottom で渡す。
+  const barRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = barRef.current
+    if (!el) return
+    const apply = () =>
+      document.documentElement.style.setProperty('--rb-tabs-bottom', `${56 + el.offsetHeight}px`)
+    apply()
+    const ro = new ResizeObserver(apply)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   return (
-    <div className="bg-slate-50 border-b border-slate-200">
+    <div ref={barRef} className={'bg-slate-50 border-b border-slate-200' + stick}>
       <div
         ref={stripRef}
         className={contentWidth(isWideView(activeView), 'max-w-3xl') + ' px-5 py-2.5 flex gap-2 overflow-x-auto'}

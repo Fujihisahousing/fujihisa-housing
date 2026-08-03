@@ -18,8 +18,10 @@ export function effectiveRentKyoeki(
   history: RentHistory[] | undefined,
   year: number,
   month: number,
-): { rent: number; kyoeki: number } {
-  const fallback = { rent: n(unit.rent), kyoeki: n(unit.kyoeki) }
+): { rent: number; kyoeki: number; parking: string | null } {
+  // parking も返すのは物件概要書の過去年度レントロールのため。
+  // 既存の呼び出し元（入金状況の請求額）は rent/kyoeki しか見ないので影響しない。
+  const fallback = { rent: n(unit.rent), kyoeki: n(unit.kyoeki), parking: unit.parking ?? null }
   if (!history || history.length === 0) return fallback
   const asOf = `${year}-${String(month).padStart(2, '0')}-01`
   const startOf = (h: RentHistory) => String(h.effective_date).slice(0, 10)
@@ -28,7 +30,9 @@ export function effectiveRentKyoeki(
     const d = startOf(h)
     if (d <= asOf && (!best || d > startOf(best))) best = h
   }
-  return best ? { rent: n(best.rent), kyoeki: n(best.kyoeki) } : fallback
+  return best
+    ? { rent: n(best.rent), kyoeki: n(best.kyoeki), parking: best.parking ?? null }
+    : fallback
 }
 
 // =====================================================================
@@ -51,12 +55,12 @@ export interface RentRollResult {
 }
 
 // 駐輪・駐車・バイク代（parking欄の金額文字列 '￥18,700' 等）を数値化。金額でなければ0。
-const parkingYen = (s?: string | null): number => {
+export const parkingYen = (s?: string | null): number => {
   const m = s ? String(s).match(/[0-9][0-9,]*/) : null
   return m ? parseInt(m[0].replace(/,/g, ''), 10) : 0
 }
 // 1戸あたりの月額収入 ＝ 家賃＋共益費＋駐輪駐車（バイク代含む）
-const unitMonthly = (u: Unit) => n(u.rent) + n(u.kyoeki) + parkingYen(u.parking)
+export const unitMonthly = (u: Unit) => n(u.rent) + n(u.kyoeki) + parkingYen(u.parking)
 
 export function calcRentRoll(units: Unit[], property?: Property | null): RentRollResult {
   const rows = units.map((u) => ({ unit: u, total: n(u.rent) + n(u.kyoeki) }))
@@ -190,6 +194,82 @@ export function isStatementRowVisible(label: string, propertyName: string): bool
   if (only && propertyName !== '全体' && !only.includes(propertyName)) return false
   if (PROPERTY_HIDDEN_ROWS.get(propertyName)?.has(label)) return false
   return true
+}
+
+// =====================================================================
+// 物件概要書の運営費（実績ベース）
+// =====================================================================
+/** 運営費に入れない行。
+ *  公租公課は税なので運営費と分けて並べる（tax に入る）。
+ *  修繕費は年によって大規模修繕で桁が変わり運営費の実態を歪めるので、修繕履歴タブへまとめる
+ *  （calcRepairByFiscalYear）。元金・利息は買主に承継されない借入返済なので概要書には出さない。 */
+const OPEX_TAX_ROW = '公租公課'
+const OPEX_DROP_ROWS: readonly string[] = ['修繕費', '元金', '利息']
+
+export interface OpexActualRow {
+  label: string
+  annual: number
+}
+export interface OpexActual {
+  /** 運営費の行（修繕費を含む。公租公課・元金・利息は除く）。金額0の費目は落とす。EXPENSE_ROWS の並び */
+  rows: OpexActualRow[]
+  /** 運営費合計＝rows の合計 */
+  total: number
+  /** 公租公課（運営費とは別に並べる） */
+  tax: number
+  /** その年度に支出の記帳が1件でもあったか */
+  hasData: boolean
+}
+
+/** 会計年度ぶんの支出実績を、収支表と同じ費目行に寄せて集計する。
+ *
+ *  金額0の行を落とすだけで、isStatementRowVisible による物件別の非表示は掛けない。
+ *  行を隠すと「行を足しても合計に合わない」表になってしまうため（収支表で実際にあった罠）。 */
+export function calcOpexActual(txs: Transaction[], year: number): OpexActual {
+  const byRow = new Map<string, number>()
+  let hasData = false
+  for (const t of txs) {
+    if (t.type !== 'expense') continue
+    if (t.deleted_at) continue
+    if (fiscalYearOf(new Date(t.date)) !== year) continue
+    hasData = true
+    const label = EXPENSE_ROW_OF[t.category] ?? 'その他'
+    byRow.set(label, (byRow.get(label) ?? 0) + Number(t.amount ?? 0))
+  }
+  const rows: OpexActualRow[] = []
+  for (const label of EXPENSE_ROWS) {
+    if (label === OPEX_TAX_ROW || OPEX_DROP_ROWS.includes(label)) continue
+    const annual = byRow.get(label) ?? 0
+    if (annual === 0) continue
+    rows.push({ label, annual })
+  }
+  return {
+    rows,
+    total: rows.reduce((s, r) => s + r.annual, 0),
+    tax: byRow.get(OPEX_TAX_ROW) ?? 0,
+    hasData,
+  }
+}
+
+export interface RepairByYear {
+  /** 会計年度（9月始まり。締める年で呼ぶ） */
+  year: number
+  annual: number
+}
+
+/** 収支表に記帳された修繕費を会計年度ごとに合計する（新しい年度が先頭）。
+ *  大規模修繕でどの年にいくら掛けたかを見せるため、運営費からは外して修繕履歴タブに出す。 */
+export function calcRepairByFiscalYear(txs: Transaction[]): RepairByYear[] {
+  const byYear = new Map<number, number>()
+  for (const t of txs) {
+    if (t.type !== 'expense' || t.deleted_at) continue
+    if ((EXPENSE_ROW_OF[t.category] ?? '') !== '修繕費') continue
+    const y = fiscalYearOf(new Date(t.date))
+    byYear.set(y, (byYear.get(y) ?? 0) + Number(t.amount ?? 0))
+  }
+  return [...byYear.entries()]
+    .map(([year, annual]) => ({ year, annual }))
+    .sort((a, b) => b.year - a.year)
 }
 
 // 会計年度は9月始まり8月締め。**年度は「締める年（終了年）」で呼ぶ**（弊社規定）。
@@ -894,8 +974,11 @@ export function calcProfitIndicators(
   property?: Property | null,
   opex = 0, // 運営費（年）
   vacancyRate = 0, // 空室率（0-1）
+  // 利回りの分母。売買資料では取得価格ではなく想定売却価格で見たいので上書きできる。
+  // 0/未指定なら従来どおり properties.acquired_price を使う。
+  priceOverride = 0,
 ): ProfitIndicators {
-  const acquired = property?.acquired_price ? n(property.acquired_price) : 0
+  const acquired = priceOverride > 0 ? priceOverride : property?.acquired_price ? n(property.acquired_price) : 0
   const gpi = rr.fullAnnual
   const currentAnnual = rr.currentMonthly * 12
   const noi = gpi * (1 - vacancyRate) - opex

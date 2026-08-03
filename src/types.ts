@@ -41,6 +41,28 @@ export interface Property {
   parking?: string | null
   /** 完了検査済日。築年月(built)とは別。現況報告用Excelに出力する */
   inspection_date?: string | null
+  // --- 以下は物件概要書（売買資料）用のスペック。竣工年月は built、構造・規模は structure を使う ---
+  /** 地番（住居表示 address とは別） */
+  chiban?: string | null
+  /** 主要用途（共同住宅+事務所 等） */
+  main_use?: string | null
+  /** 防火指定（防火地域 等） */
+  fire_zone?: string | null
+  height_district?: string | null
+  building_cert_no?: string | null
+  /** 確認済証（有り/無し） */
+  building_cert?: string | null
+  /** 検査済証（有り/無し）。inspection_date（完了検査済日）とは別項目 */
+  inspection_cert?: string | null
+  standard_floor_area?: number | null
+  max_height?: number | null
+  parking_count?: number | null
+  basement?: string | null
+  /** 総戸数／区画数の表記（例「18戸4事務所」）。units の実数とは別に原本表記を持つ */
+  unit_count_label?: string | null
+  mgmt_company?: string | null
+  mgmt_contact?: string | null
+  mgmt_phone?: string | null
   /** 決済日（売却の決済='YYYY-MM-DD'）。設定すると決済後に現況報告書→レントロールの順で
    *  自動的に一覧から消える（DBデータは消さないので過去の収支表・入金状況は残る）。 */
   disposed_date?: string | null
@@ -243,3 +265,91 @@ export const BUILDING_EXPENSE_CATEGORIES = [
 export const CAT_RENT = '賃料'
 export const CAT_KYOEKI = '共益費'
 export const CAT_UTILITY = '光熱費'
+
+// =====================================================================
+// 物件概要書（売買資料）の付随データ
+// 手本＝「台帳_プランドール守口.xlsx」の各シート。
+// レントロールだけは units（RentBook側）を正とするので、ここには型を持たない。
+// =====================================================================
+
+/** 公的書類・特殊設備の有無（Excel「公的書類詳細」シート） */
+export interface PropertyDocument {
+  id: string
+  property_id: string
+  /** '公的書類'（確認済証・定期報告・謄本 等）／'特殊設備'（避雷設備・非常用発電機 等） */
+  category: string
+  name: string
+  /** 有 / 無 / 確認中 */
+  status?: string | null
+  /** 現物のファイル名。保管場所の手がかりとして原本の表記をそのまま持つ */
+  file_name?: string | null
+  law?: string | null
+  requirement?: string | null
+  note?: string | null
+  sort_order?: number | null
+}
+export const DOCUMENT_CATEGORIES = ['公的書類', '特殊設備'] as const
+export const DOCUMENT_STATUSES = ['有', '無', '確認中'] as const
+
+/** 法定点検・維持管理スケジュール（Excel「法定点検・維持管理」シート）。売買時の遵法性開示に使う */
+export interface PropertyInspection {
+  id: string
+  property_id: string
+  category?: string | null
+  item: string
+  law?: string | null
+  frequency?: string | null
+  /** 対象 / 非対象 / 確認中 */
+  target?: string | null
+  last_date?: string | null
+  next_date?: string | null
+  /** ○適合 / △指摘あり / ×要修繕 */
+  judgement?: string | null
+  vendor?: string | null
+  note?: string | null
+  sort_order?: number | null
+}
+export const INSPECTION_TARGETS = ['対象', '非対象', '確認中'] as const
+export const INSPECTION_JUDGEMENTS = ['○適合', '△指摘あり', '×要修繕'] as const
+
+/** 年間運営費内訳（Excel「運営費内訳」シート）。
+ *  収支表(transactions)が「実際に払った額」なのに対し、こちらは「買主に示す想定運営費」。
+ *  支払先・支払サイクル・法定義務の別は transactions に無いのでここで持つ。 */
+export interface PropertyOpex {
+  id: string
+  property_id: string
+  category?: string | null
+  name: string
+  payee?: string | null
+  cycle?: string | null
+  monthly?: number | null
+  annual?: number | null
+  /** 義務 / 任意 / 義務（昇降機有）等 */
+  mandatory?: string | null
+  note?: string | null
+  sort_order?: number | null
+}
+export const OPEX_CATEGORIES = [
+  '管理費', '法定点検費', '修繕費', '光熱費（共用）', '通信費', '保険・税', 'その他',
+] as const
+export const OPEX_CYCLES = ['月次', '年次', '年2回', '隔月', 'なし'] as const
+
+/** 修繕履歴の明細（Excel「修繕費(専有部)」「修繕費(共用部)」シート）。
+ *  transactions の修繕費は金額だけなので、箇所・内容・業者はこちらで持つ。
+ *  major=true が大規模改修（原本では赤文字）で、売買資料の売り材料になる。 */
+export interface PropertyRepair {
+  id: string
+  property_id: string
+  /** 専有部 / 共用部 */
+  scope: string
+  repaired_on?: string | null
+  kind?: string | null
+  place?: string | null
+  content?: string | null
+  vendor?: string | null
+  cost?: number | null
+  major: boolean
+  note?: string | null
+  sort_order?: number | null
+}
+export const REPAIR_SCOPES = ['共用部', '専有部'] as const

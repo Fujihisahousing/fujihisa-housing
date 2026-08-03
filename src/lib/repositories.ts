@@ -2,6 +2,7 @@
 // RLS により、ログイン済みでないと読み書きできない。個人情報(leases)は admin のみ。
 import { supabase } from './supabase'
 import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory, ArrearsNote, AuditLog } from '../types'
+import type { PropertyDocument, PropertyInspection, PropertyOpex, PropertyRepair } from '../types'
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
   if (error) throw new Error(error.message)
@@ -402,3 +403,51 @@ export async function pingSupabase(): Promise<{ ok: boolean; detail: string }> {
     return { ok: false, detail: e instanceof Error ? e.message : String(e) }
   }
 }
+
+// ---------------------------------------------------------------------
+// 物件概要書（売買資料）の付随データ
+// 4テーブルとも「property_id で引く／1行ずつ保存・削除」しかしないので、
+// 同じ形のリポジトリを1つのファクトリから作る。
+// ---------------------------------------------------------------------
+interface PropertyChild {
+  id: string
+  property_id: string
+  sort_order?: number | null
+}
+
+function propertyChildRepo<T extends PropertyChild>(table: string, orderBy: string) {
+  return {
+    async listByProperty(propertyId: string): Promise<T[]> {
+      const { data, error } = await supabase
+        .from(table)
+        .select('*')
+        .eq('property_id', propertyId)
+        .order(orderBy, { nullsFirst: false })
+      return unwrap(data, error)
+    },
+    /** id があれば更新、無ければ作成。渡したフィールドだけ書き換える。 */
+    async save(row: Partial<T> & { property_id: string }): Promise<T> {
+      const patch = { ...row, updated_at: new Date().toISOString() }
+      if (row.id) {
+        const { id, ...rest } = patch as Record<string, unknown> & { id: string }
+        const { data, error } = await supabase.from(table).update(rest).eq('id', id).select().single()
+        return unwrap(data, error)
+      }
+      const { data, error } = await supabase.from(table).insert(patch).select().single()
+      return unwrap(data, error)
+    },
+    async remove(id: string): Promise<void> {
+      const { error } = await supabase.from(table).delete().eq('id', id)
+      if (error) throw new Error(error.message)
+    },
+  }
+}
+
+/** 公的書類・特殊設備の有無 */
+export const propertyDocumentsRepo = propertyChildRepo<PropertyDocument>('property_documents', 'sort_order')
+/** 法定点検・維持管理スケジュール */
+export const propertyInspectionsRepo = propertyChildRepo<PropertyInspection>('property_inspections', 'sort_order')
+/** 年間運営費内訳 */
+export const propertyOpexRepo = propertyChildRepo<PropertyOpex>('property_opex', 'sort_order')
+/** 修繕履歴の明細。新しい修繕が上に来るよう日付の降順で返す */
+export const propertyRepairsRepo = propertyChildRepo<PropertyRepair>('property_repairs', 'repaired_on')
