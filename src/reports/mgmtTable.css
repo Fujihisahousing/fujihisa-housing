@@ -3,9 +3,11 @@
    物件数が多いと1枚に収まらないので、物件の帯単位でページを送る。 */
 
 .mt-page {
-  /* A3横 420mm × 297mm から余白8mmを引いた実寸 */
+  /* 基準は印刷時の実寸＝A3横 420mm × 297mm から余白8mmを引いた中身 */
   width: 404mm;
   min-height: 281mm;
+  box-sizing: border-box;
+  padding: 0;
   margin: 0 auto;
   /* 表を紙面の高さいっぱいに伸ばして下の余白をなくす。行数が変わっても
      余った高さが各行に配られるので、フォントを詰め直す必要がない。 */
@@ -229,11 +231,26 @@
   color: #991b1b !important;
 }
 
+/* 画面プレビューでは余白込みの用紙まるごとを出す（現況報告書と同じ手）。
+   余白ぶんを padding で内側に取るので、中身の幅は 404mm のまま変わらない。 */
+@media screen {
+  .mt-page {
+    width: 420mm;
+    min-height: 297mm;
+    padding: 8mm;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
+  }
+}
+
 /* 印刷：物件の帯は途中で割らない */
 @media print {
   .mt-block {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+  /* 余白は @page（A3横・8mm）が持つので、紙面側では取らない */
+  .mt-page {
+    padding: 0;
   }
   /* min-height は 281mm のまま残す。ここで 0 にすると flex の伸びが効かず、
      紙の下に余白が戻ってしまう（画面と印刷で見た目がずれる）。 */

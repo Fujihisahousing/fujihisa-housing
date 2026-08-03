@@ -17,17 +17,27 @@
 }
 
 .pr-sheet {
-  /* A4縦 210mm × 297mm から print.css の余白 12mm を引いた実寸 */
+  /* 基準は印刷時の実寸＝A4縦 210mm × 297mm から print.css の余白 12mm を引いた中身 */
   width: 186mm;
   min-height: 273mm;
   box-sizing: border-box;
+  padding: 0;
   background: #fff;
   color: #0b1220;
   font-family: 'Inter', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
   font-feature-settings: 'tnum' 1;
   -webkit-font-smoothing: antialiased;
-  /* 画面では紙に見えるよう影を付ける（印刷では消す） */
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+/* 画面プレビューでは余白込みの用紙まるごとを出す（現況報告書と同じ手）。
+   余白ぶんを padding で内側に取るので、中身の幅は 186mm のまま変わらない。 */
+@media screen {
+  .pr-sheet {
+    width: 210mm;
+    min-height: 297mm;
+    padding: 12mm;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
+  }
 }
 
 /* ---------------- 各ページの見出し ---------------- */
@@ -132,7 +142,9 @@
     display: block;
   }
   .pr-sheet {
+    /* 余白は @page（print.css の 12mm）が持つので、紙面側では取らない */
     box-shadow: none;
+    padding: 0;
     /* 中身が少ないセクションで紙1枚ぶんの空白が残らないようにする */
     min-height: 0;
     width: 100%;
