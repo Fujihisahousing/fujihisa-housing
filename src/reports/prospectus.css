@@ -114,24 +114,52 @@
 }
 
 /* 年間収支表は3列（項目・前年度・今年度）しかないので、ゆったり見せる */
-.pr-sheet[data-sec='statement'] table {
-  font-size: 8pt;
-  line-height: 1.3;
-}
-.pr-sheet[data-sec='statement'] th,
-.pr-sheet[data-sec='statement'] td {
-  padding: 1.6mm 2mm;
-}
-
-/* レントロールは16列あるので、いちばん詰めて折り返さない */
-.pr-sheet[data-sec='rentroll'] table {
+/* レントロール本体は16列あるので、いちばん詰めて折り返さない。
+   セクション全体ではなく .pr-rentroll に限定すること — 同じシートに載る収入サマリーまで
+   5.4pt に潰れてしまうため（実際にそうなっていた）。 */
+.pr-sheet .pr-rentroll {
   font-size: 5.4pt;
   line-height: 1.15;
 }
-.pr-sheet[data-sec='rentroll'] th,
-.pr-sheet[data-sec='rentroll'] td {
+.pr-sheet .pr-rentroll th,
+.pr-sheet .pr-rentroll td {
   padding: 0.45mm 0.6mm;
   white-space: nowrap;
+}
+
+/* 収入サマリーは概要書でいちばん見たい数字なので、レントロール本体の倍ほどの大きさで出す */
+.pr-sheet .pr-summary {
+  font-size: 9pt;
+  line-height: 1.3;
+}
+.pr-sheet .pr-summary th,
+.pr-sheet .pr-summary td {
+  padding: 1.8mm 2mm;
+}
+.pr-sheet .pr-summary tbody td:not(:first-child) {
+  font-size: 11pt;
+  font-weight: 600;
+}
+
+/* 年間収支表は「項目＋12ヶ月＋年度合計」の14列。金額は円記号を外して桁区切りだけにし、
+   合計列だけ ¥ を付ける（そうしないと8桁の月に幅を食われる）。 */
+.pr-sheet[data-sec='statement'] .pr-monthly {
+  font-size: 5pt;
+  line-height: 1.2;
+}
+.pr-sheet[data-sec='statement'] .pr-monthly th,
+.pr-sheet[data-sec='statement'] .pr-monthly td {
+  padding: 0.5mm 0.5mm;
+  white-space: nowrap;
+}
+/* 暦年が変わる位置（12月と1月の間）に区切りを入れる */
+.pr-sheet .pr-monthly .pr-yearsplit {
+  border-left: 0.8px solid #94a3b8;
+}
+/* 年度合計の列は左に太めの罫線を引いて月と分ける */
+.pr-sheet .pr-monthly .pr-total {
+  border-left: 1px solid #0b1220;
+  font-weight: 700;
 }
 
 /* 法定点検は根拠法令・指摘事項に長文が入るので、詰めるより折り返す */

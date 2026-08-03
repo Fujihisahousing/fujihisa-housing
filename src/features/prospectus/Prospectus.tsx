@@ -30,7 +30,7 @@ import {
   calcRentRoll, buildingAgeYears, parkingYen,
   calcOpexActual, calcRepairByFiscalYear, calcIncomeStatement,
   paymentRecordsToTransactions, bookedRentKeys,
-  fiscalYearOf, fiscalYearRange, INCOME_ROWS, EXPENSE_ROWS,
+  fiscalYearOf, fiscalYearRange, FISCAL_MONTHS, FISCAL_PREV_YEAR_COLS,
   type OpexActual, type RepairByYear, type IncomeStatementResult, type StatementRow,
 } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
@@ -379,10 +379,10 @@ export function SpecTable({ property: p, units }: { property: Property; units: U
 
 const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予'
 
-/** 3. 年間収支表。収支表(transactions＋入金記録)を今年度・前年度の年額で並べる。
+/** 3. 年間収支表。収支表(transactions＋入金記録)を月ごとに並べる。今年度・前年度の2表。
  *
  *  収支管理表は「管理費」に複数費目を畳んでいるが、こちらは畳まず費目ごとに出す（ユーザー指定）。
- *  金額が両年度とも0の費目は行ごと省く。物件ごとの行の出し分け（isStatementRowVisible）は
+ *  金額が全月0の費目は行ごと省く。物件ごとの行の出し分け（isStatementRowVisible）は
  *  掛けない — 行を隠すと「行を足しても計に合わない」表になるため。
  *  ログイン無しで見た目を検証できるよう export してある（tabcheck から import する） */
 export function AnnualStatement({
@@ -393,95 +393,117 @@ export function AnnualStatement({
   prevYear: number
   curYear: number
 }) {
-  const totals = (rows: StatementRow[]) => new Map(rows.map((r) => [r.label, r.total]))
-  const pIn = totals(prev.income)
-  const cIn = totals(cur.income)
-  const pEx = totals(prev.expense)
-  const cEx = totals(cur.expense)
+  return (
+    <div className="space-y-5">
+      <MonthlyStatement r={cur} year={curYear} note="進行中のため途中までの金額" />
+      <MonthlyStatement r={prev} year={prevYear} />
+      <p className="text-[11px] text-slate-500">
+        ※ 収支管理表と違い、支出は費目ごとにばらして出している（管理費等にまとめない）。
+        家賃収入は入金状況の月次記録を合算したもの。全月0円の費目は行ごと省いている。
+        借入返済（元金・利息）は買主に承継されないため載せていない。
+        月の欄は円記号を省いた桁区切り。
+      </p>
+    </div>
+  )
+}
 
-  const has = (a: Map<string, number>, b: Map<string, number>, l: string) => (a.get(l) ?? 0) !== 0 || (b.get(l) ?? 0) !== 0
-  const incomeLabels = INCOME_ROWS.filter((l) => has(pIn, cIn, l))
-  const expenseLabels = EXPENSE_ROWS.filter((l) => !STATEMENT_EXCLUDE.has(l) && has(pEx, cEx, l))
-  const sum = (labels: readonly string[], m: Map<string, number>) =>
-    labels.reduce((s, l) => s + (m.get(l) ?? 0), 0)
+/** 会計年度1年ぶんの月別収支。列＝9月〜8月＋年度合計 */
+function MonthlyStatement({ r, year, note }: { r: IncomeStatementResult; year: number; note?: string }) {
+  const alive = (x: StatementRow) => x.total !== 0 || x.months.some((m) => m !== 0)
+  const income = r.income.filter(alive)
+  const expense = r.expense.filter((x) => !STATEMENT_EXCLUDE.has(x.label) && alive(x))
 
-  const pIncome = sum(incomeLabels, pIn)
-  const cIncome = sum(incomeLabels, cIn)
-  const pExpense = sum(expenseLabels, pEx)
-  const cExpense = sum(expenseLabels, cEx)
-  const pRange = fiscalYearRange(prevYear)
-  const cRange = fiscalYearRange(curYear)
+  // 合計は表示している行だけから出す（元金・利息を除いた計にする）
+  const byMonth = (rows: StatementRow[]) =>
+    FISCAL_MONTHS.map((_, i) => rows.reduce((s, x) => s + x.months[i], 0))
+  const inM = byMonth(income)
+  const exM = byMonth(expense)
+  const sum = (a: number[]) => a.reduce((s, v) => s + v, 0)
+  const range = fiscalYearRange(year)
 
-  if (incomeLabels.length === 0 && expenseLabels.length === 0) {
+  if (income.length === 0 && expense.length === 0) {
     return (
-      <div className="text-center text-slate-400 text-sm py-8">
-        {prevYear}年度・{curYear}年度とも収支の記帳がありません。
+      <div>
+        <StatementHead year={year} range={range} note={note} />
+        <p className="text-center text-slate-400 text-xs py-4">この年度の記帳がありません。</p>
       </div>
     )
   }
 
   return (
-    <>
-      <table className="w-full border-collapse">
+    <div>
+      <StatementHead year={year} range={range} note={note} />
+      <table className="pr-monthly w-full border-collapse">
         <thead>
           <tr className="text-slate-500 border-b-2 border-slate-300">
             <th className="text-left font-medium">項目</th>
-            <th className="text-right font-medium">
-              {prevYear}年度
-              <span className="block font-normal text-slate-400">{pRange.from}〜{pRange.to}</span>
-            </th>
-            <th className="text-right font-medium">
-              {curYear}年度
-              <span className="block font-normal text-slate-400">{cRange.from}〜{cRange.to}</span>
-            </th>
+            {FISCAL_MONTHS.map((m, i) => (
+              <th key={m} className={`text-right font-medium ${splitClass(i)}`}>{m}月</th>
+            ))}
+            <th className="text-right font-medium pr-total">年度合計</th>
           </tr>
         </thead>
         <tbody>
           <SectionRow label="収入" />
-          {incomeLabels.map((l) => (
-            <MoneyLine key={l} label={l} prev={pIn.get(l) ?? 0} cur={cIn.get(l) ?? 0} />
-          ))}
-          <MoneyLine label="収入計" prev={pIncome} cur={cIncome} bold />
+          {income.map((x) => <MonthRow key={x.label} row={x} />)}
+          <MonthRow row={{ label: '収入計', months: inM, total: sum(inM) }} bold />
 
           <SectionRow label="支出" />
-          {expenseLabels.map((l) => (
-            <MoneyLine key={l} label={l} prev={pEx.get(l) ?? 0} cur={cEx.get(l) ?? 0} />
-          ))}
-          <MoneyLine label="支出計" prev={pExpense} cur={cExpense} bold />
+          {expense.map((x) => <MonthRow key={x.label} row={x} />)}
+          <MonthRow row={{ label: '支出計', months: exM, total: sum(exM) }} bold />
 
-          <tr className="border-t-2 border-slate-800 font-bold bg-slate-50">
-            <td>差引（収入計 − 支出計）</td>
-            <td className="text-right tabular-nums">{yen(pIncome - pExpense)}</td>
-            <td className="text-right tabular-nums">{yen(cIncome - cExpense)}</td>
-          </tr>
+          <MonthRow
+            row={{ label: '差引', months: inM.map((v, i) => v - exM[i]), total: sum(inM) - sum(exM) }}
+            bold
+            top
+          />
         </tbody>
       </table>
-      <p className="text-[11px] text-slate-500 mt-2">
-        ※ 収支管理表と違い、支出は費目ごとにばらして出している（管理費等にまとめない）。
-        家賃収入は入金状況の月次記録を合算したもの。両年度とも0円の費目は行ごと省いている。
-        借入返済（元金・利息）は買主に承継されないため載せていない。
-        {curYear}年度は進行中のため、途中までの金額。
-      </p>
-    </>
+    </div>
   )
 }
+
+function StatementHead({
+  year, range, note,
+}: { year: number; range: { from: string; to: string }; note?: string }) {
+  return (
+    <div className="flex items-baseline gap-2 border-b-2 border-slate-800 pb-1 mb-1.5">
+      <h3 className="text-sm font-bold text-slate-700">{year}年度</h3>
+      <span className="text-[11px] text-slate-500">{range.from}〜{range.to}</span>
+      {note && <span className="text-[11px] text-slate-400">（{note}）</span>}
+    </div>
+  )
+}
+
+/** 暦年が変わる位置（年度の5列目＝1月）に区切り線を入れる */
+const splitClass = (i: number) => (i === FISCAL_PREV_YEAR_COLS ? 'pr-yearsplit' : '')
 
 function SectionRow({ label }: { label: string }) {
   return (
     <tr>
-      <td colSpan={3} className="bg-slate-100 text-slate-700 font-medium">{label}</td>
+      <td colSpan={FISCAL_MONTHS.length + 2} className="bg-slate-100 text-slate-700 font-medium">
+        {label}
+      </td>
     </tr>
   )
 }
 
-function MoneyLine({
-  label, prev, cur, bold,
-}: { label: string; prev: number; cur: number; bold?: boolean }) {
+function MonthRow({ row, bold, top }: { row: StatementRow; bold?: boolean; top?: boolean }) {
   return (
-    <tr className={`border-b border-slate-100 ${bold ? 'font-bold bg-slate-50' : ''}`}>
-      <td className={bold ? '' : 'pl-3'}>{label}</td>
-      <td className="text-right tabular-nums">{yen(prev)}</td>
-      <td className="text-right tabular-nums">{yen(cur)}</td>
+    <tr
+      className={
+        'border-b border-slate-100 ' +
+        (bold ? 'font-bold bg-slate-50 ' : '') +
+        (top ? 'border-t-2 border-slate-800' : '')
+      }
+    >
+      <td className={bold ? '' : 'pl-2'}>{row.label}</td>
+      {row.months.map((v, i) => (
+        <td key={i} className={`text-right tabular-nums ${splitClass(i)} ${v === 0 ? 'text-slate-300' : ''}`}>
+          {v === 0 ? '—' : num(v)}
+        </td>
+      ))}
+      <td className="text-right tabular-nums pr-total">{yen(row.total)}</td>
     </tr>
   )
 }
@@ -564,13 +586,14 @@ export function IncomeSummary({
     <div className="report-block">
       <h3 className="text-sm font-bold text-slate-700 border-b-2 border-slate-800 pb-1 mb-2">収入サマリー</h3>
 
-      <table className="w-full text-xs border-collapse mb-3">
+      {/* 概要書でいちばん見たい数字なので、pr-summary で大きめに出す（prospectus.css） */}
+      <table className="pr-summary w-full border-collapse mb-3">
         <thead>
-          <tr className="text-[11px] text-slate-500 border-b border-slate-300">
-            <th className="py-1.5 pr-2 text-left font-medium" />
-            <th className="py-1.5 pr-2 text-right font-medium">家賃＋共益費</th>
-            <th className="py-1.5 pr-2 text-right font-medium">駐輪・駐車</th>
-            <th className="py-1.5 text-right font-medium">総合計</th>
+          <tr className="text-slate-500 border-b border-slate-300">
+            <th className="text-left font-medium" />
+            <th className="text-right font-medium">家賃＋共益費</th>
+            <th className="text-right font-medium">駐輪・駐車</th>
+            <th className="text-right font-medium">総合計</th>
           </tr>
         </thead>
         <tbody>
@@ -595,10 +618,10 @@ function MoneyRow({
 }: { label: string; rent: number; park: number; strong?: boolean }) {
   return (
     <tr className={`border-b border-slate-100 ${strong ? 'font-bold bg-slate-50' : ''}`}>
-      <td className="py-1.5 pr-2 text-slate-600">{label}</td>
-      <td className="py-1.5 pr-2 text-right tabular-nums">{yen(rent)}</td>
-      <td className="py-1.5 pr-2 text-right tabular-nums">{yen(park)}</td>
-      <td className="py-1.5 text-right tabular-nums">{yen(rent + park)}</td>
+      <td className="text-slate-600">{label}</td>
+      <td className="text-right tabular-nums">{yen(rent)}</td>
+      <td className="text-right tabular-nums">{yen(park)}</td>
+      <td className="text-right tabular-nums">{yen(rent + park)}</td>
     </tr>
   )
 }
@@ -721,9 +744,9 @@ export function RentRollTable({
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full text-[11px] border-collapse">
+        <table className="pr-rentroll w-full border-collapse">
           <thead>
-            <tr className="text-left text-[10px] text-slate-500 border-b-2 border-slate-300">
+            <tr className="text-left text-slate-500 border-b-2 border-slate-300">
               <th className="py-1.5 pr-2">号室</th>
               <th className="py-1.5 pr-2">用途</th>
               <th className="py-1.5 pr-2">間取り</th>
