@@ -95,8 +95,10 @@ function RepairScope({
   ]
   const total = rows.reduce((s, r) => s + Number(r.cost ?? 0), 0)
 
+  // 修繕明細は件数が多く1枚に収まらないので report-block（break-inside: avoid）は付けない。
+  // 付けると前のページに大きな空白が残る。行が割れないことは prospectus.css 側で担保している。
   return (
-    <div className="report-block">
+    <div>
       <div className="flex items-baseline justify-between border-b-2 border-slate-800 pb-1 mb-2">
         <h3 className="text-sm font-bold text-slate-700">{scope}修繕費</h3>
         <div className="text-xs text-slate-500">

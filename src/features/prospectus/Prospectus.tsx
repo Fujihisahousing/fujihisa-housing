@@ -14,8 +14,10 @@
 // 物件の切り替えは画面最上段の物件タブ（PropertyTabs）で行うので、この画面には
 // 物件のプルダウンを置かない。
 //
-// 印刷はタブ単位と全ページまとめの2通り。レントロールと法定点検は列が多いので A4横、
-// それ以外は A4縦にする（print.css は A4縦なので、必要なときだけ head に上書きを差し込む）。
+// 紙面は A4縦で統一する。収支管理表・現況報告書と同じく、画面でも印刷と同じ紙面を出す
+// （reports/prospectus.css が mm 指定で用紙を再現する）。1セクション＝1枚から始まり、
+// 1枚に入らないセクションだけ行単位でページを送るので、途中で半端に改ページされない。
+// 印刷はタブ単位と全ページまとめの2通り。
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Printer, Loader2, FileText } from 'lucide-react'
 import {
@@ -36,6 +38,7 @@ import type {
 } from '../../types'
 import { OpexTab, RepairsTab, InspectionsTab, DocumentsTab } from './ProspectusTables'
 import '../../reports/print.css'
+import '../../reports/prospectus.css'
 
 type TabKey = 'overview' | 'rentroll' | 'opex' | 'repairs' | 'inspections' | 'documents'
 const TABS: { key: TabKey; label: string }[] = [
@@ -46,8 +49,6 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'inspections', label: '法定点検' },
   { key: 'documents', label: '引継書類' },
 ]
-/** 列が多くて A4縦に収まらないタブ。全ページ印刷のときもこちらに合わせる */
-const LANDSCAPE: TabKey[] = ['rentroll', 'inspections']
 
 export function Prospectus({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
@@ -101,18 +102,6 @@ export function Prospectus({ properties }: { properties: Property[] }) {
   useEffect(() => {
     void load()
   }, [load])
-
-  // 印刷の用紙向き。全ページ印刷のときは、いちばん広いタブに合わせて横にする
-  const landscape = printAll || LANDSCAPE.includes(tab)
-  useEffect(() => {
-    if (!landscape) return
-    const el = document.createElement('style')
-    el.textContent = '@media print { @page { size: A4 landscape; margin: 10mm; } }'
-    document.head.appendChild(el)
-    return () => {
-      document.head.removeChild(el)
-    }
-  }, [landscape])
 
   // 全ページ印刷：先に全タブを描画してから print する（描画前に呼ぶと1タブしか出ない）
   useEffect(() => {
@@ -219,21 +208,11 @@ export function Prospectus({ properties }: { properties: Property[] }) {
           <Loader2 className="w-4 h-4 animate-spin" /> 読み込み中…
         </div>
       ) : (
-        <div id="print-root">
-          <div className={`sheet bg-white border border-slate-200 rounded-xl p-6 mx-auto ${landscape ? '' : 'max-w-[820px]'}`}>
-            <header className="flex items-end justify-between border-b-2 border-slate-800 pb-2 mb-4">
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">物件概要書</h1>
-                <div className="text-sm text-slate-600">{property.name}</div>
-              </div>
-              <div className="text-xs text-slate-500 text-right">
-                作成日 {formatDate(new Date())}
-                {property.mgmt_company && <div>管理：{property.mgmt_company}</div>}
-              </div>
-            </header>
-
+        // 用紙幅（186mm）が画面より広いことがあるので、はみ出す分だけ横スクロールさせる
+        <div className="overflow-x-auto">
+          <div id="print-root" className="pr-root">
             {show('overview') && (
-              <TabPanel title="1. 物件概要">
+              <Sheet sec="overview" property={property} title="1. 物件概要">
                 <SpecTable property={property} units={units} />
                 <IncomeSummary rr={rr} units={units} />
                 {property.notes && (
@@ -242,11 +221,11 @@ export function Prospectus({ properties }: { properties: Property[] }) {
                     <p className="text-xs text-slate-700 whitespace-pre-wrap">{property.notes}</p>
                   </div>
                 )}
-              </TabPanel>
+              </Sheet>
             )}
 
             {show('rentroll') && (
-              <TabPanel title="2. レントロール（賃貸借条件一覧）">
+              <Sheet sec="rentroll" property={property} title="2. レントロール（賃貸借条件一覧）">
                 <div className="space-y-6">
                   <RentRollTable
                     units={sortedUnits}
@@ -265,11 +244,11 @@ export function Prospectus({ properties }: { properties: Property[] }) {
                   ※ 入居者名は個人情報のため属性（個人／法人）のみ記載。稼働 {rr.occupiedUnits}/{rr.totalUnits} 戸・
                   稼働率 {percent(rr.occupancyRate, 1)}（募集停止は総数から除外）。
                 </p>
-              </TabPanel>
+              </Sheet>
             )}
 
             {show('opex') && (
-              <TabPanel title={`3. 運営費（${lastFY}年度実績）`}>
+              <Sheet sec="opex" property={property} title={`3. 運営費（${lastFY}年度実績）`}>
                 <OpexActualTable actual={actual} lastFY={lastFY} />
                 <div className="mt-6">
                   <h3 className="text-sm font-bold text-slate-700 border-b-2 border-slate-800 pb-1 mb-2">
@@ -277,29 +256,29 @@ export function Prospectus({ properties }: { properties: Property[] }) {
                   </h3>
                   <OpexTab rows={opex} propertyId={selectedId} {...handler(propertyOpexRepo)} />
                 </div>
-              </TabPanel>
+              </Sheet>
             )}
 
             {show('repairs') && (
-              <TabPanel title="4. 修繕費・修繕履歴">
+              <Sheet sec="repairs" property={property} title="4. 修繕費・修繕履歴">
                 {/* 前年度より古い年度は出さない（レントロールと同じく今年度・前年度の2年度） */}
                 <RepairByYearTable rows={repairByYear.filter((r) => r.year >= lastFY)} lastFY={lastFY} />
                 <div className="mt-6">
                   <RepairsTab rows={repairs} propertyId={selectedId} {...handler(propertyRepairsRepo)} />
                 </div>
-              </TabPanel>
+              </Sheet>
             )}
 
             {show('inspections') && (
-              <TabPanel title="5. 法定点検・維持管理">
+              <Sheet sec="inspections" property={property} title="5. 法定点検・維持管理">
                 <InspectionsTab rows={inspections} propertyId={selectedId} {...handler(propertyInspectionsRepo)} />
-              </TabPanel>
+              </Sheet>
             )}
 
             {show('documents') && (
-              <TabPanel title="6. 引継書類">
+              <Sheet sec="documents" property={property} title="6. 引継書類">
                 <DocumentsTab rows={docs} propertyId={selectedId} {...handler(propertyDocumentsRepo)} />
-              </TabPanel>
+              </Sheet>
             )}
           </div>
         </div>
@@ -311,10 +290,29 @@ export function Prospectus({ properties }: { properties: Property[] }) {
 // =====================================================================
 // 1. 概要
 // =====================================================================
-function TabPanel({ title, children }: { title: string; children: ReactNode }) {
+/** 1セクション＝A4縦1枚ぶんの紙面。中身が1枚に収まらないときだけ行単位でページが送られる。
+ *  どのページを切り取っても物件が分かるよう、見出しは全セクションに同じものを出す。 */
+function Sheet({
+  sec, property, title, children,
+}: {
+  sec: string
+  property: Property
+  title: string
+  children: ReactNode
+}) {
   return (
-    <section className="report-block mb-6">
-      <h2 className="text-base font-bold text-slate-800 mb-2">{title}</h2>
+    <section className="pr-sheet" data-sec={sec}>
+      <header className="pr-head">
+        <div>
+          <h1>物件概要書</h1>
+          <div className="pr-prop">{property.name}</div>
+        </div>
+        <div className="pr-meta">
+          <div>作成日 {formatDate(new Date())}</div>
+          {property.mgmt_company && <div>管理：{property.mgmt_company}</div>}
+        </div>
+      </header>
+      <h2 className="pr-h2">{title}</h2>
       {children}
     </section>
   )
@@ -622,8 +620,11 @@ export function RentRollTable({
   }
   const sum = (f: (u: Unit) => number) => units.reduce((s, u) => s + f(u), 0)
 
+  // report-block（break-inside: avoid）は付けない。1枚に収まらない長さになると
+  // ブロックごと次ページへ送られて前のページに大きな空白が残るため。
+  // 行が割れないことと見出しの繰り返しは prospectus.css 側で担保している。
   return (
-    <div className="report-block">
+    <div>
       {title && (
         <div className="border-b-2 border-slate-800 pb-1 mb-2">
           <h3 className="text-sm font-bold text-slate-700">{title}</h3>

@@ -1,0 +1,145 @@
+/* 物件概要書のA4縦レイアウト。収支管理表(mgmtTable.css)・現況報告書(statusReport.css)と
+   同じ方針で、画面でも印刷と同じ紙面が見えるよう mm 指定で用紙を再現する。
+
+   構成は「1セクション＝1枚から始まる」。内容が1枚に入らないセクション（レントロール・
+   修繕明細など）は行単位でページを送る。セクションの途中で唐突に改ページが入って
+   紙面が半端に終わるのを防ぐのが狙い。
+
+   フォントサイズは列数に合わせてセクションごとに変えている（data-sec で出し分け）。
+   Tailwind のユーティリティ（text-xs 等）は 0,1,0 なので、ここの子孫セレクタ 0,1,1 が勝つ。
+   列や項目を増やしたときは、必ず幅186mmに収まるか実測すること。 */
+
+.pr-root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6mm;
+}
+
+.pr-sheet {
+  /* A4縦 210mm × 297mm から print.css の余白 12mm を引いた実寸 */
+  width: 186mm;
+  min-height: 273mm;
+  box-sizing: border-box;
+  background: #fff;
+  color: #0b1220;
+  font-family: 'Inter', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
+  font-feature-settings: 'tnum' 1;
+  -webkit-font-smoothing: antialiased;
+  /* 画面では紙に見えるよう影を付ける（印刷では消す） */
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+/* ---------------- 各ページの見出し ---------------- */
+/* どのページを切り取っても物件が分かるよう、全ページに同じ見出しを出す */
+.pr-head {
+  display: flex;
+  align-items: flex-end;
+  gap: 6mm;
+  border-bottom: 1.2px solid #0b1220;
+  padding-bottom: 1.5mm;
+  margin-bottom: 3mm;
+}
+.pr-head h1 {
+  margin: 0;
+  font-size: 12pt;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+}
+.pr-head .pr-prop {
+  font-size: 9pt;
+  font-weight: 600;
+  color: #334155;
+  margin-top: 0.6mm;
+}
+.pr-head .pr-meta {
+  margin-left: auto;
+  text-align: right;
+  font-size: 6.5pt;
+  color: #64748b;
+  line-height: 1.35;
+}
+.pr-h2 {
+  font-size: 9.5pt;
+  font-weight: 700;
+  margin: 0 0 2.5mm;
+}
+
+/* ---------------- 表の共通 ---------------- */
+.pr-sheet table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 6.8pt;
+  line-height: 1.25;
+}
+.pr-sheet th,
+.pr-sheet td {
+  padding: 0.7mm 1mm;
+}
+/* ページをまたぐ表は各ページに見出しを出し、行は途中で割らない */
+.pr-sheet thead {
+  display: table-header-group;
+}
+.pr-sheet tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+/* 小見出しだけがページ末尾に取り残されないようにする */
+.pr-sheet h3 {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+/* ---------------- セクション別の詰め方 ---------------- */
+/* レントロールは16列あるので、いちばん詰めて折り返さない */
+.pr-sheet[data-sec='rentroll'] table {
+  font-size: 5.4pt;
+  line-height: 1.15;
+}
+.pr-sheet[data-sec='rentroll'] th,
+.pr-sheet[data-sec='rentroll'] td {
+  padding: 0.45mm 0.6mm;
+  white-space: nowrap;
+}
+
+/* 法定点検は根拠法令・指摘事項に長文が入るので、詰めるより折り返す */
+.pr-sheet[data-sec='inspections'] table {
+  font-size: 6pt;
+  line-height: 1.2;
+}
+.pr-sheet[data-sec='inspections'] th,
+.pr-sheet[data-sec='inspections'] td {
+  padding: 0.6mm 0.8mm;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* 修繕明細は件数が多い（守口で95件）。行を詰めて枚数を抑える */
+.pr-sheet[data-sec='repairs'] table {
+  font-size: 6pt;
+  line-height: 1.2;
+}
+.pr-sheet[data-sec='repairs'] th,
+.pr-sheet[data-sec='repairs'] td {
+  padding: 0.5mm 0.8mm;
+}
+
+/* ---------------- 印刷 ---------------- */
+@media print {
+  .pr-root {
+    gap: 0;
+    display: block;
+  }
+  .pr-sheet {
+    box-shadow: none;
+    /* 中身が少ないセクションで紙1枚ぶんの空白が残らないようにする */
+    min-height: 0;
+    width: 100%;
+  }
+  /* セクションの切れ目でページを送る＝各セクションはページ先頭から始まる */
+  .pr-sheet + .pr-sheet {
+    break-before: page;
+    page-break-before: always;
+  }
+}
