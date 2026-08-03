@@ -6,7 +6,7 @@
 //
 //   概要         … Excel「物件サマリー」だけ。1枚を使い切るよう1列でゆったり組む
 //   レントロール … RentBook の units。現在の契約内容のみ（過去分は年間収支表で見る）
-//   年間収支表   … 収支表(transactions＋入金記録)を今年度・前年度の年額で並べる。
+//   年間収支表   … 収支表(transactions＋入金記録)を今年度・前年度の月別で並べる。
 //                  収支管理表と違って支出は費目ごとにばらす（まとめない）
 //   運営費       … Excel「運営費内訳」
 //   修繕履歴     … Excel「修繕費(専有部)」「修繕費(共用部)」
@@ -393,11 +393,12 @@ export function AnnualStatement({
   prevYear: number
   curYear: number
 }) {
+  // pr-fill：紙面の高さいっぱいまで2表を伸ばす（余った高さは各行に配られる。prospectus.css）
   return (
-    <div className="space-y-5">
+    <div className="pr-fill">
       <MonthlyStatement r={cur} year={curYear} note="進行中のため途中までの金額" />
       <MonthlyStatement r={prev} year={prevYear} />
-      <p className="text-[11px] text-slate-500">
+      <p className="pr-nofill text-[11px] text-slate-500">
         ※ 収支管理表と違い、支出は費目ごとにばらして出している（管理費等にまとめない）。
         家賃収入は入金状況の月次記録を合算したもの。全月0円の費目は行ごと省いている。
         借入返済（元金・利息）は買主に承継されないため載せていない。
@@ -423,7 +424,7 @@ function MonthlyStatement({ r, year, note }: { r: IncomeStatementResult; year: n
 
   if (income.length === 0 && expense.length === 0) {
     return (
-      <div>
+      <div className="pr-fill-block">
         <StatementHead year={year} range={range} note={note} />
         <p className="text-center text-slate-400 text-xs py-4">この年度の記帳がありません。</p>
       </div>
@@ -431,7 +432,7 @@ function MonthlyStatement({ r, year, note }: { r: IncomeStatementResult; year: n
   }
 
   return (
-    <div>
+    <div className="pr-fill-block">
       <StatementHead year={year} range={range} note={note} />
       <table className="pr-monthly w-full border-collapse">
         <thead>

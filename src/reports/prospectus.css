@@ -149,8 +149,37 @@
 }
 .pr-sheet[data-sec='statement'] .pr-monthly th,
 .pr-sheet[data-sec='statement'] .pr-monthly td {
-  padding: 0.5mm 0.5mm;
+  /* 縦だけ広げる。横を広げると14列が186mmに収まらなくなる。
+     ここは小さめにしておき、余った高さは下の flex に配らせる — 固定で広げると
+     費目の多い物件で1枚に収まらなくなる（実測で 1.6mm だと4.6mm溢れた）。 */
+  padding: 0.9mm 0.5mm;
   white-space: nowrap;
+}
+
+/* 行数が少なく紙面の下に余白が残るので、高さいっぱいまで行を伸ばす。
+   収支管理表(.mt-table)と同じ手で、余った高さは表が各行に配ってくれるので
+   行数が物件ごとに変わってもフォントを調整し直さなくてよい。 */
+.pr-sheet[data-sec='statement'] {
+  display: flex;
+  flex-direction: column;
+}
+.pr-sheet .pr-fill {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6mm;
+}
+.pr-sheet .pr-fill-block {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.pr-sheet .pr-fill-block .pr-monthly {
+  flex: 1 0 auto;
+}
+/* 注記は伸ばさない */
+.pr-sheet .pr-fill > .pr-nofill {
+  flex: 0 0 auto;
 }
 /* 暦年が変わる位置（12月と1月の間）に区切りを入れる */
 .pr-sheet .pr-monthly .pr-yearsplit {
@@ -197,6 +226,11 @@
     /* 中身が少ないセクションで紙1枚ぶんの空白が残らないようにする */
     min-height: 0;
     width: 100%;
+  }
+  /* 年間収支表だけは高さを残す。0 にすると flex の伸びが効かず行が縮んで、
+     画面と印刷で見た目がずれる（収支管理表と同じ理由）。 */
+  .pr-sheet[data-sec='statement'] {
+    min-height: 273mm;
   }
   /* セクションの切れ目でページを送る＝各セクションはページ先頭から始まる */
   .pr-sheet + .pr-sheet {
