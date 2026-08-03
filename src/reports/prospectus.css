@@ -102,6 +102,27 @@
 }
 
 /* ---------------- セクション別の詰め方 ---------------- */
+/* 概要は物件概要だけを1項目1行で出す。A4縦1枚を使い切るよう行間をゆったり取る。
+   項目を増やしたら1枚に収まるか（.pr-sheet の中身が273mm以内か）を実測すること。 */
+.pr-sheet[data-sec='overview'] table {
+  font-size: 8.5pt;
+  line-height: 1.35;
+}
+.pr-sheet[data-sec='overview'] th,
+.pr-sheet[data-sec='overview'] td {
+  padding: 2.6mm 2.5mm;
+}
+
+/* 年間収支表は3列（項目・前年度・今年度）しかないので、ゆったり見せる */
+.pr-sheet[data-sec='statement'] table {
+  font-size: 8pt;
+  line-height: 1.3;
+}
+.pr-sheet[data-sec='statement'] th,
+.pr-sheet[data-sec='statement'] td {
+  padding: 1.6mm 2mm;
+}
+
 /* レントロールは16列あるので、いちばん詰めて折り返さない */
 .pr-sheet[data-sec='rentroll'] table {
   font-size: 5.4pt;

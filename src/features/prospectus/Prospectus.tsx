@@ -1,11 +1,13 @@
 // 物件概要書（売買資料版・A4印刷 / PDF）。
 //
 // 手本＝デスクトップ「台帳_プランドール守口.xlsx」の7シート構成。Excelのシートに対応する
-// 6タブに分け、レントロールだけは Excel ではなく RentBook の units を正として出す
+// タブに分け、レントロールだけは Excel ではなく RentBook の units を正として出す
 // （原本のレントロールより RentBook のほうが整合性が高い、というユーザー判断）。
 //
-//   概要         … Excel「物件サマリー」＋収支サマリー
-//   レントロール … RentBook の units。今年度・前年度の2本を出す
+//   概要         … Excel「物件サマリー」だけ。1枚を使い切るよう1列でゆったり組む
+//   レントロール … RentBook の units。現在の契約内容のみ（過去分は年間収支表で見る）
+//   年間収支表   … 収支表(transactions＋入金記録)を今年度・前年度の年額で並べる。
+//                  収支管理表と違って支出は費目ごとにばらす（まとめない）
 //   運営費       … Excel「運営費内訳」
 //   修繕履歴     … Excel「修繕費(専有部)」「修繕費(共用部)」
 //   法定点検     … Excel「法定点検・維持管理」
@@ -21,34 +23,42 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Printer, Loader2, FileText } from 'lucide-react'
 import {
-  unitsRepo, transactionsRepo, rentHistoryRepo,
+  unitsRepo, transactionsRepo, paymentRecordsRepo,
   propertyDocumentsRepo, propertyInspectionsRepo, propertyOpexRepo, propertyRepairsRepo,
 } from '../../lib/repositories'
 import {
-  calcRentRoll, buildingAgeYears, parkingYen, effectiveRentKyoeki,
-  calcOpexActual, calcRepairByFiscalYear, fiscalYearOf, fiscalYearRange,
-  type OpexActual, type RepairByYear,
+  calcRentRoll, buildingAgeYears, parkingYen,
+  calcOpexActual, calcRepairByFiscalYear, calcIncomeStatement,
+  paymentRecordsToTransactions, bookedRentKeys,
+  fiscalYearOf, fiscalYearRange, INCOME_ROWS, EXPENSE_ROWS,
+  type OpexActual, type RepairByYear, type IncomeStatementResult, type StatementRow,
 } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
 import { yen, percent, formatDate, num } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import type {
-  Property, Unit, Transaction, RentHistory,
+  Property, Unit, Transaction, PaymentRecord,
   PropertyDocument, PropertyInspection, PropertyOpex, PropertyRepair,
 } from '../../types'
 import { OpexTab, RepairsTab, InspectionsTab, DocumentsTab } from './ProspectusTables'
 import '../../reports/print.css'
 import '../../reports/prospectus.css'
 
-type TabKey = 'overview' | 'rentroll' | 'opex' | 'repairs' | 'inspections' | 'documents'
+type TabKey = 'overview' | 'rentroll' | 'statement' | 'opex' | 'repairs' | 'inspections' | 'documents'
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'overview', label: '概要' },
   { key: 'rentroll', label: 'レントロール' },
+  { key: 'statement', label: '年間収支表' },
   { key: 'opex', label: '運営費' },
   { key: 'repairs', label: '修繕履歴' },
   { key: 'inspections', label: '法定点検' },
   { key: 'documents', label: '引継書類' },
 ]
+
+/** 年間収支表に出さない支出。買主に承継されない借入返済なので、概要書には載せない
+ *  （運営費タブと同じ扱い。行だけ隠すと支出計から借入額が逆算できてしまうので、
+ *   合計もこの行を除いて計算する） */
+const STATEMENT_EXCLUDE = new Set(['元金', '利息'])
 
 export function Prospectus({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
@@ -57,8 +67,8 @@ export function Prospectus({ properties }: { properties: Property[] }) {
   const [loading, setLoading] = useState(false)
 
   const [units, setUnits] = useState<Unit[]>([])
-  const [history, setHistory] = useState<RentHistory[]>([])
   const [txs, setTxs] = useState<Transaction[]>([])
+  const [records, setRecords] = useState<PaymentRecord[]>([])
   const [opex, setOpex] = useState<PropertyOpex[]>([])
   const [repairs, setRepairs] = useState<PropertyRepair[]>([])
   const [inspections, setInspections] = useState<PropertyInspection[]>([])
@@ -72,14 +82,16 @@ export function Prospectus({ properties }: { properties: Property[] }) {
 
   const load = useCallback(async () => {
     if (!selectedId) {
-      setUnits([]); setHistory([]); setTxs([]); setOpex([]); setRepairs([]); setInspections([]); setDocs([])
+      setUnits([]); setTxs([]); setRecords([]); setOpex([]); setRepairs([]); setInspections([]); setDocs([])
       return
     }
     setLoading(true)
     try {
-      const [u, t, o, r, i, d] = await Promise.all([
+      const [u, t, rec, o, r, i, d] = await Promise.all([
         unitsRepo.listByProperty(selectedId),
         transactionsRepo.list({ propertyId: selectedId }),
+        // 家賃収入の大半は入金状況の月次記録に入っているので、年間収支表にはこれも要る
+        paymentRecordsRepo.list(selectedId),
         propertyOpexRepo.listByProperty(selectedId),
         propertyRepairsRepo.listByProperty(selectedId),
         propertyInspectionsRepo.listByProperty(selectedId),
@@ -87,13 +99,12 @@ export function Prospectus({ properties }: { properties: Property[] }) {
       ])
       setUnits(u)
       setTxs(t)
+      setRecords(rec)
       setOpex(o)
       // 新しい修繕を上に。日付未入力は末尾へ落とす
       setRepairs([...r].sort((a, b) => String(b.repaired_on ?? '').localeCompare(String(a.repaired_on ?? ''))))
       setInspections(i)
       setDocs(d)
-      // 前年度のレントロールを出すのに賃料履歴が要る
-      setHistory(await rentHistoryRepo.listByUnitIds(u.map((x) => x.id)))
     } finally {
       setLoading(false)
     }
@@ -124,16 +135,14 @@ export function Prospectus({ properties }: { properties: Property[] }) {
   const actual = useMemo(() => calcOpexActual(txs, lastFY), [txs, lastFY])
   const repairByYear = useMemo(() => calcRepairByFiscalYear(txs), [txs])
 
-  // 賃料履歴を部屋ごとに引けるようにしておく（前年度レントロール用）
-  const historyByUnit = useMemo(() => {
-    const m = new Map<string, RentHistory[]>()
-    for (const h of history) {
-      const list = m.get(h.unit_id)
-      if (list) list.push(h)
-      else m.set(h.unit_id, [h])
-    }
-    return m
-  }, [history])
+  // 年間収支表。入金状況の月次記録を家賃収入として合算する（同じ家賃を台帳にも
+  // 記帳している号室・月は記帳のほうを採る）。変換は収支表・管理表と共通の calc.ts 側。
+  const allTxs = useMemo(
+    () => [...txs, ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs))],
+    [txs, records, units],
+  )
+  const stCur = useMemo(() => calcIncomeStatement(allTxs, thisFY), [allTxs, thisFY])
+  const stPrev = useMemo(() => calcIncomeStatement(allTxs, lastFY), [allTxs, lastFY])
 
   // DataTable からの保存・削除。保存後に一覧を取り直す
   const handler = <T extends { id: string }>(
@@ -214,7 +223,6 @@ export function Prospectus({ properties }: { properties: Property[] }) {
             {show('overview') && (
               <Sheet sec="overview" property={property} title="1. 物件概要">
                 <SpecTable property={property} units={units} />
-                <IncomeSummary rr={rr} units={units} />
                 {property.notes && (
                   <div className="mt-4">
                     <h3 className="text-sm font-bold text-slate-700 border-b border-slate-300 pb-1 mb-1">備考</h3>
@@ -226,19 +234,9 @@ export function Prospectus({ properties }: { properties: Property[] }) {
 
             {show('rentroll') && (
               <Sheet sec="rentroll" property={property} title="2. レントロール（賃貸借条件一覧）">
-                <div className="space-y-6">
-                  <RentRollTable
-                    units={sortedUnits}
-                    title={`${thisFY}年度（今年度・${fiscalYearRange(thisFY).from}〜${fiscalYearRange(thisFY).to}）`}
-                    subtitle="現在の契約内容"
-                  />
-                  <RentRollTable
-                    units={sortedUnits}
-                    historyByUnit={historyByUnit}
-                    asOf={{ year: lastFY, month: 8 }}
-                    title={`${lastFY}年度（前年度・${fiscalYearRange(lastFY).from}〜${fiscalYearRange(lastFY).to}）`}
-                    subtitle={`賃料・共益費・駐輪駐車のみ ${lastFY}年8月時点（賃料履歴から算出）。状況・敷金・礼金・契約開始日・保証会社は履歴を持たないため現在の値`}
-                  />
+                <IncomeSummary rr={rr} units={units} />
+                <div className="mt-6">
+                  <RentRollTable units={sortedUnits} title="現在の契約内容" subtitle={formatDate(new Date()) + ' 時点'} />
                 </div>
                 <p className="text-[11px] text-slate-400 mt-2">
                   ※ 入居者名は個人情報のため属性（個人／法人）のみ記載。稼働 {rr.occupiedUnits}/{rr.totalUnits} 戸・
@@ -247,8 +245,14 @@ export function Prospectus({ properties }: { properties: Property[] }) {
               </Sheet>
             )}
 
+            {show('statement') && (
+              <Sheet sec="statement" property={property} title="3. 年間収支表">
+                <AnnualStatement prev={stPrev} cur={stCur} prevYear={lastFY} curYear={thisFY} />
+              </Sheet>
+            )}
+
             {show('opex') && (
-              <Sheet sec="opex" property={property} title={`3. 運営費（${lastFY}年度実績）`}>
+              <Sheet sec="opex" property={property} title={`4. 運営費（${lastFY}年度実績）`}>
                 <OpexActualTable actual={actual} lastFY={lastFY} />
                 <div className="mt-6">
                   <h3 className="text-sm font-bold text-slate-700 border-b-2 border-slate-800 pb-1 mb-2">
@@ -260,7 +264,7 @@ export function Prospectus({ properties }: { properties: Property[] }) {
             )}
 
             {show('repairs') && (
-              <Sheet sec="repairs" property={property} title="4. 修繕費・修繕履歴">
+              <Sheet sec="repairs" property={property} title="5. 修繕費・修繕履歴">
                 {/* 前年度より古い年度は出さない（レントロールと同じく今年度・前年度の2年度） */}
                 <RepairByYearTable rows={repairByYear.filter((r) => r.year >= lastFY)} lastFY={lastFY} />
                 <div className="mt-6">
@@ -270,13 +274,13 @@ export function Prospectus({ properties }: { properties: Property[] }) {
             )}
 
             {show('inspections') && (
-              <Sheet sec="inspections" property={property} title="5. 法定点検・維持管理">
+              <Sheet sec="inspections" property={property} title="6. 法定点検・維持管理">
                 <InspectionsTab rows={inspections} propertyId={selectedId} {...handler(propertyInspectionsRepo)} />
               </Sheet>
             )}
 
             {show('documents') && (
-              <Sheet sec="documents" property={property} title="6. 引継書類">
+              <Sheet sec="documents" property={property} title="7. 引継書類">
                 <DocumentsTab rows={docs} propertyId={selectedId} {...handler(propertyDocumentsRepo)} />
               </Sheet>
             )}
@@ -353,15 +357,19 @@ export function SpecTable({ property: p, units }: { property: Property; units: U
     ['担当者／連絡先', [p.mgmt_contact, p.mgmt_phone].filter(Boolean).join('／') || null],
   ]
 
+  // 概要タブは物件概要だけなので、2列に詰めず1項目1行にしてA4縦1枚を使い切る。
+  // 行の高さ（余白）は prospectus.css の [data-sec='overview'] 側で決めている。
   return (
-    <table className="w-full text-xs border-collapse mb-4">
+    <table className="w-full border-collapse">
       <tbody>
-        {chunk(rows, 2).map((pair, i) => (
-          <tr key={i} className="border-b border-slate-100">
-            {pair.map(([k, v]) => (
-              <SpecCell key={k} label={k} value={v} />
-            ))}
-            {pair.length === 1 && <SpecCell label="" value={null} />}
+        {rows.map(([k, v]) => (
+          <tr key={k} className="border-b border-slate-100">
+            <th className="bg-slate-50 text-slate-500 font-medium text-left align-top w-[30%] whitespace-nowrap">
+              {k}
+            </th>
+            <td className="align-top text-slate-800">
+              {v == null || v === '' ? <span className="text-slate-300">—</span> : v}
+            </td>
           </tr>
         ))}
       </tbody>
@@ -369,28 +377,116 @@ export function SpecTable({ property: p, units }: { property: Property; units: U
   )
 }
 
-function SpecCell({ label, value }: { label: string; value: ReactNode }) {
+const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予'
+
+/** 3. 年間収支表。収支表(transactions＋入金記録)を今年度・前年度の年額で並べる。
+ *
+ *  収支管理表は「管理費」に複数費目を畳んでいるが、こちらは畳まず費目ごとに出す（ユーザー指定）。
+ *  金額が両年度とも0の費目は行ごと省く。物件ごとの行の出し分け（isStatementRowVisible）は
+ *  掛けない — 行を隠すと「行を足しても計に合わない」表になるため。
+ *  ログイン無しで見た目を検証できるよう export してある（tabcheck から import する） */
+export function AnnualStatement({
+  prev, cur, prevYear, curYear,
+}: {
+  prev: IncomeStatementResult
+  cur: IncomeStatementResult
+  prevYear: number
+  curYear: number
+}) {
+  const totals = (rows: StatementRow[]) => new Map(rows.map((r) => [r.label, r.total]))
+  const pIn = totals(prev.income)
+  const cIn = totals(cur.income)
+  const pEx = totals(prev.expense)
+  const cEx = totals(cur.expense)
+
+  const has = (a: Map<string, number>, b: Map<string, number>, l: string) => (a.get(l) ?? 0) !== 0 || (b.get(l) ?? 0) !== 0
+  const incomeLabels = INCOME_ROWS.filter((l) => has(pIn, cIn, l))
+  const expenseLabels = EXPENSE_ROWS.filter((l) => !STATEMENT_EXCLUDE.has(l) && has(pEx, cEx, l))
+  const sum = (labels: readonly string[], m: Map<string, number>) =>
+    labels.reduce((s, l) => s + (m.get(l) ?? 0), 0)
+
+  const pIncome = sum(incomeLabels, pIn)
+  const cIncome = sum(incomeLabels, cIn)
+  const pExpense = sum(expenseLabels, pEx)
+  const cExpense = sum(expenseLabels, cEx)
+  const pRange = fiscalYearRange(prevYear)
+  const cRange = fiscalYearRange(curYear)
+
+  if (incomeLabels.length === 0 && expenseLabels.length === 0) {
+    return (
+      <div className="text-center text-slate-400 text-sm py-8">
+        {prevYear}年度・{curYear}年度とも収支の記帳がありません。
+      </div>
+    )
+  }
+
   return (
     <>
-      <th className="bg-slate-50 text-slate-500 font-medium text-left align-top py-1.5 px-2 w-[15%] whitespace-nowrap">
-        {label}
-      </th>
-      <td className="py-1.5 px-2 align-top text-slate-800 w-[35%]">
-        {value == null || value === '' ? <span className="text-slate-300">—</span> : value}
-      </td>
+      <table className="w-full border-collapse">
+        <thead>
+          <tr className="text-slate-500 border-b-2 border-slate-300">
+            <th className="text-left font-medium">項目</th>
+            <th className="text-right font-medium">
+              {prevYear}年度
+              <span className="block font-normal text-slate-400">{pRange.from}〜{pRange.to}</span>
+            </th>
+            <th className="text-right font-medium">
+              {curYear}年度
+              <span className="block font-normal text-slate-400">{cRange.from}〜{cRange.to}</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <SectionRow label="収入" />
+          {incomeLabels.map((l) => (
+            <MoneyLine key={l} label={l} prev={pIn.get(l) ?? 0} cur={cIn.get(l) ?? 0} />
+          ))}
+          <MoneyLine label="収入計" prev={pIncome} cur={cIncome} bold />
+
+          <SectionRow label="支出" />
+          {expenseLabels.map((l) => (
+            <MoneyLine key={l} label={l} prev={pEx.get(l) ?? 0} cur={cEx.get(l) ?? 0} />
+          ))}
+          <MoneyLine label="支出計" prev={pExpense} cur={cExpense} bold />
+
+          <tr className="border-t-2 border-slate-800 font-bold bg-slate-50">
+            <td>差引（収入計 − 支出計）</td>
+            <td className="text-right tabular-nums">{yen(pIncome - pExpense)}</td>
+            <td className="text-right tabular-nums">{yen(cIncome - cExpense)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p className="text-[11px] text-slate-500 mt-2">
+        ※ 収支管理表と違い、支出は費目ごとにばらして出している（管理費等にまとめない）。
+        家賃収入は入金状況の月次記録を合算したもの。両年度とも0円の費目は行ごと省いている。
+        借入返済（元金・利息）は買主に承継されないため載せていない。
+        {curYear}年度は進行中のため、途中までの金額。
+      </p>
     </>
   )
 }
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = []
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
-  return out
+function SectionRow({ label }: { label: string }) {
+  return (
+    <tr>
+      <td colSpan={3} className="bg-slate-100 text-slate-700 font-medium">{label}</td>
+    </tr>
+  )
 }
 
-const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予'
+function MoneyLine({
+  label, prev, cur, bold,
+}: { label: string; prev: number; cur: number; bold?: boolean }) {
+  return (
+    <tr className={`border-b border-slate-100 ${bold ? 'font-bold bg-slate-50' : ''}`}>
+      <td className={bold ? '' : 'pl-3'}>{label}</td>
+      <td className="text-right tabular-nums">{yen(prev)}</td>
+      <td className="text-right tabular-nums">{yen(cur)}</td>
+    </tr>
+  )
+}
 
-/** 3. 運営費（会計年度の実績）。収支表に記帳された額をそのまま費目別に出す。
+/** 4. 運営費（会計年度の実績）。収支表に記帳された額をそのまま費目別に出す。
  *  ログイン無しで見た目を検証できるよう export してある（tabcheck から import する） */
 export function OpexActualTable({ actual, lastFY }: { actual: OpexActual; lastFY: number }) {
   const range = fiscalYearRange(lastFY)
@@ -600,24 +696,17 @@ const STATUS_CLASS: Record<string, string> = {
   停止: 'bg-slate-200 text-slate-500',
 }
 
-/** ログイン無しで見た目を検証できるよう export してある（tabcheck から import する）。
- *  asOf を渡すと、その年月時点の賃料履歴で賃料・共益費・駐輪駐車を置き換える（前年度用）。 */
+/** 現在の契約内容だけを出す。過去の推移は年間収支表で見る（ユーザー指定）。
+ *  ログイン無しで見た目を検証できるよう export してある（tabcheck から import する）。 */
 export function RentRollTable({
-  units, title, subtitle, historyByUnit, asOf,
+  units, title, subtitle,
 }: {
   units: Unit[]
   title?: string
   subtitle?: string
-  historyByUnit?: Map<string, RentHistory[]>
-  asOf?: { year: number; month: number }
 }) {
   const n = (v: unknown) => Number(v ?? 0)
-  // asOf があればその時点の実効値、無ければ現在値
-  const moneyOf = (u: Unit) => {
-    if (!asOf) return { rent: n(u.rent), kyoeki: n(u.kyoeki), park: parkingYen(u.parking) }
-    const e = effectiveRentKyoeki(u, historyByUnit?.get(u.id), asOf.year, asOf.month)
-    return { rent: e.rent, kyoeki: e.kyoeki, park: parkingYen(e.parking) }
-  }
+  const moneyOf = (u: Unit) => ({ rent: n(u.rent), kyoeki: n(u.kyoeki), park: parkingYen(u.parking) })
   const sum = (f: (u: Unit) => number) => units.reduce((s, u) => s + f(u), 0)
 
   // report-block（break-inside: avoid）は付けない。1枚に収まらない長さになると
