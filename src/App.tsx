@@ -6,6 +6,7 @@ import { Header } from './components/layout/Header'
 import { PropertyTabs } from './components/layout/PropertyTabs'
 import { RoomEntry } from './components/entry/RoomEntry'
 import { BuildingEntry } from './components/entry/BuildingEntry'
+import { RepairEntry } from './components/entry/RepairEntry'
 import { ImportCsv } from './features/payments/ImportCsv'
 import { LedgerView } from './features/ledger/LedgerView'
 import { PropertiesView } from './features/properties/PropertiesView'
@@ -75,7 +76,13 @@ function Shell() {
   )
 }
 
-type EntryTab = 'room' | 'building' | 'import'
+type EntryTab = 'room' | 'building' | 'import' | 'repair'
+const ENTRY_TABS: { key: EntryTab; label: string }[] = [
+  { key: 'room', label: '部屋ごと' },
+  { key: 'building', label: '建物まとめ' },
+  { key: 'import', label: '通帳から取込' },
+  { key: 'repair', label: '修繕履歴' },
+]
 
 function EntryView({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
@@ -115,16 +122,16 @@ function EntryView({ properties }: { properties: Property[] }) {
       )}
 
       <div className="flex rounded-xl bg-slate-100 p-1 text-sm">
-        {(['room', 'building', 'import'] as EntryTab[]).map((t) => (
+        {ENTRY_TABS.map((t) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={t.key}
+            onClick={() => setTab(t.key)}
             className={
-              'flex-1 rounded-lg py-2 font-medium transition-colors ' +
-              (tab === t ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')
+              'flex-1 whitespace-nowrap rounded-lg py-2 text-xs sm:text-sm font-medium transition-colors ' +
+              (tab === t.key ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500')
             }
           >
-            {t === 'room' ? '部屋ごと' : t === 'building' ? '建物まとめ' : '通帳から取込'}
+            {t.label}
           </button>
         ))}
       </div>
@@ -143,6 +150,9 @@ function EntryView({ properties }: { properties: Property[] }) {
           embedded
           onDone={onSaved}
         />
+      )}
+      {tab === 'repair' && (
+        <RepairEntry properties={properties} defaultPropertyId={activeProperty} onSaved={onSaved} />
       )}
     </div>
   )

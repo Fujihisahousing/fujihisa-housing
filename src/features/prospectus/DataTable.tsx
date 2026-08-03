@@ -17,6 +17,9 @@ export interface FieldDef<T> {
   align?: 'left' | 'right' | 'center'
   /** true にすると表には出さず、編集モーダルでだけ扱う */
   formOnly?: boolean
+  /** true にすると表にだけ出し、編集モーダルには出さない。
+   *  他の列から組み立てて見せるだけの列（key は React の key に使うだけ）に付ける */
+  tableOnly?: boolean
   /** th に付けるクラス（幅の指定など） */
   thClass?: string
 }
@@ -215,7 +218,7 @@ function RowModal<T extends { id: string }>({
           </button>
         </div>
         <div className="p-4 space-y-3">
-          {fields.map((f) => (
+          {fields.filter((f) => !f.tableOnly).map((f) => (
             <div key={f.key}>
               <label className="block text-xs text-slate-500 mb-1">{f.label}</label>
               {f.type === 'select' ? (

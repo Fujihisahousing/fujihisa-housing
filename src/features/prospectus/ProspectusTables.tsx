@@ -13,22 +13,29 @@ import {
 const money = (v: unknown) => (v == null || v === '' ? <span className="text-slate-300">—</span> : yen(Number(v)))
 const date = (v: unknown) => (v ? formatDate(String(v)) : <span className="text-slate-300">—</span>)
 
+/** 支払サイクル1回あたりの金額。月次なら月額、それ以外は年額。片方しか無ければ入っている方を出す */
+const cycleAmount = (r: PropertyOpex): number | null => {
+  const pick = r.cycle === '月次' ? r.monthly : r.annual
+  return pick ?? r.monthly ?? r.annual ?? null
+}
+
 // =====================================================================
 // 運営費内訳
 // =====================================================================
 export function OpexTab({ rows, onSave, onRemove, propertyId }: TabProps<PropertyOpex>) {
-  // 金額（月額・年額）は表に出さない。運営費の数字は収支表の実績を正としており、
-  // 契約時の想定額を並べると2つの合計が並んで誤解を招くため。
-  // データは残してあるので、編集モーダルでは今までどおり入力・確認できる。
+  // 金額は「支払サイクル1回あたり」の額を1列で出す（月次なら月額、それ以外は年額）。
+  // 運営費の合計は収支表の実績を正としているので、この表には合計行を置かない。
   const fields: FieldDef<PropertyOpex>[] = [
     { key: 'category', label: '費目カテゴリ', type: 'select', options: OPEX_CATEGORIES, formOnly: true },
     { key: 'name', label: '費目名称' },
     { key: 'payee', label: '支払先' },
     { key: 'cycle', label: '支払サイクル', type: 'select', options: OPEX_CYCLES },
+    { key: 'monthly', label: '月額（円）', type: 'number', formOnly: true },
+    { key: 'annual', label: '年額（円）', type: 'number', formOnly: true },
+    // 表示専用の列。値は monthly / annual に入るので、編集は上の2欄で行う
+    { key: 'id', label: '金額', align: 'right', tableOnly: true, render: (r) => money(cycleAmount(r)) },
     { key: 'mandatory', label: '法定義務', align: 'center' },
     { key: 'note', label: '備考', type: 'textarea' },
-    { key: 'monthly', label: '月額（円・参考）', type: 'number', formOnly: true },
-    { key: 'annual', label: '年額（円・参考）', type: 'number', formOnly: true },
     { key: 'sort_order', label: '並び順', type: 'number', formOnly: true },
   ]
 
@@ -45,8 +52,8 @@ export function OpexTab({ rows, onSave, onRemove, propertyId }: TabProps<Propert
         emptyText="支払先が登録されていません。「費目を追加」から入力してください。"
       />
       <p className="text-[11px] text-slate-400 mt-2">
-        ※ 誰にいくらのサイクルで払っているかの一覧。金額は上の実績を正とするため表には出していない
-        （編集画面では入力できる）。
+        ※ 誰にどのサイクルでいくら払っているかの一覧。金額は支払サイクル1回あたり（月次なら月額）。
+        編集画面の月額・年額の欄から入力する。年度の運営費合計は上の実績が正。
       </p>
     </>
   )
@@ -78,19 +85,15 @@ function RepairScope({
   const fields: FieldDef<PropertyRepair>[] = [
     { key: 'repaired_on', label: '修繕日付', type: 'date', render: (r) => date(r.repaired_on) },
     { key: 'kind', label: '分類' },
-    { key: 'place', label: '修繕箇所' },
-    { key: 'content', label: '修繕内容' },
+    { key: 'place', label: '修繕箇所', thClass: 'w-[16%]' },
+    // 修繕内容は長くなることがあるので、列幅を決めて2行に折り返させる（1行のまま伸ばさない）
+    { key: 'content', label: '修繕内容', thClass: 'w-[24%]' },
     { key: 'vendor', label: '会社名' },
     { key: 'cost', label: '費用', type: 'number', align: 'right', render: (r) => money(r.cost) },
-    {
-      key: 'major', label: '大規模', type: 'checkbox', align: 'center',
-      render: (r) => (r.major ? <span className="text-red-600 font-bold">大規模</span> : null),
-    },
     { key: 'note', label: '備考', type: 'textarea' },
     { key: 'scope', label: '区分', type: 'select', options: ['共用部', '専有部'], formOnly: true },
   ]
   const total = rows.reduce((s, r) => s + Number(r.cost ?? 0), 0)
-  const major = rows.filter((r) => r.major).reduce((s, r) => s + Number(r.cost ?? 0), 0)
 
   return (
     <div className="report-block">
@@ -98,7 +101,6 @@ function RepairScope({
         <h3 className="text-sm font-bold text-slate-700">{scope}修繕費</h3>
         <div className="text-xs text-slate-500">
           {rows.length}件・費用合計 <span className="font-bold text-slate-800">{yen(total)}</span>
-          {major > 0 && <>（うち大規模改修 {yen(major)}）</>}
         </div>
       </div>
       <DataTable
@@ -106,7 +108,7 @@ function RepairScope({
         rows={rows}
         onSave={onSave}
         onRemove={onRemove}
-        defaults={{ property_id: propertyId, scope, major: false }}
+        defaults={{ property_id: propertyId, scope }}
         addLabel={`${scope}の修繕を追加`}
         emptyText={`${scope}の修繕履歴が登録されていません。`}
       />

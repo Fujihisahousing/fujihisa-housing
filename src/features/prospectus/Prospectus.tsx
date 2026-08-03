@@ -282,7 +282,8 @@ export function Prospectus({ properties }: { properties: Property[] }) {
 
             {show('repairs') && (
               <TabPanel title="4. 修繕費・修繕履歴">
-                <RepairByYearTable rows={repairByYear} lastFY={lastFY} />
+                {/* 前年度より古い年度は出さない（レントロールと同じく今年度・前年度の2年度） */}
+                <RepairByYearTable rows={repairByYear.filter((r) => r.year >= lastFY)} lastFY={lastFY} />
                 <div className="mt-6">
                   <RepairsTab rows={repairs} propertyId={selectedId} {...handler(propertyRepairsRepo)} />
                 </div>
@@ -431,9 +432,10 @@ export function OpexActualTable({ actual, lastFY }: { actual: OpexActual; lastFY
         </tbody>
       </table>
 
-      {/* 運営費合計と、そこから外した公租公課を横に並べる */}
+      {/* 運営費合計と、そこから外した公租公課を横に並べる。
+          公租公課は年1回払いなので月平均は出さない */}
       <div className="grid grid-cols-2 gap-2 mt-3">
-        <TotalBox label={`${lastFY}年度 運営費 合計`} annual={actual.total} strong />
+        <TotalBox label={`${lastFY}年度 運営費 合計`} annual={actual.total} monthlyAverage strong />
         <TotalBox label={`${lastFY}年度 公租公課`} annual={actual.tax} />
       </div>
 
@@ -518,7 +520,6 @@ export function RepairByYearTable({ rows, lastFY }: { rows: RepairByYear[]; last
     )
   }
   const total = rows.reduce((s, r) => s + r.annual, 0)
-  const avg = total / rows.length
 
   return (
     <div className="report-block">
@@ -549,7 +550,7 @@ export function RepairByYearTable({ rows, lastFY }: { rows: RepairByYear[]; last
           })}
           <tr className="border-t-2 border-slate-800 font-bold">
             <td className="py-1.5 pr-2">{rows.length}年度の合計</td>
-            <td className="py-1.5 pr-2 text-right tabular-nums">{yen(avg / 12)}</td>
+            <td className="py-1.5 pr-2 text-right tabular-nums">{yen(total / rows.length / 12)}</td>
             <td className="py-1.5 text-right tabular-nums">{yen(total)}</td>
           </tr>
         </tbody>
@@ -557,20 +558,26 @@ export function RepairByYearTable({ rows, lastFY }: { rows: RepairByYear[]; last
       <p className="text-[11px] text-slate-500 mt-2">
         ※ 合計行の月平均は「{rows.length}年度の総額 ÷ {rows.length}年 ÷ 12ヶ月」。
         大規模修繕のある年に金額が偏るため、単年ではなくこの平均で見ること。
+        年度をまたぐ古い修繕は下の明細を参照。
       </p>
     </div>
   )
 }
 
-/** 運営費タブの合計欄。月平均と年額を並べて出す */
-function TotalBox({ label, annual, strong }: { label: string; annual: number; strong?: boolean }) {
+/** 運営費タブの合計欄。monthlyAverage を付けたときだけ月平均を添える
+ *  （公租公課は年1回払いなので月平均に意味がなく、出さない） */
+function TotalBox({
+  label, annual, monthlyAverage, strong,
+}: { label: string; annual: number; monthlyAverage?: boolean; strong?: boolean }) {
   return (
     <div className={`rounded-lg px-3 py-2 ${strong ? 'bg-slate-800 text-white' : 'bg-slate-50'}`}>
       <div className={`text-[11px] ${strong ? 'text-slate-300' : 'text-slate-500'}`}>{label}</div>
       <div className={`font-bold text-base tabular-nums ${strong ? '' : 'text-slate-800'}`}>{yen(annual)}</div>
-      <div className={`text-[11px] tabular-nums ${strong ? 'text-slate-300' : 'text-slate-500'}`}>
-        月平均 {yen(annual / 12)}
-      </div>
+      {monthlyAverage && (
+        <div className={`text-[11px] tabular-nums ${strong ? 'text-slate-300' : 'text-slate-500'}`}>
+          月平均 {yen(annual / 12)}
+        </div>
+      )}
     </div>
   )
 }
