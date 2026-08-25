@@ -4,6 +4,7 @@
 // タブに分け、レントロールだけは Excel ではなく RentBook の units を正として出す
 // （原本のレントロールより RentBook のほうが整合性が高い、というユーザー判断）。
 //
+//   表紙         … マンション名・所在地・管理会社・作成日だけの1枚。表や見出し帯は載せない
 //   概要         … Excel「物件サマリー」だけ。1枚を使い切るよう1列でゆったり組む
 //   レントロール … RentBook の units。現在の契約内容のみ（過去分は年間収支表で見る）
 //   年間収支表   … 収支表(transactions＋入金記録)を今年度・前年度の月別で並べる。
@@ -45,8 +46,9 @@ import { OpexTab, RepairsTab, InspectionsTab, DocumentsTab } from './ProspectusT
 import '../../reports/print.css'
 import '../../reports/prospectus.css'
 
-type TabKey = 'overview' | 'rentroll' | 'statement' | 'opex' | 'repairs' | 'inspections' | 'documents'
+type TabKey = 'cover' | 'overview' | 'rentroll' | 'statement' | 'opex' | 'repairs' | 'inspections' | 'documents'
 const TABS: { key: TabKey; label: string }[] = [
+  { key: 'cover', label: '表紙' },
   { key: 'overview', label: '概要' },
   { key: 'rentroll', label: 'レントロール' },
   { key: 'statement', label: '年間収支表' },
@@ -63,7 +65,7 @@ const STATEMENT_EXCLUDE = new Set(['元金', '利息'])
 
 export function Prospectus({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
-  const [tab, setTab] = useState<TabKey>('overview')
+  const [tab, setTab] = useState<TabKey>('cover')
   const [printAll, setPrintAll] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
@@ -246,6 +248,8 @@ export function Prospectus({ properties }: { properties: Property[] }) {
         // 用紙幅（186mm）が画面より広いことがあるので、はみ出す分だけ横スクロールさせる
         <div className="overflow-x-auto">
           <div id="print-root" ref={rootRef} className="pr-root">
+            {show('cover') && <CoverSheet property={property} />}
+
             {show('overview') && (
               <Sheet sec="overview" property={property} title="1. 物件概要">
                 <SpecTable property={property} units={units} />
@@ -318,6 +322,40 @@ export function Prospectus({ properties }: { properties: Property[] }) {
 }
 
 // =====================================================================
+// 0. 表紙
+// =====================================================================
+/** 表紙。1枚ものなので、他のセクションと違って共通見出し（pr-head）も通し番号も付けない。
+ *  載せるのはマンション名・所在地・会社名・作成日の4つだけ。全部センター揃え。
+ *
+ *  会社名は所有オーナー（自社）で固定する。物件ごとの管理会社
+ *  （properties.mgmt_company＝「有限会社　リアルター」等）は買主に開示しないため、
+ *  概要書のどのページにも出さない。台帳の物件編集画面には従来どおり残してある。
+ *
+ *  作成日は「2026年8月25日」と読ませる。format.ts の formatDate は "2026/08/25" で、
+ *  表紙の字面には固いのでここだけ別に組む。
+ *  ログイン無しで見た目を検証できるよう export してある（tabcheck から import する） */
+export const OWNER = '株式会社フジヒサハウジング'
+
+export function CoverSheet({ property: p, now = new Date() }: { property: Property; now?: Date }) {
+  const created = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`
+  return (
+    <section className="pr-sheet pr-cover" data-sec="cover">
+      <div className="pr-cover-main">
+        <div className="pr-cover-eyebrow">PROPERTY PROSPECTUS</div>
+        <div className="pr-cover-kicker">物件概要書</div>
+        <div className="pr-cover-rule" />
+        <h1 className="pr-cover-name">{p.name}</h1>
+        {p.address && <div className="pr-cover-addr">{p.address}</div>}
+      </div>
+      <div className="pr-cover-foot">
+        <div className="pr-cover-company">{OWNER}</div>
+        <div className="pr-cover-date">{created}</div>
+      </div>
+    </section>
+  )
+}
+
+// =====================================================================
 // 1. 概要
 // =====================================================================
 /** 1セクション＝A4縦1枚ぶんの紙面。中身が1枚に収まらないときだけ行単位でページが送られる。
@@ -337,9 +375,9 @@ function Sheet({
           <h1>物件概要書</h1>
           <div className="pr-prop">{property.name}</div>
         </div>
+        {/* 管理会社は買主に開示しないので出さない（表紙の所有オーナー名だけを載せる） */}
         <div className="pr-meta">
           <div>作成日 {formatDate(new Date())}</div>
-          {property.mgmt_company && <div>管理：{property.mgmt_company}</div>}
         </div>
       </header>
       <h2 className="pr-h2">{title}</h2>
@@ -378,9 +416,6 @@ export function SpecTable({ property: p, units }: { property: Property; units: U
     ['確認済証', p.building_cert],
     ['検査済証', p.inspection_cert],
     ['完了検査済日', p.inspection_date],
-    ['管理会社', p.mgmt_company],
-    // 担当者名が空で連絡先だけ入っている物件があるので、ラベルは両方を含む表記にする
-    ['担当者／連絡先', [p.mgmt_contact, p.mgmt_phone].filter(Boolean).join('／') || null],
   ]
 
   // 概要タブは物件概要だけなので、2列に詰めず1項目1行にしてA4縦1枚を使い切る。

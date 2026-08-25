@@ -126,7 +126,9 @@
 .pr-sheet[data-sec='overview'] table {
   font-size: 8.5pt;
   --pr-lh: 1.35;
-  --pr-pad-y: 2.6mm;
+  /* 22項目で紙面（273mm）を使い切る値。管理会社・担当者の2行を落としたとき、
+     2.6mm のままだと 42mm も余白が残った。項目を増減したら実測して合わせ直すこと。 */
+  --pr-pad-y: 3.35mm;
   --pr-pad-x: 2.5mm;
 }
 
@@ -229,6 +231,83 @@
   --pr-pad-x: 0.8mm;
 }
 
+/* ---------------- 表紙 ---------------- */
+/* 1枚もの。共通見出し(.pr-head)も表も罫線も置かず、
+   マンション名・所在地・会社名・作成日だけを全部センター揃えで組む。
+   フォントはゴシックで固定する。.pr-sheet の既定は 'Inter' 始まりだが Inter は和文を持たず、
+   Windows では 'Hiragino Sans'/'Noto Sans JP' も無いことが多いので、
+   Yu Gothic・Meiryo まで並べておかないと環境によって明朝に落ちる。 */
+.pr-cover {
+  font-family: 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic Medium', 'Yu Gothic',
+    YuGothic, Meiryo, 'Noto Sans JP', system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  text-align: center;
+  color: #0b1220;
+}
+
+/* 物件名のかたまり。紙面の余った高さの中央に置く（下の会社名ぶんを除いた中央） */
+.pr-cover-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 20mm;
+}
+.pr-cover-eyebrow {
+  font-size: 7pt;
+  font-weight: 600;
+  letter-spacing: 0.32em;
+  /* letter-spacing は最後の1文字の右にも入るので、その分だけ左へ戻して中心を合わせる */
+  text-indent: 0.32em;
+  color: #94a3b8;
+}
+.pr-cover-kicker {
+  margin-top: 3mm;
+  font-size: 10pt;
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  color: #64748b;
+}
+.pr-cover-rule {
+  width: 16mm;
+  height: 1px;
+  background: #cbd5e1;
+  margin: 9mm auto;
+}
+.pr-cover-name {
+  margin: 0;
+  font-size: 28pt;
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: 0.06em;
+  text-indent: 0.06em;
+}
+.pr-cover-addr {
+  margin-top: 6mm;
+  font-size: 10pt;
+  line-height: 1.7;
+  color: #475569;
+}
+
+/* 会社名と作成日は紙面のいちばん下。罫線は引かない */
+.pr-cover-foot {
+  padding-bottom: 14mm;
+}
+.pr-cover-company {
+  font-size: 12pt;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-indent: 0.08em;
+}
+.pr-cover-date {
+  margin-top: 3mm;
+  font-size: 9pt;
+  letter-spacing: 0.06em;
+  text-indent: 0.06em;
+  color: #64748b;
+}
+
 /* ---------------- 高さの測定用 ---------------- */
 /* fitToPage.ts が高さを測るあいだだけ付くクラス。画面でも印刷と同じ幾何にする。
    .no-print を隠さないと、画面にしか出ない「行を追加」ボタンや編集列まで測ってしまう。
@@ -260,6 +339,11 @@
   /* 年間収支表だけは高さを残す。0 にすると flex の伸びが効かず行が縮んで、
      画面と印刷で見た目がずれる（収支管理表と同じ理由）。 */
   .pr-sheet[data-sec='statement'] {
+    min-height: 273mm;
+  }
+  /* 表紙も同じ理由で高さを残す。0 にすると margin-top:auto の下寄せが効かず、
+     管理会社・作成日が帯のすぐ下に張り付いてしまう。 */
+  .pr-sheet[data-sec='cover'] {
     min-height: 273mm;
   }
   /* セクションの切れ目でページを送る＝各セクションはページ先頭から始まる */
