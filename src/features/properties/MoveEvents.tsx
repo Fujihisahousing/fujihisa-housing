@@ -196,14 +196,15 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-500">
+        <span className="text-sm font-semibold text-slate-600">
           {isMoveIn ? '入居' : '退去'}（{rows.length}）
         </span>
+        {/* この画面の主役の操作なので、上のタブや「物件を追加」と同じ大きさで出す */}
         <button
           onClick={startNew}
-          className="flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900"
+          className="flex items-center gap-1.5 rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-medium hover:bg-slate-800"
         >
-          <Plus className="w-3.5 h-3.5" /> {isMoveIn ? '入居を登録' : '退去を登録'}
+          <Plus className="w-4 h-4" /> {isMoveIn ? '入居を登録' : '退去を登録'}
         </button>
       </div>
 
