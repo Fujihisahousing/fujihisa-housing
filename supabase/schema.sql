@@ -574,8 +574,9 @@ create table if not exists move_events (
   first_full_ym text,
   -- 退去：最終請求月（'YYYY-MM'）。退去月は満額なので既定は退去月
   final_ym text,
-  -- 記録用の契約者名。units.tenant は退去時にクリアするので、ここに控えを残す
+  -- 記録用の契約者名と読み。units 側は退去時にクリアするので、ここに控えを残す
   tenant text,
+  tenant_kana text,
   memo text,
   created_at timestamptz default now()
 );

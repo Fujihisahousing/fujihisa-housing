@@ -198,6 +198,8 @@ export interface MoveEvent {
   final_ym?: string | null
   /** 契約者名の控え（units.tenant は退去時にクリアするため） */
   tenant?: string | null
+  /** 読み仮名の控え */
+  tenant_kana?: string | null
   memo?: string | null
   created_at?: string
 }
