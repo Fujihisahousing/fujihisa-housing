@@ -3,19 +3,27 @@ import { useCallback, useEffect, useState } from 'react'
 import { Plus, Pencil, Trash2, Loader2, DoorOpen, ChevronDown, ChevronRight, Users } from 'lucide-react'
 import { Modal } from '../../components/common/Modal'
 import { LeaseManager } from '../leases/LeaseManager'
+import { MoveEventsPanel } from './MoveEvents'
 import { useAuth } from '../../auth/AuthProvider'
-import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo } from '../../lib/repositories'
+import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo, moveEventsRepo } from '../../lib/repositories'
 import { unitCompare } from '../../lib/sortUnits'
 import { effectiveRentKyoeki, deriveJudgement } from '../../lib/calc'
 import { statusBadgeClass } from '../../lib/status'
-import { yen, formatDate, today } from '../../lib/format'
-import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type Property, type RentHistory, type Unit } from '../../types'
+import { yen, today } from '../../lib/format'
+import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type MoveEvent, type Property, type RentHistory, type Unit } from '../../types'
 
 export function PropertiesView({ onChanged }: { onChanged: () => void }) {
   const [properties, setProperties] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Partial<Property> | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  // 物件／入居／退去の3タブ。入退去は全物件を横断して一覧したいので、
+  // 物件パネルの中ではなくこの画面のトップに置いている。
+  const [tab, setTab] = useState<'物件' | '入居' | '退去'>('物件')
+  const [units, setUnits] = useState<Unit[]>([])
+  const [events, setEvents] = useState<MoveEvent[]>([])
+  const [history, setHistory] = useState<RentHistory[]>([])
+  const [moveLoading, setMoveLoading] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -25,6 +33,29 @@ export function PropertiesView({ onChanged }: { onChanged: () => void }) {
       setLoading(false)
     }
   }, [])
+
+  /** 入退去タブで使う全物件ぶんのデータ。賃料履歴も要る
+   *  （日割りの目安と退去月の満額を、その月時点の賃料で出すため） */
+  const loadMove = useCallback(async () => {
+    setMoveLoading(true)
+    try {
+      const us = await unitsRepo.listAll()
+      setUnits(us)
+      const ids = us.map((u) => u.id)
+      const [ev, hs] = await Promise.all([
+        moveEventsRepo.listByUnitIds(ids),
+        rentHistoryRepo.listByUnitIds(ids),
+      ])
+      setEvents(ev)
+      setHistory(hs)
+    } finally {
+      setMoveLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (tab !== '物件') void loadMove()
+  }, [tab, loadMove])
 
   useEffect(() => {
     void load()
@@ -39,17 +70,44 @@ export function PropertiesView({ onChanged }: { onChanged: () => void }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center gap-2">
         <h2 className="font-bold text-slate-800">物件・部屋の管理</h2>
-        <button
-          onClick={() => setEditing({})}
-          className="flex items-center gap-1.5 rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-medium hover:bg-slate-800"
-        >
-          <Plus className="w-4 h-4" /> 物件を追加
-        </button>
+        <span className="flex-1" />
+        {(['物件', '入居', '退去'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={
+              'rounded-xl px-3 py-2 text-sm font-medium transition-colors ' +
+              (tab === t
+                ? 'bg-slate-900 text-white'
+                : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50')
+            }
+          >
+            {t}
+          </button>
+        ))}
+        {tab === '物件' && (
+          <button
+            onClick={() => setEditing({})}
+            className="flex items-center gap-1.5 rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-medium hover:bg-slate-800"
+          >
+            <Plus className="w-4 h-4" /> 物件を追加
+          </button>
+        )}
       </div>
 
-      {loading ? (
+      {tab !== '物件' ? (
+        <MoveEventsPanel
+          kind={tab}
+          units={units}
+          properties={properties}
+          history={history}
+          events={events}
+          loading={moveLoading}
+          onChanged={loadMove}
+        />
+      ) : loading ? (
         <div className="flex items-center gap-2 text-slate-500 text-sm py-8 justify-center">
           <Loader2 className="w-4 h-4 animate-spin" /> 読み込み中…
         </div>
@@ -238,6 +296,31 @@ function TextField({
  * 触るのは請求額と判定だけで、入金額・契約者名・備考・滞納月数には手を付けない。
  * 対象は反映開始日の月以降だけ（それより前の月は当時の請求額のまま残す）。
  */
+/** 'YYYY-MM' の当月値。適用開始月の既定値に使う */
+function thisYm(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
+/** 'YYYY-MM' → 'YYYY-MM-01'。effectiveRentKyoeki は対象月の1日と文字列比較するので、
+ *  1日に揃えておけば「その月分から効く」がそのまま成り立つ。 */
+function ymToDate(ym?: string | null): string | null {
+  const m = String(ym ?? '').match(/^(\d{4})-(\d{2})$/)
+  return m ? `${m[1]}-${m[2]}-01` : null
+}
+
+/** 日付を その月の1日 に丸める。契約開始日から「改定前の額の開始月」を作るのに使う */
+function firstOfMonth(date?: string | null): string | null {
+  const m = String(date ?? '').match(/^(\d{4})-(\d{2})/)
+  return m ? `${m[1]}-${m[2]}-01` : null
+}
+
+/** 履歴一覧の表示。'2026-08-01' → '2026年8月分' */
+function ymLabel(date: string): string {
+  const m = String(date).match(/^(\d{4})-(\d{2})/)
+  return m ? `${m[1]}年${Number(m[2])}月分` : String(date)
+}
+
 async function repriceRecords(
   propertyId: string,
   room: string,
@@ -508,7 +591,7 @@ function UnitModal({
       rent: value.rent != null ? String(value.rent) : '',
       kyoeki: value.kyoeki != null ? String(value.kyoeki) : '',
       variation: value.variation ?? '',
-      rent_effective_date: today(),
+      rent_apply_ym: thisYm(),
       deposit: value.deposit != null ? String(value.deposit) : '',
       hoshokin: value.hoshokin != null ? String(value.hoshokin) : '',
       key_money: value.key_money != null ? String(value.key_money) : '',
@@ -537,6 +620,23 @@ function UnitModal({
 
   async function save() {
     if (!f.room?.trim()) return setError('号室を入力してください。')
+
+    // 「空室」に変えた＝退去が確定した時点。契約者まわりの情報を消す。
+    // 賃料・共益費・駐輪駐車は次の募集条件としてそのまま使うので残す
+    // （消してしまうと満室想定や過去月の請求額の計算材料が無くなる）。
+    const movedOut = isEdit && f.status === '空室' && (value?.status ?? '') !== '空室'
+    if (movedOut) {
+      const ok = window.confirm(
+        `${f.room} を空室にします。
+
+契約者名・読み方・入居者属性・保証会社・支払方法・契約期間を消去します。
+賃料・共益費・駐輪駐車は残します（次の募集条件として使うため）。
+
+よろしいですか？`,
+      )
+      if (!ok) return
+    }
+
     setSaving(true)
     try {
       const newRent = numOrNull(f.rent) ?? 0
@@ -555,9 +655,9 @@ function UnitModal({
         layout: f.layout || null,
         area: numOrNull(f.area),
         use_type: f.use_type || null,
-        tenant_type: f.tenant_type || null,
-        tenant: f.tenant || null,
-        tenant_kana: f.tenant_kana || null,
+        tenant_type: movedOut ? null : f.tenant_type || null,
+        tenant: movedOut ? null : f.tenant || null,
+        tenant_kana: movedOut ? null : f.tenant_kana || null,
         rent: newRent,
         kyoeki: newKyoeki,
         variation: f.variation || null,
@@ -568,10 +668,10 @@ function UnitModal({
         refund: numOrNull(f.refund),
         parking: f.parking || null,
         status: f.status || '空室',
-        guarantor: f.guarantor || null,
-        payment_method: f.payment_method || null,
-        contract_start: f.contract_start || null,
-        contract_end: f.contract_end || null,
+        guarantor: movedOut ? null : f.guarantor || null,
+        payment_method: movedOut ? null : f.payment_method || null,
+        contract_start: movedOut ? null : f.contract_start || null,
+        contract_end: movedOut ? null : f.contract_end || null,
         notes: f.notes || null,
       }
 
@@ -593,14 +693,37 @@ function UnitModal({
       }
 
       if (rentChanged && (newRent > 0 || newKyoeki > 0 || newParking)) {
+        // 適用開始月の1日を反映開始日にする。effectiveRentKyoeki は対象月の1日と
+        // 文字列比較するので、1日にしておけば「その月分から」がそのまま成り立つ。
+        const applyDate = ymToDate(f.rent_apply_ym) || today()
+
+        // 改定前の額を履歴に残す。これが無いと、適用開始月より前の月を計算する材料が
+        // 無くなり「最古の履歴＝改定後の額」になって過去月まで新家賃になってしまう。
+        // 既に適用開始月より前の履歴があるなら、改定前の額はそこに入っているので触らない。
+        const before = isEdit ? await rentHistoryRepo.listByUnit(unitId) : []
+        const hasEarlier = before.some((h) => String(h.effective_date).slice(0, 10) < applyDate)
+        const oldRent = Number(value?.rent) || 0
+        const oldKyoeki = Number(value?.kyoeki) || 0
+        if (isEdit && !hasEarlier && (oldRent > 0 || oldKyoeki > 0)) {
+          await rentHistoryRepo.create({
+            unit_id: unitId,
+            // 「いつからその額だったか」は分からないので、契約開始日があればそこから、
+            // 無ければ十分過去に置く。過去月の計算で最古の履歴として拾われるのが目的。
+            effective_date: firstOfMonth(value?.contract_start) ?? '2000-01-01',
+            rent: oldRent,
+            kyoeki: oldKyoeki,
+            parking: value?.parking ?? null,
+          })
+        }
+
         await rentHistoryRepo.create({
           unit_id: unitId,
-          effective_date: f.rent_effective_date || today(),
+          effective_date: applyDate,
           rent: newRent,
           kyoeki: newKyoeki,
           parking: newParking,
         })
-        // 反映開始日が過去日（バックデート修正）の場合、「今日時点で最新の履歴」を units の現在値として再計算する。
+        // 適用開始月が過去（バックデート修正）の場合、「今日時点で最新の履歴」を units の現在値として再計算する。
         const allHistory = await rentHistoryRepo.listByUnit(unitId)
         const todayStr = today()
         const current = allHistory
@@ -615,7 +738,7 @@ function UnitModal({
         // 入金状況の月次記録は、作られた時点の請求額を持ったまま固まっている
         // （記録がある月は物件情報にフォールバックしない設計）。賃料履歴を直しても
         // 画面が変わらないのを防ぐため、反映開始日以降の記録の請求額を貼り直す。
-        await repriceRecords(propertyId, payload.room!, unitId, allHistory, f.rent_effective_date || todayStr)
+        await repriceRecords(propertyId, payload.room!, unitId, allHistory, ymToDate(f.rent_apply_ym) || todayStr)
       }
       onSaved()
     } catch (e) {
@@ -709,16 +832,20 @@ function UnitModal({
         <TextField label="変動値（家賃変動・自由入力）" value={f.variation ?? ''} onChange={set('variation')} />
         <div>
           <TextField
-            label="反映開始日（賃料・共益費・駐輪駐車の変更時のみ使用。過去日を入れれば遡って修正、将来分は今日の日付でOK）"
-            value={f.rent_effective_date ?? ''}
-            onChange={set('rent_effective_date')}
-            type="date"
+            label="適用開始月（何月分の賃料から新しい額にするか。賃料・共益費・駐輪駐車を変えたときだけ使う）"
+            value={f.rent_apply_ym ?? ''}
+            onChange={set('rent_apply_ym')}
+            type="month"
           />
+          <p className="mt-1 text-[11px] text-slate-500">
+            例：2026年8月分から値上げ → 2026-08 を選ぶ。7月以前の請求額と収支表は変わりません。
+            過去の月を選べば遡って直せます。
+          </p>
           {history.length > 0 && (
             <div className="mt-2 rounded-lg border border-slate-200 divide-y divide-slate-100">
               {history.map((h) => (
                 <div key={h.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-600">
-                  <span className="w-24 shrink-0">{formatDate(h.effective_date)}〜</span>
+                  <span className="w-24 shrink-0">{ymLabel(h.effective_date)}〜</span>
                   <span className="flex-1">
                     賃料 {yen(h.rent)}／共益費 {yen(h.kyoeki)}
                     {h.parking && `／駐輪駐車 ${h.parking}`}

@@ -6,9 +6,16 @@ const n = (v: number | null | undefined) => Number(v ?? 0) || 0
 const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予' // 退去予定も入居中・課金対象
 const isStopped = (u: Unit) => u.status === '停止' // 募集停止：空室率の総数に含めない
 
-// 指定年月時点で有効な賃料・共益費を履歴から求める（履歴が無い/その年月以前の履歴が無い場合は units の現在値にフォールバック）。
-// 「新しい日付の開始日ほど優先」＝ effective_date が対象月の1日以前で最大の行を採用する。
-// 月初を反映開始日にした履歴は、その月から効く（例：2026-03-01 → 3月分から660,000円）。
+// 指定年月時点で有効な賃料・共益費を履歴から求める。
+// 「新しい開始月ほど優先」＝ effective_date が対象月の1日以前で最大の行を採用する。
+// 履歴は適用開始月の1日で作るので、その月分から効く（例：2026-03-01 → 3月分から）。
+//
+// 対象月より前の履歴が無いときは「いちばん古い履歴」を使う。ここを units の現在値に
+// していたのが、賃料改定のたびに過去月まで新家賃になっていた原因：
+//   8月から値上げして履歴を1行足すと、7月は該当行が無いので現在値（＝新家賃）に落ちる。
+//   入金記録に請求額が入っている月は記録が優先されるので無事だが、まだ記録が無い月
+//   （＝7月）だけが新家賃で計算されてしまい、6月は正しいのに7月だけ狂って見えた。
+// 改定時は PropertiesView 側で「改定前の額」も履歴に残すので、最古の履歴＝改定前の額になる。
 //
 // 判定は 'YYYY-MM-DD' の文字列同士の比較で行う。Date に変換して比べてはいけない：
 // new Date('2026-03-01') は UTC の0時として解釈されるため JST では 3/1 9時になり、
@@ -26,12 +33,15 @@ export function effectiveRentKyoeki(
   const asOf = `${year}-${String(month).padStart(2, '0')}-01`
   const startOf = (h: RentHistory) => String(h.effective_date).slice(0, 10)
   let best: RentHistory | null = null
+  let oldest: RentHistory | null = null
   for (const h of history) {
     const d = startOf(h)
     if (d <= asOf && (!best || d > startOf(best))) best = h
+    if (!oldest || d < startOf(oldest)) oldest = h
   }
-  return best
-    ? { rent: n(best.rent), kyoeki: n(best.kyoeki), parking: best.parking ?? null }
+  const hit = best ?? oldest
+  return hit
+    ? { rent: n(hit.rent), kyoeki: n(hit.kyoeki), parking: hit.parking ?? null }
     : fallback
 }
 

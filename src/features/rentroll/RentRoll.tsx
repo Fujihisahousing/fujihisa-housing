@@ -1,13 +1,13 @@
 // レントロール（画面）。一覧上で編集できるのは「変動値」「状況」「備考」のみ。他は表示専用。
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Loader2 } from 'lucide-react'
-import { unitsRepo } from '../../lib/repositories'
+import { Loader2, AlertTriangle } from 'lucide-react'
+import { unitsRepo, moveEventsRepo } from '../../lib/repositories'
 import { calcRentRoll, isDisposedForRentRoll } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, percent, formatDate, maxRoomDigits, padRoom } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import { UNIT_STATUSES, type Property, type Unit } from '../../types'
+import { UNIT_STATUSES, type MoveEvent, type Property, type Unit } from '../../types'
 
 const money = (v?: number | null) => (v != null ? yen(v) : '—')
 
@@ -33,6 +33,30 @@ function refundDisplay(u: Unit): string {
   const hosho = Number(u.hoshokin) || 0
   if (dep > 0 || hosho > 0) return yen(refundValue(u))
   return u.refund != null ? yen(u.refund) : '—'
+}
+
+/** 退去シートの退去予定日を過ぎているのに、まだ状況が「退予」のままの部屋を拾う。
+ *  退去したのに空室に切り替え忘れると、稼働率も満室想定も現況も全部ずれたままになるので、
+ *  レントロールの一番上で気づけるようにしている（入退去シートは MoveEvents.tsx）。
+ *  今日との比較は 'YYYY-MM-DD' の文字列同士で行う（Date を通すと UTC で1日ずれる）。 */
+export function overdueMoveOuts(
+  units: Unit[],
+  events: MoveEvent[],
+  todayStr: string,
+): { unit: Unit; scheduled: string }[] {
+  const byUnit = new Map<string, string>()
+  for (const e of events) {
+    if (e.kind !== '退去' || !e.scheduled_date) continue
+    const d = String(e.scheduled_date).slice(0, 10)
+    // 同じ部屋に複数あれば、いちばん新しい予定日を採る（予定が延びた場合に対応）
+    const prev = byUnit.get(e.unit_id)
+    if (!prev || d > prev) byUnit.set(e.unit_id, d)
+  }
+  return units
+    .filter((u) => u.status === '退予')
+    .map((u) => ({ unit: u, scheduled: byUnit.get(u.id) ?? '' }))
+    .filter((r) => r.scheduled !== '' && r.scheduled < todayStr)
+    .sort((a, b) => a.scheduled.localeCompare(b.scheduled))
 }
 
 // 物件グループの稼働率・返還金合計（稼働率は入居+退去予定／停止を除いた総数）
@@ -82,12 +106,18 @@ const sumTotals = (rows: { unit: Unit }[]): Totals =>
 export function RentRoll({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const [units, setUnits] = useState<Unit[]>([])
+  const [events, setEvents] = useState<MoveEvent[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      setUnits(activeProperty ? await unitsRepo.listByProperty(activeProperty) : await unitsRepo.listAll())
+      const list = activeProperty
+        ? await unitsRepo.listByProperty(activeProperty)
+        : await unitsRepo.listAll()
+      setUnits(list)
+      // 退去予定日の超過を出すため、入退去シートも一緒に読む
+      setEvents(await moveEventsRepo.listByUnitIds(list.map((u) => u.id)))
     } finally {
       setLoading(false)
     }
@@ -135,6 +165,18 @@ export function RentRoll({ properties }: { properties: Property[] }) {
   }, [properties])
   // 全体タブでは group_name を持つ物件を1つの帯にまとめる（戸建ての6現場→「戸建て賃貸」）。
   // group_name が無い物件は従来どおり物件単位。
+  const nameOf = useCallback(
+    (propertyId: string) => properties.find((p) => p.id === propertyId)?.name ?? '',
+    [properties],
+  )
+
+  // 退去予定日を過ぎたのに「退予」のままの部屋。今日は文字列で持つ（Date 経由だと UTC で1日ずれる）
+  const overdue = useMemo(() => {
+    const d = new Date()
+    const todayStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return overdueMoveOuts(units, events, todayStr)
+  }, [units, events])
+
   const groupKeyOf = useMemo(() => {
     const m = new Map(properties.map((p) => [p.id, p.group_name || p.id]))
     return (propertyId: string) => m.get(propertyId) ?? propertyId
@@ -180,6 +222,28 @@ export function RentRoll({ properties }: { properties: Property[] }) {
   return (
     <div className="space-y-4">
       <div className="text-xs text-slate-500">状況・備考はその場で編集できます（自動保存）</div>
+
+      {overdue.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-amber-900">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            退去予定日を過ぎています（{overdue.length}件）
+          </div>
+          <p className="mt-1 text-xs text-amber-800">
+            退去が済んでいれば、状況を「空室」に変えてください。稼働率・満室想定・現況がずれたままになります。
+            予定が延びた場合は、入退去シートの退去予定日を直してください。
+          </p>
+          <ul className="mt-2 space-y-0.5 text-xs text-amber-900">
+            {overdue.map(({ unit, scheduled }) => (
+              <li key={unit.id}>
+                <span className="font-medium">{nameOf(unit.property_id)} {unit.room}</span>
+                　退去予定 {formatDate(scheduled)}
+                {unit.tenant ? `　${unit.tenant}` : ''}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <DualCard label="満室想定" monthly={rr.fullMonthly} annual={rr.fullAnnual} />
         <DualCard label="現況" monthly={rr.currentMonthly} annual={rr.currentMonthly * 12} />

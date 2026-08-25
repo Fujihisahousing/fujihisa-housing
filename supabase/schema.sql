@@ -549,3 +549,37 @@ $$;
 --   select cron.unschedule('rentbook-purge-pii')
 --     where exists (select 1 from cron.job where jobname = 'rentbook-purge-pii');
 --   select cron.schedule('rentbook-purge-pii', '0 3 * * *', $$ select purge_expired_pii(); $$);
+
+-- =====================================================================
+-- 入退去シート（move_events）
+-- 「いつ入居／退去したか」と「その月の請求をどうするか」だけを持つ運用テーブル。
+-- 個人情報（連絡先・保証人など）は暗号化された leases 側に置くので、ここには入れない。
+--
+-- 退去は予告を受けた時点で1行作る（scheduled_date＝予告書に書かれた退去予定日）。
+-- 退去月の家賃は満額もらう運用なので final_ym は既定で退去月そのもの。
+-- 入居は入居日の月が日割りになるので、prorated_amount に契約書どおりの額を手で入れる
+-- （実日数からの目安は画面に出すが、仲介会社ごとに計算が違うので採用しない）。
+create table if not exists move_events (
+  id uuid primary key default gen_random_uuid(),
+  unit_id uuid references units(id) on delete cascade,
+  kind text not null check (kind in ('入居','退去')),
+  -- 退去：予告を受けた日と、予告書に書かれた退去予定日
+  notice_date date,
+  scheduled_date date,
+  -- 実際の入居日／退去日
+  actual_date date,
+  -- 入居：日割り家賃と、それを計上する年月／満額請求を始める年月（'YYYY-MM'）
+  prorated_amount numeric,
+  prorated_ym text,
+  first_full_ym text,
+  -- 退去：最終請求月（'YYYY-MM'）。退去月は満額なので既定は退去月
+  final_ym text,
+  -- 記録用の契約者名。units.tenant は退去時にクリアするので、ここに控えを残す
+  tenant text,
+  memo text,
+  created_at timestamptz default now()
+);
+create index if not exists move_events_unit_idx on move_events(unit_id, kind, actual_date);
+alter table move_events enable row level security;
+drop policy if exists "auth all move_events" on move_events;
+create policy "auth all move_events" on move_events for all to authenticated using (true) with check (true);

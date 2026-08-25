@@ -172,6 +172,36 @@ export interface ArrearsNote {
   memo?: string | null
 }
 
+/** 入退去の種別 */
+export const MOVE_KINDS = ['入居', '退去'] as const
+export type MoveKind = (typeof MOVE_KINDS)[number]
+
+/** 入退去シート（move_events）。個人情報は暗号化された leases 側に置くので、ここは運用データだけ。
+ *  年月の項目（*_ym）は 'YYYY-MM'。請求は月単位なので日付ではなく月で持つ。 */
+export interface MoveEvent {
+  id: string
+  unit_id: string
+  kind: MoveKind
+  /** 退去：予告を受けた日 */
+  notice_date?: string | null
+  /** 退去：予告書に書かれた退去予定日 */
+  scheduled_date?: string | null
+  /** 実際の入居日／退去日 */
+  actual_date?: string | null
+  /** 入居：入居月の日割り家賃（契約書どおりの手入力） */
+  prorated_amount?: number | null
+  /** 入居：日割りを計上する年月 */
+  prorated_ym?: string | null
+  /** 入居：満額請求を始める年月 */
+  first_full_ym?: string | null
+  /** 退去：最終請求月。退去月は満額もらう運用なので既定は退去月 */
+  final_ym?: string | null
+  /** 契約者名の控え（units.tenant は退去時にクリアするため） */
+  tenant?: string | null
+  memo?: string | null
+  created_at?: string
+}
+
 /** 賃料・共益費の履歴（反映開始日つき）。ある年月時点の実効値＝effective_date がその年月以前で最大の行。 */
 export interface RentHistory {
   id: string

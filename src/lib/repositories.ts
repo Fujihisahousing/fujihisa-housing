@@ -1,7 +1,7 @@
 // repository層：UI・集計は必ずここ経由で DB にアクセスする（DB実装に依存させない）。
 // RLS により、ログイン済みでないと読み書きできない。個人情報(leases)は admin のみ。
 import { supabase } from './supabase'
-import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory, ArrearsNote, AuditLog } from '../types'
+import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory, ArrearsNote, AuditLog, MoveEvent } from '../types'
 import type { PropertyDocument, PropertyInspection, PropertyOpex, PropertyRepair } from '../types'
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
@@ -286,6 +286,25 @@ export const paymentRecordsRepo = {
     return unwrap(data, error)
   },
   /** 請求額と判定だけを差し替える（入金額・契約者名・備考には触らない） */
+  /** 請求額だけを1か月ぶん書き込む。記録が無ければ作る。
+   *  setBilled と違って判定は触らない（入退去シートの例外月＝入居月の日割り・退去月の満額に使う）。
+   *  upsert は渡した列だけを更新するので、入金額やメモなど既存の値は消えない。 */
+  async upsertBilled(
+    property_id: string,
+    room: string,
+    year: number,
+    month: number,
+    billed: number,
+  ): Promise<void> {
+    const { error } = await supabase
+      .from('payment_records')
+      .upsert(
+        { property_id, room, year, month, billed, updated_at: new Date().toISOString() },
+        { onConflict: 'property_id,room,year,month' },
+      )
+    if (error) throw new Error(error.message)
+  },
+
   async setBilled(
     property_id: string,
     room: string,
@@ -367,6 +386,31 @@ export const profilesRepo = {
 // ---------------------------------------------------------------------
 // leases RPC へ渡すペイロード（値は文字列でも数値でも可。サーバ側でパース）
 export type LeasePayload = Record<string, string | number | null | undefined>
+
+/** 入退去シート。個人情報を持たないので leases と違って暗号化RPCを通さず素で読み書きする */
+export const moveEventsRepo = {
+  /** 物件の入退去を新しい順で取得。号室は units 側から引くので unit_id で束ねて使う */
+  async listByUnitIds(unitIds: string[]): Promise<MoveEvent[]> {
+    if (unitIds.length === 0) return []
+    const { data, error } = await supabase
+      .from('move_events')
+      .select('*')
+      .in('unit_id', unitIds)
+      .order('actual_date', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false })
+    return unwrap(data, error)
+  },
+  async save(row: Partial<MoveEvent> & { unit_id: string; kind: string }): Promise<MoveEvent> {
+    const { data, error } = row.id
+      ? await supabase.from('move_events').update(row).eq('id', row.id).select().single()
+      : await supabase.from('move_events').insert(row).select().single()
+    return unwrap(data, error)
+  },
+  async remove(id: string): Promise<void> {
+    const { error } = await supabase.from('move_events').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+  },
+}
 
 export const leasesRepo = {
   /** 号室の入居履歴を「復号済み」で取得（admin 以外は空配列） */
