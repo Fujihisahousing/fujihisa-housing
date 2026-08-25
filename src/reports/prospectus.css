@@ -7,7 +7,13 @@
 
    フォントサイズは列数に合わせてセクションごとに変えている（data-sec で出し分け）。
    Tailwind のユーティリティ（text-xs 等）は 0,1,0 なので、ここの子孫セレクタ 0,1,1 が勝つ。
-   列や項目を増やしたときは、必ず幅186mmに収まるか実測すること。 */
+   列や項目を増やしたときは、必ず幅186mmに収まるか実測すること。
+
+   セルの上下余白と行送りは --pr-fit / --pr-lh-fit を掛けた値で書いてある。
+   末尾の数行だけが次ページへこぼれるセクションは、fitToPage.ts が描画後に高さを実測して
+   この2つを下げ、1枚に収める。1＝詰めない（既定）。
+   セクションごとの値は th/td ではなく table 側に --pr-pad-y / --pr-pad-x / --pr-lh として
+   置くこと（変数が th/td へ継承されるので、共通の padding 宣言がそのまま効く）。 */
 
 .pr-root {
   display: flex;
@@ -27,6 +33,13 @@
   font-family: 'Inter', 'Hiragino Sans', 'Noto Sans JP', system-ui, sans-serif;
   font-feature-settings: 'tnum' 1;
   -webkit-font-smoothing: antialiased;
+
+  /* 行間の既定値と詰め率。詰め率は fitToPage.ts が必要なセクションだけ下げる */
+  --pr-pad-y: 0.7mm;
+  --pr-pad-x: 1mm;
+  --pr-lh: 1.25;
+  --pr-fit: 1;
+  --pr-lh-fit: 1;
 }
 
 /* 画面プレビューでは余白込みの用紙まるごとを出す（現況報告書と同じ手）。
@@ -81,11 +94,17 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 6.8pt;
-  line-height: 1.25;
+  line-height: calc(var(--pr-lh) * var(--pr-lh-fit));
 }
 .pr-sheet th,
 .pr-sheet td {
-  padding: 0.7mm 1mm;
+  padding: calc(var(--pr-pad-y) * var(--pr-fit)) var(--pr-pad-x);
+}
+/* 合計欄などのカード。表と一緒に詰まるよう上下の余白を詰め率に乗せる
+   （Tailwind の py-2 は 0,1,0 なので、この子孫セレクタ 0,1,1 が勝つ） */
+.pr-sheet .pr-box {
+  padding-top: calc(2mm * var(--pr-fit));
+  padding-bottom: calc(2mm * var(--pr-fit));
 }
 /* ページをまたぐ表は各ページに見出しを出し、行は途中で割らない */
 .pr-sheet thead {
@@ -106,11 +125,9 @@
    項目を増やしたら1枚に収まるか（.pr-sheet の中身が273mm以内か）を実測すること。 */
 .pr-sheet[data-sec='overview'] table {
   font-size: 8.5pt;
-  line-height: 1.35;
-}
-.pr-sheet[data-sec='overview'] th,
-.pr-sheet[data-sec='overview'] td {
-  padding: 2.6mm 2.5mm;
+  --pr-lh: 1.35;
+  --pr-pad-y: 2.6mm;
+  --pr-pad-x: 2.5mm;
 }
 
 /* 年間収支表は3列（項目・前年度・今年度）しかないので、ゆったり見せる */
@@ -119,22 +136,21 @@
    5.4pt に潰れてしまうため（実際にそうなっていた）。 */
 .pr-sheet .pr-rentroll {
   font-size: 5.4pt;
-  line-height: 1.15;
+  --pr-lh: 1.15;
+  --pr-pad-y: 0.45mm;
+  --pr-pad-x: 0.6mm;
 }
 .pr-sheet .pr-rentroll th,
 .pr-sheet .pr-rentroll td {
-  padding: 0.45mm 0.6mm;
   white-space: nowrap;
 }
 
 /* 収入サマリーは概要書でいちばん見たい数字なので、レントロール本体の倍ほどの大きさで出す */
 .pr-sheet .pr-summary {
   font-size: 9pt;
-  line-height: 1.3;
-}
-.pr-sheet .pr-summary th,
-.pr-sheet .pr-summary td {
-  padding: 1.8mm 2mm;
+  --pr-lh: 1.3;
+  --pr-pad-y: 1.8mm;
+  --pr-pad-x: 2mm;
 }
 .pr-sheet .pr-summary tbody td:not(:first-child) {
   font-size: 11pt;
@@ -142,17 +158,18 @@
 }
 
 /* 年間収支表は「項目＋12ヶ月＋年度合計」の14列。金額は円記号を外して桁区切りだけにし、
-   合計列だけ ¥ を付ける（そうしないと8桁の月に幅を食われる）。 */
+   合計列だけ ¥ を付ける（そうしないと8桁の月に幅を食われる）。
+   縦だけ広げる。横を広げると14列が186mmに収まらなくなる。
+   ここは小さめにしておき、余った高さは下の flex に配らせる — 固定で広げると
+   費目の多い物件で1枚に収まらなくなる（実測で 1.6mm だと4.6mm溢れた）。 */
 .pr-sheet[data-sec='statement'] .pr-monthly {
   font-size: 5pt;
-  line-height: 1.2;
+  --pr-lh: 1.2;
+  --pr-pad-y: 0.9mm;
+  --pr-pad-x: 0.5mm;
 }
 .pr-sheet[data-sec='statement'] .pr-monthly th,
 .pr-sheet[data-sec='statement'] .pr-monthly td {
-  /* 縦だけ広げる。横を広げると14列が186mmに収まらなくなる。
-     ここは小さめにしておき、余った高さは下の flex に配らせる — 固定で広げると
-     費目の多い物件で1枚に収まらなくなる（実測で 1.6mm だと4.6mm溢れた）。 */
-  padding: 0.9mm 0.5mm;
   white-space: nowrap;
 }
 
@@ -194,11 +211,12 @@
 /* 法定点検は根拠法令・指摘事項に長文が入るので、詰めるより折り返す */
 .pr-sheet[data-sec='inspections'] table {
   font-size: 6pt;
-  line-height: 1.2;
+  --pr-lh: 1.2;
+  --pr-pad-y: 0.6mm;
+  --pr-pad-x: 0.8mm;
 }
 .pr-sheet[data-sec='inspections'] th,
 .pr-sheet[data-sec='inspections'] td {
-  padding: 0.6mm 0.8mm;
   white-space: normal;
   word-break: break-word;
 }
@@ -206,11 +224,23 @@
 /* 修繕明細は件数が多い（守口で95件）。行を詰めて枚数を抑える */
 .pr-sheet[data-sec='repairs'] table {
   font-size: 6pt;
-  line-height: 1.2;
+  --pr-lh: 1.2;
+  --pr-pad-y: 0.5mm;
+  --pr-pad-x: 0.8mm;
 }
-.pr-sheet[data-sec='repairs'] th,
-.pr-sheet[data-sec='repairs'] td {
-  padding: 0.5mm 0.8mm;
+
+/* ---------------- 高さの測定用 ---------------- */
+/* fitToPage.ts が高さを測るあいだだけ付くクラス。画面でも印刷と同じ幾何にする。
+   .no-print を隠さないと、画面にしか出ない「行を追加」ボタンや編集列まで測ってしまう。
+   @media screen の指定より後に置くこと（0,2,0 で勝たせる）。 */
+.pr-measuring .pr-sheet {
+  width: 186mm;
+  min-height: 0;
+  padding: 0;
+  box-shadow: none;
+}
+.pr-measuring .no-print {
+  display: none !important;
 }
 
 /* ---------------- 印刷 ---------------- */

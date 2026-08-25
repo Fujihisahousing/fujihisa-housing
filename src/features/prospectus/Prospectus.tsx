@@ -20,7 +20,7 @@
 // （reports/prospectus.css が mm 指定で用紙を再現する）。1セクション＝1枚から始まり、
 // 1枚に入らないセクションだけ行単位でページを送るので、途中で半端に改ページされない。
 // 印刷はタブ単位と全ページまとめの2通り。
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Printer, Loader2, FileText } from 'lucide-react'
 import {
   unitsRepo, transactionsRepo, paymentRecordsRepo,
@@ -34,6 +34,7 @@ import {
   type OpexActual, type RepairByYear, type IncomeStatementResult, type StatementRow,
 } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
+import { fitSheets } from '../../reports/fitToPage'
 import { yen, percent, formatDate, num } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import type {
@@ -64,6 +65,7 @@ export function Prospectus({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const [tab, setTab] = useState<TabKey>('overview')
   const [printAll, setPrintAll] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
 
   const [units, setUnits] = useState<Unit[]>([])
@@ -119,12 +121,33 @@ export function Prospectus({ properties }: { properties: Property[] }) {
     if (!printAll) return
     const done = () => setPrintAll(false)
     window.addEventListener('afterprint', done)
-    const id = window.setTimeout(() => window.print(), 100)
+    const id = window.setTimeout(() => {
+      fitSheets(rootRef.current)
+      window.print()
+    }, 100)
     return () => {
       window.clearTimeout(id)
       window.removeEventListener('afterprint', done)
     }
   }, [printAll])
+
+  // 末尾の数行だけが次ページへこぼれるセクションは、行間を詰めて1枚に収める（fitToPage.ts）。
+  // 依存配列を付けないのは、タブ切替・行の追加・printAll のどれでも測り直したいから。
+  // React の state を触らないので再レンダーのループにはならない。
+  useLayoutEffect(() => {
+    fitSheets(rootRef.current)
+  })
+
+  // フォントの読み込みで行の高さが変わるので、読み込み後にもう一度測る
+  useEffect(() => {
+    let alive = true
+    void document.fonts?.ready.then(() => {
+      if (alive) fitSheets(rootRef.current)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
 
   const sortedUnits = useMemo(() => [...units].sort(unitCompare), [units])
   const rr = useMemo(() => calcRentRoll(sortedUnits, property), [sortedUnits, property])
@@ -178,7 +201,10 @@ export function Prospectus({ properties }: { properties: Property[] }) {
             {property ? property.name : '物件を選択してください'}
           </div>
           <button
-            onClick={() => window.print()}
+            onClick={() => {
+              fitSheets(rootRef.current)
+              window.print()
+            }}
             className="ml-auto flex items-center gap-1.5 rounded-lg bg-slate-900 text-white px-3 py-1.5 text-sm font-medium hover:bg-slate-800"
           >
             <Printer className="w-4 h-4" /> このタブを印刷
@@ -219,7 +245,7 @@ export function Prospectus({ properties }: { properties: Property[] }) {
       ) : (
         // 用紙幅（186mm）が画面より広いことがあるので、はみ出す分だけ横スクロールさせる
         <div className="overflow-x-auto">
-          <div id="print-root" className="pr-root">
+          <div id="print-root" ref={rootRef} className="pr-root">
             {show('overview') && (
               <Sheet sec="overview" property={property} title="1. 物件概要">
                 <SpecTable property={property} units={units} />
@@ -688,7 +714,7 @@ function TotalBox({
   label, annual, monthlyAverage, strong,
 }: { label: string; annual: number; monthlyAverage?: boolean; strong?: boolean }) {
   return (
-    <div className={`rounded-lg px-3 py-2 ${strong ? 'bg-slate-800 text-white' : 'bg-slate-50'}`}>
+    <div className={`pr-box rounded-lg px-3 py-2 ${strong ? 'bg-slate-800 text-white' : 'bg-slate-50'}`}>
       <div className={`text-[11px] ${strong ? 'text-slate-300' : 'text-slate-500'}`}>{label}</div>
       <div className={`font-bold text-base tabular-nums ${strong ? '' : 'text-slate-800'}`}>{yen(annual)}</div>
       {monthlyAverage && (
@@ -702,7 +728,7 @@ function TotalBox({
 
 function Metric({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div className={`rounded-lg px-3 py-2 ${strong ? 'bg-slate-800 text-white' : 'bg-slate-50'}`}>
+    <div className={`pr-box rounded-lg px-3 py-2 ${strong ? 'bg-slate-800 text-white' : 'bg-slate-50'}`}>
       <div className={`text-[11px] ${strong ? 'text-slate-300' : 'text-slate-500'}`}>{label}</div>
       <div className={`font-bold text-sm ${strong ? '' : 'text-slate-800'}`}>{value}</div>
     </div>
