@@ -578,6 +578,10 @@ create table if not exists move_events (
   tenant text,
   tenant_kana text,
   memo text,
+  -- 入居は予約として登録し、入居日が来たら部屋へ反映する。
+  -- unit_patch＝反映待ちの契約内容（units に入れる値）、applied_at＝反映済みの目印。
+  unit_patch jsonb,
+  applied_at timestamptz,
   created_at timestamptz default now()
 );
 create index if not exists move_events_unit_idx on move_events(unit_id, kind, actual_date);

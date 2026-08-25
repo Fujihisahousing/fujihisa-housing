@@ -200,6 +200,10 @@ export interface MoveEvent {
   tenant?: string | null
   /** 読み仮名の控え */
   tenant_kana?: string | null
+  /** 入居日が来たら units に入れる契約内容。反映するまでここに置いておく */
+  unit_patch?: Record<string, unknown> | null
+  /** units へ反映した日時。null なら未反映 */
+  applied_at?: string | null
   memo?: string | null
   created_at?: string
 }

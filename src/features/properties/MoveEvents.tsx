@@ -70,6 +70,44 @@ export function moveInMonths(date?: string | null): { proratedYm: string | null;
     : { proratedYm: ym, firstFullYm: nextYm(ym) }
 }
 
+/** 備考欄に入れる入居予定の目印。年は付けない（'8/25入居予定'）。
+ *  レントロールの備考は狭いので、年をまたいでも月日だけで足りるという運用判断。 */
+export function moveInNote(date?: string | null): string {
+  const m = String(date ?? '').match(/^\d{4}-(\d{2})-(\d{2})$/)
+  return m ? `${Number(m[1])}/${Number(m[2])}入居予定` : ''
+}
+
+/** 備考から入居予定の目印だけを外す。手書きのメモは残す */
+export function stripMoveInNote(notes?: string | null): string {
+  return String(notes ?? '')
+    .replace(/\d{1,2}\/\d{1,2}入居予定/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/** 備考に入居予定の目印を付け直す（重複しないよう、いったん外してから足す） */
+export function withMoveInNote(notes: string | null | undefined, date?: string | null): string | null {
+  const base = stripMoveInNote(notes)
+  const mark = moveInNote(date)
+  const joined = [base, mark].filter(Boolean).join(' ')
+  return joined === '' ? null : joined
+}
+
+/** 返還金の既定値。敷金があれば敷金、無ければ保証金−解約引。
+ *  レントロールの返還金列と同じ考え方（RentRoll.tsx の refundValue）。 */
+export function defaultRefund(
+  deposit: unknown,
+  hoshokin: unknown,
+  kaiyakubiki: unknown,
+): number | null {
+  const d = Number(deposit) || 0
+  const h = Number(hoshokin) || 0
+  const k = Number(kaiyakubiki) || 0
+  if (d > 0) return d
+  if (h > 0) return h - k
+  return null
+}
+
 /** 日割りの目安。実日数割りと30日割りの2通りを出す（採用はしない。手入力の参考） */
 export function proratedHints(monthly: number, date: string): { actual: number; thirty: number } | null {
   const ym = ymOf(date)
@@ -115,6 +153,8 @@ type Form = Partial<Omit<MoveEvent, 'unit_id'>> & {
   key_money?: string | number | null
   kaiyakubiki?: string | number | null
   refund?: string | number | null
+  /** 返還金を手で触ったか。触った後は敷金の変更で上書きしない（画面だけの状態） */
+  refund_touched?: boolean
 }
 
 const numOrNull = (v: unknown) => {
@@ -185,7 +225,14 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
         hoshokin: p.hoshokin ?? u.hoshokin ?? null,
         key_money: p.key_money ?? u.key_money ?? null,
         kaiyakubiki: p.kaiyakubiki ?? u.kaiyakubiki ?? null,
-        refund: p.refund ?? u.refund ?? null,
+        // 返還金は部屋の保存値ではなく、敷金／保証金−解約引 から計算し直す
+        refund: p.refund_touched
+          ? p.refund
+          : defaultRefund(
+              p.deposit ?? u.deposit,
+              p.hoshokin ?? u.hoshokin,
+              p.kaiyakubiki ?? u.kaiyakubiki,
+            ),
       }
     })
   }
@@ -223,8 +270,28 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
       const unitId = form.unit_id
       const u = unitById.get(unitId)
 
-      // move_events には入退去の事実だけを保存する。契約条件は units 側が正なので、
-      // property_id など画面だけの項目と一緒にここでは落とす。
+      // 入居は「予約」として持つ。入居日が来るまで部屋の情報は書き換えず、
+      // 入れる予定の内容を unit_patch に置いておく（applyDueMoveIns がその日に反映する）。
+      const patch = isMoveIn
+        ? {
+            tenant: form.tenant || null,
+            tenant_kana: form.tenant_kana || null,
+            tenant_type: form.tenant_type || null,
+            guarantor: form.guarantor || null,
+            payment_method: form.payment_method || null,
+            use_type: form.use_type || null,
+            contract_start: form.contract_start || null,
+            parking: form.parking || null,
+            rent: numOrNull(form.rent) ?? 0,
+            kyoeki: numOrNull(form.kyoeki) ?? 0,
+            deposit: numOrNull(form.deposit),
+            hoshokin: numOrNull(form.hoshokin),
+            key_money: numOrNull(form.key_money),
+            kaiyakubiki: numOrNull(form.kaiyakubiki),
+            refund: numOrNull(form.refund),
+          }
+        : null
+
       const saved = await moveEventsRepo.save({
         id: form.id,
         unit_id: unitId,
@@ -239,41 +306,19 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
         tenant: form.tenant || u?.tenant || null,
         tenant_kana: form.tenant_kana || u?.tenant_kana || null,
         memo: form.memo ?? null,
+        unit_patch: patch,
+        applied_at: null,
       })
 
-      // 入居はここで部屋の情報も入れ替える。入居シートと部屋の編集の二度手間を無くすため。
       if (isMoveIn && u) {
-        const newRent = numOrNull(form.rent) ?? 0
-        const newKyoeki = numOrNull(form.kyoeki) ?? 0
-        await unitsRepo.update(u.id, {
-          status: '入居',
-          tenant: form.tenant || null,
-          tenant_kana: form.tenant_kana || null,
-          tenant_type: form.tenant_type || null,
-          guarantor: form.guarantor || null,
-          payment_method: form.payment_method || null,
-          use_type: form.use_type || null,
-          contract_start: form.contract_start || null,
-          contract_end: form.contract_end || null,
-          parking: form.parking || null,
-          rent: newRent,
-          kyoeki: newKyoeki,
-          deposit: numOrNull(form.deposit),
-          hoshokin: numOrNull(form.hoshokin),
-          key_money: numOrNull(form.key_money),
-          kaiyakubiki: numOrNull(form.kaiyakubiki),
-          refund: numOrNull(form.refund),
-        })
-        // 賃料が変わるなら、満額を始める月から効く履歴を足す。
-        // 部屋の編集と同じ考え方で、月初の日付にすればその月分から効く。
-        const changed = newRent !== (Number(u.rent) || 0) || newKyoeki !== (Number(u.kyoeki) || 0)
-        if (changed && saved.first_full_ym) {
-          await rentHistoryRepo.create({
-            unit_id: u.id,
-            effective_date: `${saved.first_full_ym}-01`,
-            rent: newRent,
-            kyoeki: newKyoeki,
-            parking: form.parking || null,
+        if (isDue(saved.actual_date, todayStr())) {
+          // 入居日が今日以前なら待つ意味がないのでその場で反映する
+          await applyMoveIn(saved, u)
+        } else {
+          // まだ先の話。部屋は「入予」にし、備考に mm/dd入居予定 を出しておく
+          await unitsRepo.update(u.id, {
+            status: '入予',
+            notes: withMoveInNote(u.notes, saved.actual_date),
           })
         }
       }
@@ -417,6 +462,19 @@ function MoveForm({
   const set = (k: keyof Form) => (v: string) =>
     setForm((p) => (p ? { ...p, [k]: v || null } : p))
 
+  /** 敷金・保証金・解約引を触ったら返還金を計算し直す。
+   *  返還金を手で入力した後（refund_touched）は上書きしない。 */
+  const setDepositLike = (k: 'deposit' | 'hoshokin' | 'kaiyakubiki') => (v: string) =>
+    setForm((p) => {
+      if (!p) return p
+      const next = { ...p, [k]: v || null }
+      if (p.refund_touched) return next
+      return { ...next, refund: defaultRefund(next.deposit, next.hoshokin, next.kaiyakubiki) }
+    })
+
+  const setRefund = (v: string) =>
+    setForm((p) => (p ? { ...p, refund: v || null, refund_touched: true } : p))
+
   // 物件と号室は別々に選ばせる。1つのプルダウンに全物件の部屋を並べると数が多すぎるうえ、
   // どのマンションの部屋なのかが読み取りにくい。
   const selected = units.find((u) => u.id === form.unit_id)
@@ -456,9 +514,9 @@ function MoveForm({
 
       {isMoveIn ? (
         <>
-          <Section title="入居日" />
+          <Section title="入居予定日" />
           <div className="grid grid-cols-3 gap-3 items-end">
-            <Field label="入居日">
+            <Field label="入居予定日">
               <Input type="date" value={form.actual_date ?? ''} onChange={onDateChange} />
             </Field>
             <Readonly
@@ -536,14 +594,9 @@ function MoveForm({
               />
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="契約開始日">
-              <Input type="date" value={form.contract_start ?? ''} onChange={set('contract_start')} />
-            </Field>
-            <Field label="契約終了日">
-              <Input type="date" value={form.contract_end ?? ''} onChange={set('contract_end')} />
-            </Field>
-          </div>
+          <Field label="契約開始日">
+            <Input type="date" value={form.contract_start ?? ''} onChange={set('contract_start')} />
+          </Field>
 
           <Section title="契約条件" />
           <div className="grid grid-cols-3 gap-3">
@@ -559,26 +612,29 @@ function MoveForm({
           </div>
           <div className="grid grid-cols-3 gap-3">
             <Field label="敷金（円）">
-              <Input type="number" value={String(form.deposit ?? '')} onChange={set('deposit')} />
+              <Input type="number" value={String(form.deposit ?? '')} onChange={setDepositLike('deposit')} />
             </Field>
             <Field label="保証金（円）">
-              <Input type="number" value={String(form.hoshokin ?? '')} onChange={set('hoshokin')} />
+              <Input type="number" value={String(form.hoshokin ?? '')} onChange={setDepositLike('hoshokin')} />
             </Field>
             <Field label="解約引（円）">
-              <Input type="number" value={String(form.kaiyakubiki ?? '')} onChange={set('kaiyakubiki')} />
+              <Input type="number" value={String(form.kaiyakubiki ?? '')} onChange={setDepositLike('kaiyakubiki')} />
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="礼金（円）">
               <Input type="number" value={String(form.key_money ?? '')} onChange={set('key_money')} />
             </Field>
-            <Field label="返還金（円）">
-              <Input type="number" value={String(form.refund ?? '')} onChange={set('refund')} />
+            <Field label="返還金（円）　※敷金／保証金−解約引から自動、手入力で上書き可">
+              <Input type="number" value={String(form.refund ?? '')} onChange={setRefund} />
             </Field>
           </div>
           <p className="text-[11px] text-slate-500">
-            保存すると、この内容が部屋の情報にも反映され、状況が「入居」になります。
+            保存すると状況が「入予」になり、レントロールの備考に「
+            {moveInNote(form.actual_date) || 'mm/dd入居予定'}」が出ます。
+            入居予定日が来た時点で、この内容が自動で部屋の情報に入り、状況が「入居」に変わります。
             賃料・共益費を今と違う額にした場合は、満額を始める月からの賃料履歴も作ります。
+            入居予定日が今日以前ならその場で反映します。
           </p>
         </>
       ) : (
@@ -697,6 +753,65 @@ function Input({
       className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-slate-900"
     />
   )
+}
+
+/** 今日の 'YYYY-MM-DD'。Date を通した文字列比較にしないのは calc.ts と同じ理由 */
+export function todayStr(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** 入居日が来ているか（今日を含む） */
+export function isDue(actualDate: string | null | undefined, today: string): boolean {
+  const d = String(actualDate ?? '').slice(0, 10)
+  return d !== '' && d <= today
+}
+
+/** 反映待ちの入居のうち、入居日が来ているものを選ぶ */
+export function dueMoveIns(events: MoveEvent[], today: string): MoveEvent[] {
+  return events.filter(
+    (e) => e.kind === '入居' && !e.applied_at && e.unit_patch && isDue(e.actual_date, today),
+  )
+}
+
+/** 予約してあった入居内容を部屋へ反映する。
+ *  備考の「mm/dd入居予定」は役目を終えるので外し、状況を「入居」にする。
+ *  賃料が変わるなら、満額を始める月から効く履歴も足す（月初の日付＝その月分から）。 */
+export async function applyMoveIn(e: MoveEvent, u: Unit): Promise<void> {
+  const patch = (e.unit_patch ?? {}) as Partial<Unit>
+  const newRent = Number(patch.rent) || 0
+  const newKyoeki = Number(patch.kyoeki) || 0
+  await unitsRepo.update(u.id, {
+    ...patch,
+    status: '入居',
+    notes: stripMoveInNote(u.notes) || null,
+  })
+  const changed = newRent !== (Number(u.rent) || 0) || newKyoeki !== (Number(u.kyoeki) || 0)
+  if (changed && e.first_full_ym) {
+    await rentHistoryRepo.create({
+      unit_id: u.id,
+      effective_date: `${e.first_full_ym}-01`,
+      rent: newRent,
+      kyoeki: newKyoeki,
+      parking: patch.parking ?? null,
+    })
+  }
+  await moveEventsRepo.save({ id: e.id, unit_id: e.unit_id, kind: e.kind, applied_at: new Date().toISOString() })
+}
+
+/** 入居日が来た予約をまとめて部屋へ反映する。画面を開いたときに呼ぶ。
+ *  サーバー側の定時処理が無いので、台帳を見た人が最初に開いた時点で追いつく作り。
+ *  反映した件数を返す（0 なら再読み込み不要）。 */
+export async function applyDueMoveIns(units: Unit[], events: MoveEvent[]): Promise<number> {
+  const byId = new Map(units.map((u) => [u.id, u]))
+  const due = dueMoveIns(events, todayStr())
+  let done = 0
+  for (const e of due) {
+    const u = byId.get(e.unit_id)
+    if (!u) continue
+    await applyMoveIn(e, u)
+    done++
+  }
+  return done
 }
 
 /** 入金状況の請求額を1か月だけ上書きする。記録が無ければ作る */

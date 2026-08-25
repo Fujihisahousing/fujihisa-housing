@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Plus, Pencil, Trash2, Loader2, DoorOpen, ChevronDown, ChevronRight, Users } from 'lucide-react'
 import { Modal } from '../../components/common/Modal'
 import { LeaseManager } from '../leases/LeaseManager'
-import { MoveEventsPanel } from './MoveEvents'
+import { MoveEventsPanel, applyDueMoveIns } from './MoveEvents'
 import { useAuth } from '../../auth/AuthProvider'
 import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo, moveEventsRepo } from '../../lib/repositories'
 import { unitCompare } from '../../lib/sortUnits'
@@ -46,6 +46,15 @@ export function PropertiesView({ onChanged }: { onChanged: () => void }) {
         moveEventsRepo.listByUnitIds(ids),
         rentHistoryRepo.listByUnitIds(ids),
       ])
+      // 入居予定日が来た予約を部屋へ反映する。サーバー側の定時処理が無いので、
+      // 画面を開いた時点で追いつかせる。反映したら部屋と記録を読み直す。
+      if ((await applyDueMoveIns(us, ev)) > 0) {
+        const us2 = await unitsRepo.listAll()
+        setUnits(us2)
+        setEvents(await moveEventsRepo.listByUnitIds(us2.map((u) => u.id)))
+        setHistory(await rentHistoryRepo.listByUnitIds(us2.map((u) => u.id)))
+        return
+      }
       setEvents(ev)
       setHistory(hs)
     } finally {

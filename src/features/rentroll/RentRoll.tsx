@@ -5,6 +5,7 @@ import { unitsRepo, moveEventsRepo } from '../../lib/repositories'
 import { calcRentRoll, isDisposedForRentRoll } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
+import { applyDueMoveIns } from '../properties/MoveEvents'
 import { yen, percent, formatDate, maxRoomDigits, padRoom } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { UNIT_STATUSES, type MoveEvent, type Property, type Unit } from '../../types'
@@ -115,9 +116,19 @@ export function RentRoll({ properties }: { properties: Property[] }) {
       const list = activeProperty
         ? await unitsRepo.listByProperty(activeProperty)
         : await unitsRepo.listAll()
-      setUnits(list)
       // 退去予定日の超過を出すため、入退去シートも一緒に読む
-      setEvents(await moveEventsRepo.listByUnitIds(list.map((u) => u.id)))
+      const ev = await moveEventsRepo.listByUnitIds(list.map((u) => u.id))
+      // 入居予定日が来た予約はここでも反映する（レントロールを先に開く運用のため）
+      if ((await applyDueMoveIns(list, ev)) > 0) {
+        const fresh = activeProperty
+          ? await unitsRepo.listByProperty(activeProperty)
+          : await unitsRepo.listAll()
+        setUnits(fresh)
+        setEvents(await moveEventsRepo.listByUnitIds(fresh.map((u) => u.id)))
+        return
+      }
+      setUnits(list)
+      setEvents(ev)
     } finally {
       setLoading(false)
     }
