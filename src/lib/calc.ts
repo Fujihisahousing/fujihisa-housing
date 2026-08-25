@@ -1,6 +1,6 @@
 // 集計ロジック（レントロール・利回り・収支表・入金状況）。UI から分離（SOW 設計方針）。
 import { CAT_RENT } from '../types'
-import type { PaymentRecord, Property, RentHistory, Transaction, Unit } from '../types'
+import type { MoveEvent, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
 const isOccupied = (u: Unit) => u.status === '入居' || u.status === '退予' // 退去予定も入居中・課金対象
@@ -767,6 +767,51 @@ export function ledgerMonth(date: string | Date): { year: number; month: number 
 }
 
 // 請求額・入金額・入居状況・保証会社有無 から判定を導出（手入力の入金額編集で使用）。
+/**
+ * 入金状況で、その月の契約者情報をどこから出すかを決める。
+ *
+ * 退去月は旧入居者が1か月まるまる払っているので、その行は旧入居者のまま残す。
+ * ただし同じ月に新しい人が入ることがあるので、名前に「（旧）」を付けて取り違えを防ぐ。
+ * 翌月からは部屋の現在値（＝新入居者、居なければ空）に切り替える。記録に残っている
+ * 旧入居者の名前を出し続けると、いつまでも前の人の行に見えてしまうため。
+ *
+ * moveOutYm は 'YYYY-MM'。ym も同じ形。文字列比較で足りる（どちらも同じ桁数）。
+ */
+export interface TenantView {
+  /** 記録ではなく部屋の現在値を使うか（退去月の翌月以降） */
+  useUnit: boolean
+  /** 名前に付ける接尾辞。退去月だけ '（旧）' */
+  suffix: string
+  /** 空室として扱うか（退去の翌月以降で、次の入居が無い） */
+  vacant: boolean
+}
+
+export function tenantViewFor(
+  occupiedNow: boolean,
+  moveOutYm: string | null | undefined,
+  ym: string,
+): TenantView {
+  const none = { useUnit: false, suffix: '', vacant: false }
+  if (!moveOutYm) return none
+  if (ym < moveOutYm) return none
+  if (ym === moveOutYm) return { useUnit: false, suffix: '（旧）', vacant: false }
+  return { useUnit: true, suffix: '', vacant: !occupiedNow }
+}
+
+/** 部屋ごとの退去月（'YYYY-MM'）。実際の退去日が無ければ退去予定日を使う */
+export function moveOutYmByUnit(events: MoveEvent[]): Map<string, string> {
+  const m = new Map<string, string>()
+  for (const e of events) {
+    if (e.kind !== '退去') continue
+    const d = String(e.actual_date ?? e.scheduled_date ?? '').slice(0, 7)
+    if (!d) continue
+    // 同じ部屋に複数あれば新しい方を採る（退去→入居→また退去 の順に積まれるため）
+    const prev = m.get(e.unit_id)
+    if (!prev || d > prev) m.set(e.unit_id, d)
+  }
+  return m
+}
+
 export function deriveJudgement(
   occupied: boolean,
   billed: number,

@@ -3,14 +3,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2, FileSpreadsheet, Upload, ListChecks } from 'lucide-react'
 import { ImportCsv } from './ImportCsv'
-import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo, arrearsNotesRepo } from '../../lib/repositories'
-import { calcPaymentStatus, calcArrearsList, deriveJudgement, type ArrearsUnitRow } from '../../lib/calc'
+import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo, arrearsNotesRepo, moveEventsRepo } from '../../lib/repositories'
+import { calcPaymentStatus, calcArrearsList, deriveJudgement, tenantViewFor, moveOutYmByUnit, type ArrearsUnitRow } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
 import { yen, percent, formatDate, today } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { PAYMENT_JUDGEMENTS } from '../../types'
-import type { ArrearsNote, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
+import type { ArrearsNote, MoveEvent, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
 
 const JUDGE_STYLE: Record<string, string> = {
   入金済: 'bg-emerald-50 text-emerald-700',
@@ -59,6 +59,7 @@ export function PaymentStatus({
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth() + 1)
   const [units, setUnits] = useState<Unit[]>([])
+  const [events, setEvents] = useState<MoveEvent[]>([])
   const [txs, setTxs] = useState<Transaction[]>([])
   const [notes, setNotes] = useState<Record<string, string>>({})
   const [records, setRecords] = useState<PaymentRecord[]>([])
@@ -88,13 +89,16 @@ export function PaymentStatus({
     setLoading(true)
     try {
       const u = await (activeProperty ? unitsRepo.listByProperty(activeProperty) : unitsRepo.listAll())
-      const [t, n, rec, rh, an] = await Promise.all([
+      const [t, n, rec, rh, an, ev] = await Promise.all([
         transactionsRepo.list({ propertyId: activeProperty }),
         paymentNotesRepo.mapByMonth(year, month),
         paymentRecordsRepo.list(activeProperty),
         rentHistoryRepo.listByUnitIds(u.map((x) => x.id)),
         arrearsNotesRepo.listByUnitIds(u.map((x) => x.id)),
+        // 退去月の「（旧）」表記と、翌月からの切り替えに使う
+        moveEventsRepo.listByUnitIds(u.map((x) => x.id)),
       ])
+      setEvents(ev)
       setUnits(u)
       setTxs(t)
       setNotes(n)
@@ -185,6 +189,10 @@ export function PaymentStatus({
     return m
   }, [arrears])
 
+  // 部屋ごとの退去月と、表示している月。退去の前後で契約者の出しどころを切り替える
+  const moveOutYm = useMemo(() => moveOutYmByUnit(events), [events])
+  const ym = `${year}-${String(month).padStart(2, '0')}`
+
   // 表示行：記録があれば記録、無ければ自動計算
   const displayRows: DisplayRow[] = useMemo(() => {
     return r.rows.map((row) => {
@@ -195,7 +203,13 @@ export function PaymentStatus({
       const manualArrears = rec?.arrears_months
       const arrearsMonths = manualArrears ?? arr?.months ?? 0
       const arrearsIsManual = manualArrears != null
-      if (rec) {
+      // 退去月は旧入居者のまま「（旧）」を付け、翌月からは部屋の現在値に切り替える。
+      const view = tenantViewFor(
+        u.status === '入居' || u.status === '退予',
+        moveOutYm.get(u.id),
+        ym,
+      )
+      if (rec && !view.useUnit) {
         // 記録がある月は、その時点の値だけを使う（物件情報には一切フォールバックしない）。
         // → 物件情報の契約者名を変更しても過去の表示は変わらない。
         // ただし読み方(kana)だけは例外：記録に読み方が入っておらず、かつ契約者名が
@@ -207,7 +221,7 @@ export function PaymentStatus({
         const kana = rec.kana || (sameTenant(rec.tenant, u.tenant) ? u.tenant_kana : null) || ''
         return {
           unit: u,
-          tenant: rec.tenant ?? '',
+          tenant: rec.tenant ? rec.tenant + view.suffix : '',
           tenantType: rec.tenant_type ?? '',
           kana,
           billed: rec.billed ?? null,
@@ -227,11 +241,11 @@ export function PaymentStatus({
         tenant: u.tenant ?? '',
         tenantType: u.tenant_type ?? '',
         kana: u.tenant_kana ?? '',
-        billed: row.billed,
-        calcBilled: row.billed,
-        paid: row.paid,
-        paidDate: row.paidDate,
-        judgement: row.judgement,
+        billed: view.vacant ? 0 : row.billed,
+        calcBilled: view.vacant ? 0 : row.billed,
+        paid: view.useUnit && view.vacant ? null : row.paid,
+        paidDate: view.useUnit && view.vacant ? null : row.paidDate,
+        judgement: view.vacant ? '空室' : row.judgement,
         guarantor: u.guarantor ?? '',
         memo: notes[u.id] ?? '',
         arrears: arrearsMonths,
@@ -239,7 +253,7 @@ export function PaymentStatus({
         fromRecord: false,
       }
     })
-  }, [r.rows, recIndex, arrearsByUnit, year, month, notes])
+  }, [r.rows, recIndex, arrearsByUnit, year, month, notes, moveOutYm, ym])
 
   // 集計（表示行ベース）
   const summary = useMemo(() => {
