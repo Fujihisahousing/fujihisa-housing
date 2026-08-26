@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { X, Upload, Loader2, Download } from 'lucide-react'
 import { transactionsRepo, unitsRepo } from '../../lib/repositories'
 import { yen } from '../../lib/format'
-import { CAT_RENT, CAT_KYOEKI, CAT_UTILITY, type Property, type Transaction, type Unit } from '../../types'
+import { CAT_RENT, CAT_KYOEKI, CAT_PARKING, CAT_UTILITY, type Property, type Transaction, type Unit } from '../../types'
 import { matchTenantName, type MatchConfidence } from '../../lib/matchTenant'
 import { allocateDeposit, contractAmount } from '../../lib/allocateDeposit'
 import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
@@ -248,6 +248,7 @@ export function ImportCsv({
         }
         if (a.rent > 0) tx.push({ ...base, category: CAT_RENT, amount: a.rent })
         if (a.kyoeki > 0) tx.push({ ...base, category: CAT_KYOEKI, amount: a.kyoeki })
+        if (a.parking > 0) tx.push({ ...base, category: CAT_PARKING, amount: a.parking })
         if (a.utility > 0) tx.push({ ...base, category: CAT_UTILITY, amount: a.utility })
       }
     }
@@ -300,10 +301,12 @@ export function ImportCsv({
             <p>
               振込名義から号室を当てます。半角カナ・法人格（カ）など）・語尾の増減は吸収しますが、
               <b>推測で当てた行は色を変えて出す</b>ので、記帳前に確認してください。
+              入金額は 賃料 → 共益費 → 駐車・駐輪 → 光熱費 の順に充てます
+              （駐車・駐輪は部屋の「駐輪駐車」欄の金額まで）。
             </p>
             <p>
               保証会社などが複数戸をまとめて振り込んでくる場合は、<b>号室を追加で選べます</b>。
-              選んだ戸の契約額（賃料＋共益費）で自動的に割り振ります。
+              選んだ戸の契約額（賃料＋共益費＋駐輪駐車）で自動的に割り振ります。
               合計が契約額と合わないときは差額を赤で出します。
             </p>
             <button
@@ -496,7 +499,9 @@ export function ImportCsv({
                                       {picked.length > 1 && (
                                         <b className="text-slate-700">{au.room}　</b>
                                       )}
-                                      賃料 {yen(a.rent)}／共益 {yen(a.kyoeki)}／光熱 {yen(a.utility)}
+                                      賃料 {yen(a.rent)}／共益 {yen(a.kyoeki)}
+                                      {a.parking > 0 && `／駐車駐輪 ${yen(a.parking)}`}
+                                      ／光熱 {yen(a.utility)}
                                     </div>
                                   )
                                 })}

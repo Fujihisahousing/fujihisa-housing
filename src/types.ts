@@ -330,6 +330,8 @@ export const BUILDING_EXPENSE_CATEGORIES = [
 export const CAT_RENT = '賃料'
 export const CAT_KYOEKI = '共益費'
 export const CAT_UTILITY = '光熱費'
+/** 駐車場代・駐輪場代。契約額の駐輪駐車欄（units.parking）に相当する分 */
+export const CAT_PARKING = '駐車・駐輪'
 
 // =====================================================================
 // 物件概要書（売買資料）の付随データ
