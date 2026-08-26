@@ -8,6 +8,7 @@
 import { transactionsRepo, unitsRepo, paymentRecordsRepo, rentHistoryRepo } from './repositories'
 import {
   attributionMonth,
+  billedAmount,
   deriveJudgement,
   effectiveRentKyoeki,
   isRentCategory,
@@ -23,7 +24,7 @@ const keyOf = (y: number, m: number) => `${y}-${m}`
  * @param affected 変更に関わった記帳（更新なら変更前と変更後の両方、削除なら削除した行）。
  *                 ここから「どの号室のどの月を貼り直すか」を決める。
  *
- * 触るのは賃料・共益費で、かつ号室が紐づいている記帳だけ。号室が分からない記帳は
+ * 触るのは賃料・共益費・駐車・駐輪で、かつ号室が紐づいている記帳だけ。号室が分からない記帳は
  * どの部屋の入金か決められないので対象外にする（建物まとめの収入など）。
  * 貼り直すのは入金額と判定だけで、契約者名・請求額・備考・滞納月数には触らない。
  */
@@ -75,7 +76,7 @@ export async function syncPaymentRecordsFromLedger(affected: Partial<Transaction
 
       // 請求額は記録にあればそれを、無ければ賃料履歴から出す
       const eff = effectiveRentKyoeki(unit, history, year, month)
-      const billed = rec?.billed != null ? n(rec.billed) : eff.rent + eff.kyoeki
+      const billed = rec?.billed != null ? n(rec.billed) : billedAmount(eff)
       const guarantor = rec?.guarantor ?? unit.guarantor ?? null
       // 記録を新しく作るときは、契約者名・読み方・属性・保証会社を部屋の情報から埋める。
       // ここを空のまま作ると、入金状況に金額だけ並んで誰の入金か分からなくなる。

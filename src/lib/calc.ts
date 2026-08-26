@@ -1,5 +1,5 @@
 // 集計ロジック（レントロール・利回り・収支表・入金状況）。UI から分離（SOW 設計方針）。
-import { CAT_RENT } from '../types'
+import { CAT_RENT, CAT_KYOEKI, CAT_PARKING } from '../types'
 import type { MoveEvent, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
@@ -26,8 +26,8 @@ export function effectiveRentKyoeki(
   year: number,
   month: number,
 ): { rent: number; kyoeki: number; parking: string | null } {
-  // parking も返すのは物件概要書の過去年度レントロールのため。
-  // 既存の呼び出し元（入金状況の請求額）は rent/kyoeki しか見ないので影響しない。
+  // parking も返すのは物件概要書の過去年度レントロールと、入金状況の請求額のため。
+  // 請求額は billedAmount() で 賃料＋共益費＋駐輪駐車 として組み立てる。
   const fallback = { rent: n(unit.rent), kyoeki: n(unit.kyoeki), parking: unit.parking ?? null }
   if (!history || history.length === 0) return fallback
   const asOf = `${year}-${String(month).padStart(2, '0')}-01`
@@ -71,6 +71,16 @@ export const parkingYen = (s?: string | null): number => {
 }
 // 1戸あたりの月額収入 ＝ 家賃＋共益費＋駐輪駐車（バイク代含む）
 export const unitMonthly = (u: Unit) => n(u.rent) + n(u.kyoeki) + parkingYen(u.parking)
+
+/**
+ * 請求額 ＝ 賃料＋共益費＋駐輪駐車（バイク代・駐車場代含む）。
+ * 入居者が毎月払う契約額そのもの。入金状況・滞納一覧・台帳同期で同じ定義を使う。
+ * 以前は賃料＋共益費だけで出しており、駐輪代や駐車場代のぶんが請求額から落ちていた
+ * （レントロールの満室想定＝unitMonthly とも定義がズレていた）。
+ * parking は '￥18,700' 等の文字列で、'家賃込み' のように金額でなければ 0 になる。
+ */
+export const billedAmount = (eff: { rent: number; kyoeki: number; parking: string | null }) =>
+  eff.rent + eff.kyoeki + parkingYen(eff.parking)
 
 export function calcRentRoll(units: Unit[], property?: Property | null): RentRollResult {
   const rows = units.map((u) => ({ unit: u, total: n(u.rent) + n(u.kyoeki) }))
@@ -708,7 +718,7 @@ export type PaymentJudgement =
 
 export interface PaymentRow {
   unit: Unit
-  billed: number // 請求額 = rent+kyoeki（入居戸）
+  billed: number // 請求額 = rent+kyoeki+駐輪駐車（入居戸）
   paid: number // 入金額 = 当月分（前家賃で帰属）の賃料系入金
   paidDate: string | null // 入金日 = 当月分の最新入金の日付
   judgement: PaymentJudgement
@@ -724,7 +734,11 @@ export interface PaymentStatusResult {
   collectionRate: number // 回収率 = 回収済 / 請求対象
 }
 
-const RENT_CATEGORIES = new Set(['賃料', '共益費'])
+// 入金状況で「賃料系の入金」として数えるカテゴリ。
+// 請求額に駐輪駐車を含める以上、入金側も同じ範囲で拾わないと駐輪代のある戸が
+// 毎月「一部入金」になってしまうので、駐車・駐輪もここに入れる。
+// 光熱費（水道代・電気代）は請求額に含めないので対象外のまま。
+const RENT_CATEGORIES = new Set<string>([CAT_RENT, CAT_KYOEKI, CAT_PARKING])
 const isGuarantor = (s?: string | null) => Boolean(s && /保証/.test(s))
 /** その記帳が賃料系（入金状況で扱う対象）か */
 export const isRentCategory = (category: string) => RENT_CATEGORIES.has(category)
@@ -845,7 +859,7 @@ export function calcPaymentStatus(
 
   const rows: PaymentRow[] = units.map((u) => {
     const eff = effectiveRentKyoeki(u, rentHistoryByUnit?.get(u.id), year, month)
-    const billed = eff.rent + eff.kyoeki
+    const billed = billedAmount(eff)
 
     // この号室の賃料系入金を帰属月ごとに集計（選択月まで）
     const paidByMonth = new Map<number, number>()
@@ -975,13 +989,13 @@ export function calcArrearsList(
       let paid: number
       if (rec) {
         if (isSettled(rec.judgement)) continue
-        billed = rec.billed != null ? n(rec.billed) : eff.rent + eff.kyoeki
+        billed = rec.billed != null ? n(rec.billed) : billedAmount(eff)
         paid = rec.paid != null ? n(rec.paid) : 0
         if (!tenant && rec.tenant) tenant = rec.tenant
         if (!guarantor && rec.guarantor) guarantor = rec.guarantor
       } else {
         if (!isOccupied(u)) continue // 記録の無い空室月は数えない
-        billed = eff.rent + eff.kyoeki
+        billed = billedAmount(eff)
         paid = txMap?.get(idx) ?? 0
       }
       const shortfall = Math.max(0, billed - paid)

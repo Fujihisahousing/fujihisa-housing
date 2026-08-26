@@ -28,7 +28,7 @@ interface DisplayRow {
   tenantType: string
   kana: string
   billed: number | null
-  calcBilled: number // 実効家賃ベースの請求額（記録のbilledがnullでも常に埋まる。手入力の判定計算に使う）
+  calcBilled: number // 契約額ベースの請求額＝賃料＋共益費＋駐輪駐車（記録のbilledがnullでも常に埋まる。手入力の判定計算に使う）
   paid: number | null
   paidDate: string | null
   judgement: string
