@@ -427,11 +427,18 @@ export const moveOutLedgerRepo = {
     }
     return (data ?? []) as MoveOutLedgerEntry[]
   },
-  /** 退去の記録1件につき1行を作る／上書きする。住所を空にすると記録は残り住所だけ消える */
-  async save(moveEventId: string, forwardingAddress: string | null): Promise<void> {
-    const { error } = await supabase.rpc('move_out_ledger_save', {
-      p: { move_event_id: moveEventId, forwarding_address: forwardingAddress ?? '' },
-    })
+  /** 退去の記録1件につき1行を作る／上書きする。
+   *  控え（物件名・号室・契約者名・日付・最終請求月・メモ）はサーバ側で move_events から
+   *  取り直すので渡さない。🔒項目は渡したものだけ差し替わる——一覧で連絡先だけ直しても
+   *  転居先住所が消えないようにするため。空文字を渡せばその項目だけ消える。 */
+  async save(
+    moveEventId: string,
+    pii: { forwarding_address?: string | null; contact?: string | null } = {},
+  ): Promise<void> {
+    const p: Record<string, string> = { move_event_id: moveEventId }
+    if (pii.forwarding_address !== undefined) p.forwarding_address = pii.forwarding_address ?? ''
+    if (pii.contact !== undefined) p.contact = pii.contact ?? ''
+    const { error } = await supabase.rpc('move_out_ledger_save', { p })
     if (error) throw new Error(error.message)
   },
 }

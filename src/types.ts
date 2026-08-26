@@ -216,8 +216,22 @@ export interface MoveOutLedgerEntry {
   id: string
   move_event_id: string
   unit_id: string
+  /** ここから下は退去タブに書いた内容の控え。保存のたびに move_events から取り直す。
+   *  部屋を消しても物件名を直しても、名簿には記録した時点の内容が残る。 */
+  property_name?: string | null
+  room?: string | null
+  tenant?: string | null
+  tenant_kana?: string | null
+  notice_date?: string | null
+  scheduled_date?: string | null
+  actual_date?: string | null
+  final_ym?: string | null
+  memo?: string | null
+  /** 🔒 連絡先（復号済みの平文） */
+  contact?: string | null
+  /** 🔒 転居先住所（復号済みの平文） */
   forwarding_address?: string | null
-  /** 個人情報の消去予定日 */
+  /** 個人情報（連絡先・転居先住所）の消去予定日。控えは消えない */
   pii_purge_at?: string | null
   created_at?: string
   updated_at?: string

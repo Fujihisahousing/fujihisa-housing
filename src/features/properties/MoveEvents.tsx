@@ -155,8 +155,9 @@ const PULLED_FIELDS = [
 ] as const
 type PulledField = (typeof PULLED_FIELDS)[number]
 
-/** 手入力で自動計算を止められる項目。引いてくる項目に最終請求月を足したもの */
-type TouchableField = PulledField | 'final_ym'
+/** 手入力で自動計算を止められる項目。引いてくる項目に、日付から決まる最終請求月と、
+ *  部屋から引いてくる契約者名を足したもの */
+type TouchableField = PulledField | 'final_ym' | 'tenant'
 
 /** フォームの持ち物。move_events の列に加えて、保存時に units へ書き戻す契約情報と、
  *  号室を絞り込むための property_id を持つ（property_id は move_events には保存しない）。
@@ -177,7 +178,8 @@ type Form = Partial<Omit<MoveEvent, 'unit_id'>> & {
   hoshokin?: string | number | null
   key_money?: string | number | null
   kaiyakubiki?: string | number | null
-  /** 退去：転居先住所。move_events ではなく退去帳簿（暗号化）に保存する */
+  /** 退去：連絡先と転居先住所。move_events ではなく退去名簿（暗号化）に保存する */
+  contact?: string | null
   forwarding_address?: string | null
   refund?: string | number | null
   /** 手で触った項目。触った後は日付や号室を変えても自動では上書きしない（画面だけの状態） */
@@ -197,11 +199,20 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // 転居先住所は個人情報なので admin にしか届かない。退去の記録から引けるようにしておく
-  const addressOf = useMemo(
-    () => new Map(ledger.map((l) => [l.move_event_id, l.forwarding_address ?? ''])),
+  // 連絡先・転居先住所は個人情報なので admin にしか届かない。退去の記録から引けるようにしておく
+  const ledgerOf = useMemo(
+    () => new Map(ledger.map((l) => [l.move_event_id, l])),
     [ledger],
   )
+
+  /** 一覧でその場編集した🔒項目を名簿へ書き戻す。渡した項目だけが差し替わる */
+  async function saveLedger(
+    moveEventId: string,
+    pii: { forwarding_address?: string; contact?: string },
+  ) {
+    await moveOutLedgerRepo.save(moveEventId, pii)
+    await onChanged()
+  }
 
   const nameOf = useMemo(() => {
     const m = new Map(properties.map((p) => [p.id, p.name]))
@@ -251,8 +262,18 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
     const u = unitId ? unitById.get(unitId) : null
     setForm((p) => {
       if (!p) return p
-      if (!isMoveIn || !u) return { ...p, unit_id: unitId || null }
+      if (!u) return { ...p, unit_id: unitId || null }
       const t = p.touched ?? {}
+      // 退去は契約者名だけ引く。誰が出ていくのかを選んだ時点で確かめられるようにする
+      // （読みは画面に出さないが、記録として move_events に残すので一緒に持っておく）
+      if (!isMoveIn) {
+        return {
+          ...p,
+          unit_id: unitId || null,
+          tenant: t.tenant ? p.tenant ?? null : u.tenant ?? null,
+          tenant_kana: t.tenant ? p.tenant_kana ?? null : u.tenant_kana ?? null,
+        }
+      }
       const deposit = t.deposit ? p.deposit ?? null : u.deposit ?? null
       const hoshokin = t.hoshokin ? p.hoshokin ?? null : u.hoshokin ?? null
       const kaiyakubiki = t.kaiyakubiki ? p.kaiyakubiki ?? null : u.kaiyakubiki ?? null
@@ -392,9 +413,18 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
       }
       // 転居先住所は暗号化して退去帳簿へ。move_events は誰でも読めるので置かない。
       // 予告の時点でまだ分からないことが多いので、後から一覧のその場編集でも足せる。
-      const forwarding = form.forwarding_address?.trim() || ''
-      if (!isMoveIn && isAdmin && forwarding !== '') {
-        await moveOutLedgerRepo.save(saved.id, forwarding)
+      // 退去名簿。控え（物件名・号室・契約者名・日付・最終請求月・メモ）はサーバ側で
+      // 取り直されるので、書いた内容は住所や連絡先が空でも残る。
+      if (!isMoveIn) {
+        await moveOutLedgerRepo.save(
+          saved.id,
+          isAdmin
+            ? {
+                forwarding_address: form.forwarding_address?.trim() || '',
+                contact: form.contact?.trim() || '',
+              }
+            : {},
+        )
       }
 
       setForm(null)
@@ -486,15 +516,22 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
                         {' ／ '}退去 {formatDate(e.actual_date) || '—'}
                       </div>
                       <div>最終請求 {e.final_ym ? `${e.final_ym} 分（満額）` : '—'}</div>
-                      {/* 転居先は退去の後で分かることが多いので、一覧でそのまま書き足せるようにする */}
+                      {/* 連絡先・転居先は退去の後で分かることが多いので、一覧でそのまま書き足せるようにする */}
                       {isAdmin && (
-                        <ForwardingCell
-                          value={addressOf.get(e.id) ?? ''}
-                          onSave={async (v) => {
-                            await moveOutLedgerRepo.save(e.id, v || null)
-                            await onChanged()
-                          }}
-                        />
+                        <>
+                          <LedgerCell
+                            label="連絡先"
+                            placeholder="電話番号など"
+                            value={ledgerOf.get(e.id)?.contact ?? ''}
+                            onSave={(v) => saveLedger(e.id, { contact: v })}
+                          />
+                          <LedgerCell
+                            label="転居先"
+                            placeholder="住所（未確認なら空のまま）"
+                            value={ledgerOf.get(e.id)?.forwarding_address ?? ''}
+                            onSave={(v) => saveLedger(e.id, { forwarding_address: v })}
+                          />
+                        </>
                       )}
                     </>
                   )}
@@ -542,6 +579,10 @@ function MoveForm({
    *  部屋の額で戻さない（自動で入るが、手で決めた額のほうを優先する）。 */
   const setPulled = (k: PulledField) => (v: string) =>
     setForm((p) => (p ? { ...p, [k]: v || null, touched: { ...p.touched, [k]: true } } : p))
+
+  /** 契約者名の手入力。直したら以降は号室を選び直しても部屋の名前で戻さない */
+  const setTenant = (v: string) =>
+    setForm((p) => (p ? { ...p, tenant: v || null, touched: { ...p.touched, tenant: true } } : p))
 
   /** 最終請求月の手入力。直したら以降は退去日・退去予定日を変えても自動で戻さない */
   const setFinalYm = (v: string) =>
@@ -603,6 +644,25 @@ function MoveForm({
           />
         </Field>
       </div>
+
+      {/* 退去は「誰が出ていくのか」を先に確かめる画面なので、
+          マンション名の下に契約者名、その右に連絡先を並べる。
+          契約者名は号室を選べば部屋から入る（違えば書き換えられる）。
+          連絡先は個人情報なので admin のときだけ出し、退去名簿に暗号化して残す。 */}
+      {!isMoveIn && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="契約者名（号室を選ぶと自動で入ります）">
+            <Input value={form.tenant ?? ''} onChange={setTenant} />
+          </Field>
+          {isAdmin ? (
+            <Field label="連絡先（電話番号など）">
+              <Input value={form.contact ?? ''} onChange={set('contact')} />
+            </Field>
+          ) : (
+            <Readonly label="連絡先" value="管理者のみ" />
+          )}
+        </div>
+      )}
 
       {isMoveIn ? (
         <>
@@ -756,14 +816,16 @@ function MoveForm({
           </p>
           {isAdmin && (
             <>
-              <Section title="転居先（退去帳簿）" />
+              <Section title="転居先（退去名簿）" />
               <Field label="転居先住所">
                 <Input value={form.forwarding_address ?? ''} onChange={set('forwarding_address')} />
               </Field>
               <p className="text-[11px] text-slate-500">
                 敷金の返金先・郵便物の転送先として残します。予告の時点で分からなければ空のままでよく、
-                後から一覧の「転居先」欄に直接書き足せます。
-                個人情報なので暗号化して保存し、管理者だけが読めます。退去から2年で自動的に消えます。
+                後から一覧の「連絡先」「転居先」欄に直接書き足せます。
+                連絡先と転居先住所は個人情報なので暗号化して保存し、管理者だけが読めます。
+                この2つは退去から2年で自動的に消えますが、退去名簿の記録（物件・号室・契約者名・
+                各日付・最終請求月・メモ）はそのまま残ります。
               </p>
             </>
           )}
@@ -800,11 +862,14 @@ function MoveForm({
   )
 }
 
-/** 退去帳簿の転居先セル。打っている間は手元の値を出し、欄から離れたときだけ保存する。
- *  入金状況の備考と同じ「その場で直せる」操作感に合わせている（admin のみ描画される）。 */
-function ForwardingCell({
-  value, onSave,
+/** 退去名簿の🔒項目（連絡先・転居先住所）のセル。打っている間は手元の値を出し、
+ *  欄から離れたときだけ保存する。入金状況の備考と同じ「その場で直せる」操作感に
+ *  合わせている（admin のみ描画される）。 */
+function LedgerCell({
+  label, placeholder, value, onSave,
 }: {
+  label: string
+  placeholder: string
   value: string
   onSave: (v: string) => Promise<void>
 }) {
@@ -816,11 +881,11 @@ function ForwardingCell({
 
   return (
     <div className="flex items-center gap-1.5 pt-0.5">
-      <span className="shrink-0 text-slate-500">転居先</span>
+      <span className="shrink-0 text-slate-500 w-12">{label}</span>
       <input
         value={draft}
         disabled={busy}
-        placeholder="住所（未確認なら空のまま）"
+        placeholder={placeholder}
         onChange={(ev) => setDraft(ev.target.value)}
         onBlur={async () => {
           const next = draft.trim()
