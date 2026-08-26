@@ -11,14 +11,17 @@
 //
 // 日割りは手入力。実日数・30日それぞれの目安は出すが、仲介会社によって計算が違うので
 // 自動では入れない（契約書の額をそのまま入れてもらう）。
-import { useMemo, useState, type Dispatch, type SetStateAction } from 'react'
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
 import { Loader2, Plus, Trash2, LogIn, LogOut } from 'lucide-react'
-import { moveEventsRepo, paymentRecordsRepo, unitsRepo, rentHistoryRepo } from '../../lib/repositories'
+import { useAuth } from '../../auth/AuthProvider'
+import {
+  moveEventsRepo, moveOutLedgerRepo, paymentRecordsRepo, unitsRepo, rentHistoryRepo,
+} from '../../lib/repositories'
 import { effectiveRentKyoeki } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
 import { yen, formatDate } from '../../lib/format'
 import { TENANT_TYPES, PAYMENT_METHODS, USE_TYPES } from '../../types'
-import type { MoveEvent, MoveKind, Property, RentHistory, Unit } from '../../types'
+import type { MoveEvent, MoveKind, MoveOutLedgerEntry, Property, RentHistory, Unit } from '../../types'
 
 // ---------------------------------------------------------------------
 // 年月・日割りのヘルパー（純粋関数。UI を読まなくても検証できる）
@@ -108,6 +111,14 @@ export function defaultRefund(
   return null
 }
 
+/** 退去の最終請求月。退去月の家賃は満額もらう運用なので、月そのものが決まればよい。
+ *  予告を受けた時点では予告書の退去予定日しか無いのでその月を入れ、
+ *  実際の退去日が決まったらそちらの月に切り替える。
+ *  手で直した後は動かさない（呼び出し側で touched を見て判断する）。 */
+export function autoFinalYm(scheduled?: string | null, actual?: string | null): string | null {
+  return ymOf(actual) || ymOf(scheduled) || null
+}
+
 /** 日割りの目安。実日数割りと30日割りの2通りを出す（採用はしない。手入力の参考） */
 export function proratedHints(monthly: number, date: string): { actual: number; thirty: number } | null {
   const ym = ymOf(date)
@@ -129,9 +140,23 @@ interface Props {
   properties: Property[]
   history: RentHistory[]
   events: MoveEvent[]
+  /** 退去帳簿（転居先住所）。admin 以外は空で届く。退去の記録と move_event_id で1対1 */
+  ledger: MoveOutLedgerEntry[]
   loading: boolean
   onChanged: () => void | Promise<void>
 }
+
+/** 号室を選ぶと部屋から引いてくる項目。部屋の賃料・共益費はレントロールに出ている額そのもので、
+ *  入居のたびに打ち直さなくて済むよう号室を選んだ時点で入れる。
+ *  手入力すれば上書きでき、上書きした項目は号室を選び直しても部屋の値で戻されない。 */
+const PULLED_FIELDS = [
+  'use_type', 'parking', 'rent', 'kyoeki',
+  'deposit', 'hoshokin', 'key_money', 'kaiyakubiki', 'refund',
+] as const
+type PulledField = (typeof PULLED_FIELDS)[number]
+
+/** 手入力で自動計算を止められる項目。引いてくる項目に最終請求月を足したもの */
+type TouchableField = PulledField | 'final_ym'
 
 /** フォームの持ち物。move_events の列に加えて、保存時に units へ書き戻す契約情報と、
  *  号室を絞り込むための property_id を持つ（property_id は move_events には保存しない）。
@@ -152,9 +177,11 @@ type Form = Partial<Omit<MoveEvent, 'unit_id'>> & {
   hoshokin?: string | number | null
   key_money?: string | number | null
   kaiyakubiki?: string | number | null
+  /** 退去：転居先住所。move_events ではなく退去帳簿（暗号化）に保存する */
+  forwarding_address?: string | null
   refund?: string | number | null
-  /** 返還金を手で触ったか。触った後は敷金の変更で上書きしない（画面だけの状態） */
-  refund_touched?: boolean
+  /** 手で触った項目。触った後は日付や号室を変えても自動では上書きしない（画面だけの状態） */
+  touched?: Partial<Record<TouchableField, true>>
 }
 
 const numOrNull = (v: unknown) => {
@@ -164,10 +191,17 @@ const numOrNull = (v: unknown) => {
   return Number.isFinite(n) ? n : null
 }
 
-export function MoveEventsPanel({ kind, units, properties, history, events, loading, onChanged }: Props) {
+export function MoveEventsPanel({ kind, units, properties, history, events, ledger, loading, onChanged }: Props) {
+  const { isAdmin } = useAuth()
   const [form, setForm] = useState<Form | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // 転居先住所は個人情報なので admin にしか届かない。退去の記録から引けるようにしておく
+  const addressOf = useMemo(
+    () => new Map(ledger.map((l) => [l.move_event_id, l.forwarding_address ?? ''])),
+    [ledger],
+  )
 
   const nameOf = useMemo(() => {
     const m = new Map(properties.map((p) => [p.id, p.name]))
@@ -208,31 +242,33 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
 
   /** 号室を選んだら、その部屋の今の条件をフォームに引いてくる。
    *  募集条件（賃料・共益費・敷金など）は部屋に入っているので、
-   *  入居のたびに一から打ち直さなくて済む。契約者欄は空のままにする。 */
+   *  入居のたびに一から打ち直さなくて済む。契約者欄は空のままにする。
+   *
+   *  選び直したときは、手で触っていない項目を新しい部屋の額で入れ直す。
+   *  前は「空のときだけ入れる」だったので、部屋やマンションを選び直すと
+   *  前の部屋の賃料が残ったままになっていた。 */
   function onUnitChange(unitId: string) {
     const u = unitId ? unitById.get(unitId) : null
     setForm((p) => {
       if (!p) return p
       if (!isMoveIn || !u) return { ...p, unit_id: unitId || null }
+      const t = p.touched ?? {}
+      const deposit = t.deposit ? p.deposit ?? null : u.deposit ?? null
+      const hoshokin = t.hoshokin ? p.hoshokin ?? null : u.hoshokin ?? null
+      const kaiyakubiki = t.kaiyakubiki ? p.kaiyakubiki ?? null : u.kaiyakubiki ?? null
       return {
         ...p,
         unit_id: unitId || null,
-        use_type: p.use_type ?? u.use_type ?? null,
-        parking: p.parking ?? u.parking ?? null,
-        rent: p.rent ?? u.rent ?? null,
-        kyoeki: p.kyoeki ?? u.kyoeki ?? null,
-        deposit: p.deposit ?? u.deposit ?? null,
-        hoshokin: p.hoshokin ?? u.hoshokin ?? null,
-        key_money: p.key_money ?? u.key_money ?? null,
-        kaiyakubiki: p.kaiyakubiki ?? u.kaiyakubiki ?? null,
+        use_type: t.use_type ? p.use_type ?? null : u.use_type ?? null,
+        parking: t.parking ? p.parking ?? null : u.parking ?? null,
+        rent: t.rent ? p.rent ?? null : u.rent ?? null,
+        kyoeki: t.kyoeki ? p.kyoeki ?? null : u.kyoeki ?? null,
+        deposit,
+        hoshokin,
+        key_money: t.key_money ? p.key_money ?? null : u.key_money ?? null,
+        kaiyakubiki,
         // 返還金は部屋の保存値ではなく、敷金／保証金−解約引 から計算し直す
-        refund: p.refund_touched
-          ? p.refund
-          : defaultRefund(
-              p.deposit ?? u.deposit,
-              p.hoshokin ?? u.hoshokin,
-              p.kaiyakubiki ?? u.kaiyakubiki,
-            ),
+        refund: t.refund ? p.refund ?? null : defaultRefund(deposit, hoshokin, kaiyakubiki),
       }
     })
   }
@@ -255,8 +291,26 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
         }
       }
       // 退去月の家賃は満額もらう運用なので、最終請求月の既定は退去月そのもの
-      return { ...p, actual_date: v, final_ym: p.final_ym || ymOf(v) }
+      return {
+        ...p,
+        actual_date: v,
+        final_ym: p.touched?.final_ym ? p.final_ym ?? null : autoFinalYm(p.scheduled_date, v),
+      }
     })
+  }
+
+  /** 退去予定日（予告書の日付）が変わったら最終請求月を追随させる。
+   *  予告を受けた時点ではまだ実際の退去日が無いので、ここが既定の出どころになる。 */
+  function onScheduledChange(v: string) {
+    setForm((p) =>
+      p
+        ? {
+            ...p,
+            scheduled_date: v || null,
+            final_ym: p.touched?.final_ym ? p.final_ym ?? null : autoFinalYm(v, p.actual_date),
+          }
+        : p,
+    )
   }
 
   async function save() {
@@ -336,6 +390,13 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
           if (full > 0) await writeBilled(propertyId, room, saved.final_ym, full)
         }
       }
+      // 転居先住所は暗号化して退去帳簿へ。move_events は誰でも読めるので置かない。
+      // 予告の時点でまだ分からないことが多いので、後から一覧のその場編集でも足せる。
+      const forwarding = form.forwarding_address?.trim() || ''
+      if (!isMoveIn && isAdmin && forwarding !== '') {
+        await moveOutLedgerRepo.save(saved.id, forwarding)
+      }
+
       setForm(null)
       await onChanged()
     } catch (e) {
@@ -383,6 +444,8 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
           properties={properties}
           onUnitChange={onUnitChange}
           onDateChange={onDateChange}
+          onScheduledChange={onScheduledChange}
+          isAdmin={isAdmin}
           monthlyOf={monthlyOf}
           saving={saving}
           error={error}
@@ -423,6 +486,16 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
                         {' ／ '}退去 {formatDate(e.actual_date) || '—'}
                       </div>
                       <div>最終請求 {e.final_ym ? `${e.final_ym} 分（満額）` : '—'}</div>
+                      {/* 転居先は退去の後で分かることが多いので、一覧でそのまま書き足せるようにする */}
+                      {isAdmin && (
+                        <ForwardingCell
+                          value={addressOf.get(e.id) ?? ''}
+                          onSave={async (v) => {
+                            await moveOutLedgerRepo.save(e.id, v || null)
+                            await onChanged()
+                          }}
+                        />
+                      )}
                     </>
                   )}
                   {e.memo && <div className="text-slate-400">{e.memo}</div>}
@@ -443,7 +516,8 @@ export function MoveEventsPanel({ kind, units, properties, history, events, load
 // 入力フォーム
 // ---------------------------------------------------------------------
 function MoveForm({
-  kind, form, setForm, units, properties, onUnitChange, onDateChange, monthlyOf, saving, error, onCancel, onSave,
+  kind, form, setForm, units, properties, onUnitChange, onDateChange, onScheduledChange,
+  isAdmin, monthlyOf, saving, error, onCancel, onSave,
 }: {
   kind: MoveKind
   form: Form
@@ -452,6 +526,8 @@ function MoveForm({
   properties: Property[]
   onUnitChange: (v: string) => void
   onDateChange: (v: string) => void
+  onScheduledChange: (v: string) => void
+  isAdmin: boolean
   monthlyOf: (unitId: string | null | undefined, ym: string) => number
   saving: boolean
   error: string | null
@@ -462,18 +538,25 @@ function MoveForm({
   const set = (k: keyof Form) => (v: string) =>
     setForm((p) => (p ? { ...p, [k]: v || null } : p))
 
+  /** 部屋から引いてくる項目の手入力。触った印を残し、以降は号室を選び直しても
+   *  部屋の額で戻さない（自動で入るが、手で決めた額のほうを優先する）。 */
+  const setPulled = (k: PulledField) => (v: string) =>
+    setForm((p) => (p ? { ...p, [k]: v || null, touched: { ...p.touched, [k]: true } } : p))
+
+  /** 最終請求月の手入力。直したら以降は退去日・退去予定日を変えても自動で戻さない */
+  const setFinalYm = (v: string) =>
+    setForm((p) => (p ? { ...p, final_ym: v || null, touched: { ...p.touched, final_ym: true } } : p))
+
   /** 敷金・保証金・解約引を触ったら返還金を計算し直す。
-   *  返還金を手で入力した後（refund_touched）は上書きしない。 */
+   *  返還金を手で入力した後は上書きしない。 */
   const setDepositLike = (k: 'deposit' | 'hoshokin' | 'kaiyakubiki') => (v: string) =>
     setForm((p) => {
       if (!p) return p
-      const next = { ...p, [k]: v || null }
-      if (p.refund_touched) return next
+      const touched = { ...p.touched, [k]: true as const }
+      const next = { ...p, [k]: v || null, touched }
+      if (touched.refund) return next
       return { ...next, refund: defaultRefund(next.deposit, next.hoshokin, next.kaiyakubiki) }
     })
-
-  const setRefund = (v: string) =>
-    setForm((p) => (p ? { ...p, refund: v || null, refund_touched: true } : p))
 
   // 物件と号室は別々に選ばせる。1つのプルダウンに全物件の部屋を並べると数が多すぎるうえ、
   // どのマンションの部屋なのかが読み取りにくい。
@@ -493,7 +576,16 @@ function MoveForm({
         <Field label="マンション名">
           <Select
             value={propertyId}
-            onChange={(v) => setForm((p) => (p ? { ...p, property_id: v || null, unit_id: null } : p))}
+            onChange={(v) =>
+              setForm((p) => {
+                if (!p) return p
+                // マンションを変えたら号室は選び直し。前の部屋から引いてきた額が
+                // 残っていると次の部屋の条件と紛らわしいので、手で触っていない欄は空に戻す。
+                const next: Form = { ...p, property_id: v || null, unit_id: null }
+                for (const k of PULLED_FIELDS) if (!p.touched?.[k]) next[k] = null
+                return next
+              })
+            }
             options={[
               { value: '', label: '選択してください' },
               ...properties.map((p) => ({ value: p.id, label: p.name })),
@@ -586,7 +678,7 @@ function MoveForm({
             <Field label="用途">
               <Select
                 value={form.use_type ?? ''}
-                onChange={set('use_type')}
+                onChange={setPulled('use_type')}
                 options={[
                   { value: '', label: '未設定' },
                   ...USE_TYPES.map((t) => ({ value: t, label: t })),
@@ -601,15 +693,19 @@ function MoveForm({
           <Section title="契約条件" />
           <div className="grid grid-cols-3 gap-3">
             <Field label="賃料（円）">
-              <Input type="number" value={String(form.rent ?? '')} onChange={set('rent')} />
+              <Input type="number" value={String(form.rent ?? '')} onChange={setPulled('rent')} />
             </Field>
             <Field label="共益費（円）">
-              <Input type="number" value={String(form.kyoeki ?? '')} onChange={set('kyoeki')} />
+              <Input type="number" value={String(form.kyoeki ?? '')} onChange={setPulled('kyoeki')} />
             </Field>
             <Field label="駐輪駐車">
-              <Input value={form.parking ?? ''} onChange={set('parking')} />
+              <Input value={form.parking ?? ''} onChange={setPulled('parking')} />
             </Field>
           </div>
+          <p className="text-[11px] text-slate-500">
+            号室を選ぶと、レントロールに出ているその部屋の条件（賃料・共益費・敷金など）が入ります。
+            違う額で契約するときはそのまま書き換えてください。書き換えた欄は、号室を選び直しても元に戻りません。
+          </p>
           <div className="grid grid-cols-3 gap-3">
             <Field label="敷金（円）">
               <Input type="number" value={String(form.deposit ?? '')} onChange={setDepositLike('deposit')} />
@@ -623,10 +719,10 @@ function MoveForm({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <Field label="礼金（円）">
-              <Input type="number" value={String(form.key_money ?? '')} onChange={set('key_money')} />
+              <Input type="number" value={String(form.key_money ?? '')} onChange={setPulled('key_money')} />
             </Field>
             <Field label="返還金（円）　※敷金／保証金−解約引から自動、手入力で上書き可">
-              <Input type="number" value={String(form.refund ?? '')} onChange={setRefund} />
+              <Input type="number" value={String(form.refund ?? '')} onChange={setPulled('refund')} />
             </Field>
           </div>
           <p className="text-[11px] text-slate-500">
@@ -645,15 +741,33 @@ function MoveForm({
               <Input type="date" value={form.notice_date ?? ''} onChange={set('notice_date')} />
             </Field>
             <Field label="退去予定日（予告書の日付）">
-              <Input type="date" value={form.scheduled_date ?? ''} onChange={set('scheduled_date')} />
+              <Input type="date" value={form.scheduled_date ?? ''} onChange={onScheduledChange} />
             </Field>
             <Field label="実際の退去日">
               <Input type="date" value={form.actual_date ?? ''} onChange={onDateChange} />
             </Field>
           </div>
-          <Field label="最終請求月（退去月は満額。既定は退去月）">
-            <Input type="month" value={form.final_ym ?? ''} onChange={set('final_ym')} />
+          <Field label="最終請求月（退去月は満額）">
+            <Input type="month" value={form.final_ym ?? ''} onChange={setFinalYm} />
           </Field>
+          <p className="text-[11px] text-slate-500">
+            最終請求月は退去予定日の月が自動で入ります。実際の退去日を入れるとその月に切り替わります。
+            月をまたいで精算するなど違う月にしたいときは書き換えてください（書き換えた後は日付を変えても戻りません）。
+          </p>
+          {isAdmin && (
+            <>
+              <Section title="転居先（退去帳簿）" />
+              <Field label="転居先住所">
+                <Input value={form.forwarding_address ?? ''} onChange={set('forwarding_address')} />
+              </Field>
+              <p className="text-[11px] text-slate-500">
+                敷金の返金先・郵便物の転送先として残します。予告の時点で分からなければ空のままでよく、
+                後から一覧の「転居先」欄に直接書き足せます。
+                個人情報なので暗号化して保存し、管理者だけが読めます。退去から2年で自動的に消えます。
+              </p>
+            </>
+          )}
+
           <p className="text-[11px] text-slate-500">
             退去予定日を過ぎても状況が「退予」のままの部屋は、レントロールに警告が出ます。
             退去が済んだら部屋の編集で状況を「空室」にしてください（契約者情報が消えます）。
@@ -682,6 +796,50 @@ function MoveForm({
           やめる
         </button>
       </div>
+    </div>
+  )
+}
+
+/** 退去帳簿の転居先セル。打っている間は手元の値を出し、欄から離れたときだけ保存する。
+ *  入金状況の備考と同じ「その場で直せる」操作感に合わせている（admin のみ描画される）。 */
+function ForwardingCell({
+  value, onSave,
+}: {
+  value: string
+  onSave: (v: string) => Promise<void>
+}) {
+  const [draft, setDraft] = useState(value)
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  // 保存後に親から新しい値が届いたら追随する
+  useEffect(() => setDraft(value), [value])
+
+  return (
+    <div className="flex items-center gap-1.5 pt-0.5">
+      <span className="shrink-0 text-slate-500">転居先</span>
+      <input
+        value={draft}
+        disabled={busy}
+        placeholder="住所（未確認なら空のまま）"
+        onChange={(ev) => setDraft(ev.target.value)}
+        onBlur={async () => {
+          const next = draft.trim()
+          if (next === value.trim()) return
+          setBusy(true)
+          setFailed(false)
+          try {
+            await onSave(next)
+          } catch {
+            setFailed(true)
+            setDraft(value)
+          } finally {
+            setBusy(false)
+          }
+        }}
+        className="flex-1 rounded border border-slate-200 px-1.5 py-0.5 text-[11px] bg-white focus:outline-none focus:ring-1 focus:ring-slate-900 disabled:bg-slate-50"
+      />
+      {busy && <Loader2 className="w-3 h-3 animate-spin text-slate-400" />}
+      {failed && <span className="text-rose-600">保存できませんでした</span>}
     </div>
   )
 }

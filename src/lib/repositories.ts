@@ -1,7 +1,7 @@
 // repository層：UI・集計は必ずここ経由で DB にアクセスする（DB実装に依存させない）。
 // RLS により、ログイン済みでないと読み書きできない。個人情報(leases)は admin のみ。
 import { supabase } from './supabase'
-import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory, ArrearsNote, AuditLog, MoveEvent } from '../types'
+import type { Property, Unit, Transaction, Setting, Profile, Lease, PaymentRecord, RentHistory, ArrearsNote, AuditLog, MoveEvent, MoveOutLedgerEntry } from '../types'
 import type { PropertyDocument, PropertyInspection, PropertyOpex, PropertyRepair } from '../types'
 
 function unwrap<T>(data: T | null, error: { message: string } | null): T {
@@ -408,6 +408,30 @@ export const moveEventsRepo = {
   },
   async remove(id: string): Promise<void> {
     const { error } = await supabase.from('move_events').delete().eq('id', id)
+    if (error) throw new Error(error.message)
+  },
+}
+
+/** 退去帳簿（転居先住所）。個人情報なので暗号化・復号はサーバ側の RPC に任せる。
+ *  admin 以外が呼んでも読みは空・書きは例外になる（画面側で欄を出さない前提）。 */
+export const moveOutLedgerRepo = {
+  /** 退去タブは全物件を横断するので unit_id の配列でまとめて引く（復号済み）。
+   *  読めなかったときは空で返す：supabase/add_move_out_ledger.sql をまだ流していない本番でも
+   *  退去タブそのものは開けるようにするため（住所を書こうとした時点でエラーが出る）。 */
+  async listByUnitIds(unitIds: string[]): Promise<MoveOutLedgerEntry[]> {
+    if (unitIds.length === 0) return []
+    const { data, error } = await supabase.rpc('move_out_ledger_for_units', { p_unit_ids: unitIds })
+    if (error) {
+      console.warn('退去帳簿を読めませんでした（add_move_out_ledger.sql 未適用？）:', error.message)
+      return []
+    }
+    return (data ?? []) as MoveOutLedgerEntry[]
+  },
+  /** 退去の記録1件につき1行を作る／上書きする。住所を空にすると記録は残り住所だけ消える */
+  async save(moveEventId: string, forwardingAddress: string | null): Promise<void> {
+    const { error } = await supabase.rpc('move_out_ledger_save', {
+      p: { move_event_id: moveEventId, forwarding_address: forwardingAddress ?? '' },
+    })
     if (error) throw new Error(error.message)
   },
 }

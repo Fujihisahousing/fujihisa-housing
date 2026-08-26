@@ -208,6 +208,21 @@ export interface MoveEvent {
   created_at?: string
 }
 
+/** 退去帳簿（move_out_ledger）の1行。退去の記録1件につき1行。
+ *  転居先住所は退去者の現住所そのものなので、move_events には置かず暗号化して別テーブルに持つ
+ *  （admin のみ読み書き可・退去から pii_retention_years で自動消去）。
+ *  この型に入っている forwarding_address は RPC で復号済みの平文。 */
+export interface MoveOutLedgerEntry {
+  id: string
+  move_event_id: string
+  unit_id: string
+  forwarding_address?: string | null
+  /** 個人情報の消去予定日 */
+  pii_purge_at?: string | null
+  created_at?: string
+  updated_at?: string
+}
+
 /** 賃料・共益費の履歴（反映開始日つき）。ある年月時点の実効値＝effective_date がその年月以前で最大の行。 */
 export interface RentHistory {
   id: string

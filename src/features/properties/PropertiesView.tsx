@@ -5,12 +5,12 @@ import { Modal } from '../../components/common/Modal'
 import { LeaseManager } from '../leases/LeaseManager'
 import { MoveEventsPanel, applyDueMoveIns } from './MoveEvents'
 import { useAuth } from '../../auth/AuthProvider'
-import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo, moveEventsRepo } from '../../lib/repositories'
+import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo, moveEventsRepo, moveOutLedgerRepo } from '../../lib/repositories'
 import { unitCompare } from '../../lib/sortUnits'
 import { effectiveRentKyoeki, deriveJudgement } from '../../lib/calc'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, today } from '../../lib/format'
-import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type MoveEvent, type Property, type RentHistory, type Unit } from '../../types'
+import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type MoveEvent, type MoveOutLedgerEntry, type Property, type RentHistory, type Unit } from '../../types'
 
 export function PropertiesView({ onChanged }: { onChanged: () => void }) {
   const [properties, setProperties] = useState<Property[]>([])
@@ -23,6 +23,8 @@ export function PropertiesView({ onChanged }: { onChanged: () => void }) {
   const [units, setUnits] = useState<Unit[]>([])
   const [events, setEvents] = useState<MoveEvent[]>([])
   const [history, setHistory] = useState<RentHistory[]>([])
+  // 退去帳簿（転居先住所）。RPC が admin 以外には何も返さないので、非adminでは空のまま
+  const [ledger, setLedger] = useState<MoveOutLedgerEntry[]>([])
   const [moveLoading, setMoveLoading] = useState(false)
 
   const load = useCallback(async () => {
@@ -42,10 +44,12 @@ export function PropertiesView({ onChanged }: { onChanged: () => void }) {
       const us = await unitsRepo.listAll()
       setUnits(us)
       const ids = us.map((u) => u.id)
-      const [ev, hs] = await Promise.all([
+      const [ev, hs, lg] = await Promise.all([
         moveEventsRepo.listByUnitIds(ids),
         rentHistoryRepo.listByUnitIds(ids),
+        moveOutLedgerRepo.listByUnitIds(ids),
       ])
+      setLedger(lg)
       // 入居予定日が来た予約を部屋へ反映する。サーバー側の定時処理が無いので、
       // 画面を開いた時点で追いつかせる。反映したら部屋と記録を読み直す。
       if ((await applyDueMoveIns(us, ev)) > 0) {
@@ -53,6 +57,7 @@ export function PropertiesView({ onChanged }: { onChanged: () => void }) {
         setUnits(us2)
         setEvents(await moveEventsRepo.listByUnitIds(us2.map((u) => u.id)))
         setHistory(await rentHistoryRepo.listByUnitIds(us2.map((u) => u.id)))
+        setLedger(await moveOutLedgerRepo.listByUnitIds(us2.map((u) => u.id)))
         return
       }
       setEvents(ev)
@@ -113,6 +118,7 @@ export function PropertiesView({ onChanged }: { onChanged: () => void }) {
           properties={properties}
           history={history}
           events={events}
+          ledger={ledger}
           loading={moveLoading}
           onChanged={loadMove}
         />
