@@ -78,9 +78,16 @@ export const unitMonthly = (u: Unit) => n(u.rent) + n(u.kyoeki) + parkingYen(u.p
  * 以前は賃料＋共益費だけで出しており、駐輪代や駐車場代のぶんが請求額から落ちていた
  * （レントロールの満室想定＝unitMonthly とも定義がズレていた）。
  * parking は '￥18,700' 等の文字列で、'家賃込み' のように金額でなければ 0 になる。
+ *
+ * 賃料履歴（rent_history）の駐輪駐車が空のときは、部屋の現在値（units.parking）で補う。
+ * 堂島のように「2019年5月の基準額」だけを履歴に入れた物件は、その行の parking が空のままで、
+ * 履歴を見にいくと駐輪代が丸ごと 0 になってしまうため。履歴側は物件概要書の過去年度
+ * レントロールが参照するので空のまま触らず、請求額を出すときだけ補完する。
  */
-export const billedAmount = (eff: { rent: number; kyoeki: number; parking: string | null }) =>
-  eff.rent + eff.kyoeki + parkingYen(eff.parking)
+export const billedAmount = (
+  eff: { rent: number; kyoeki: number; parking: string | null },
+  unit?: Unit,
+) => eff.rent + eff.kyoeki + parkingYen(eff.parking || unit?.parking)
 
 export function calcRentRoll(units: Unit[], property?: Property | null): RentRollResult {
   const rows = units.map((u) => ({ unit: u, total: n(u.rent) + n(u.kyoeki) }))
@@ -859,7 +866,7 @@ export function calcPaymentStatus(
 
   const rows: PaymentRow[] = units.map((u) => {
     const eff = effectiveRentKyoeki(u, rentHistoryByUnit?.get(u.id), year, month)
-    const billed = billedAmount(eff)
+    const billed = billedAmount(eff, u)
 
     // この号室の賃料系入金を帰属月ごとに集計（選択月まで）
     const paidByMonth = new Map<number, number>()
@@ -989,13 +996,13 @@ export function calcArrearsList(
       let paid: number
       if (rec) {
         if (isSettled(rec.judgement)) continue
-        billed = rec.billed != null ? n(rec.billed) : billedAmount(eff)
+        billed = rec.billed != null ? n(rec.billed) : billedAmount(eff, u)
         paid = rec.paid != null ? n(rec.paid) : 0
         if (!tenant && rec.tenant) tenant = rec.tenant
         if (!guarantor && rec.guarantor) guarantor = rec.guarantor
       } else {
         if (!isOccupied(u)) continue // 記録の無い空室月は数えない
-        billed = billedAmount(eff)
+        billed = billedAmount(eff, u)
         paid = txMap?.get(idx) ?? 0
       }
       const shortfall = Math.max(0, billed - paid)

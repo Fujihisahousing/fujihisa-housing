@@ -76,7 +76,7 @@ export async function syncPaymentRecordsFromLedger(affected: Partial<Transaction
 
       // 請求額は記録にあればそれを、無ければ賃料履歴から出す
       const eff = effectiveRentKyoeki(unit, history, year, month)
-      const billed = rec?.billed != null ? n(rec.billed) : billedAmount(eff)
+      const billed = rec?.billed != null ? n(rec.billed) : billedAmount(eff, unit)
       const guarantor = rec?.guarantor ?? unit.guarantor ?? null
       // 記録を新しく作るときは、契約者名・読み方・属性・保証会社を部屋の情報から埋める。
       // ここを空のまま作ると、入金状況に金額だけ並んで誰の入金か分からなくなる。
