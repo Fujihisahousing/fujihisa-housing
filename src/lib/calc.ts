@@ -537,6 +537,13 @@ const finishRow = (r: StatementRow): StatementRow => ({
  * 収支表では両方を足している。ただし同じ家賃を両方に入れている月は二重計上になる。
  * そこで booked（既に賃料が記帳されている 号室×月）に当たる記録は足さない。
  * 記帳のほうを優先するのは、収支表が入金日ベース（現金主義）だから。
+ *
+ * 受取額のうち駐車場代・駐輪代にあたる分は「駐車・駐輪」として分けて出す。
+ * 以前は受取額をまるごと賃料にしていたため、駐車場代・駐輪代が収支表の
+ * 「家賃+共益費」行に混ざり、「駐車・駐輪」行はいつも0円だった。
+ * 充当の順番は 賃料→共益費→駐車・駐輪 で、まとめ入金の按分（allocateDeposit）と揃えている。
+ * ＝賃料と共益費を払いきった残りが、契約の駐輪駐車欄（units.parking）の額まで駐車・駐輪。
+ * それを超える分は従来どおり賃料に残す（光熱費まで分けると収支表の見え方が変わりすぎるため）。
  */
 export function paymentRecordsToTransactions(
   records: PaymentRecord[],
@@ -547,24 +554,51 @@ export function paymentRecordsToTransactions(
   for (const u of units) if (u.tenant === 'KDDI') kddiRooms.add(`${u.property_id}|${u.room}`)
   const unitIdOf = new Map<string, string>()
   for (const u of units) unitIdOf.set(`${u.property_id}|${u.room}`, u.id)
-  return records
-    .filter((rec) => n(rec.paid) > 0)
-    .filter((rec) => {
-      const unitId = unitIdOf.get(`${rec.property_id}|${rec.room}`)
-      if (!unitId) return true // 号室が突き合わない記録は従来どおり足す
-      return !booked.has(`${unitId}|${rec.year}-${String(rec.month).padStart(2, '0')}`)
-    })
-    .map((rec) => ({
-      id: `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`,
-      // 月次記録は既に「何月分か」で持っているので、これ以上ずらしてはいけない。
-      // accountingMonth は11日以降を翌月に寄せるため、日は必ず10日以前にする。
-      date: `${rec.year}-${String(rec.month).padStart(2, '0')}-01`,
-      property_id: rec.property_id,
-      type: 'income' as const,
-      category: kddiRooms.has(`${rec.property_id}|${rec.room}`) ? 'KDDI' : CAT_RENT,
-      amount: n(rec.paid),
-    }))
+  const unitOf = new Map<string, Unit>()
+  for (const u of units) unitOf.set(`${u.property_id}|${u.room}`, u)
+
+  const out: Transaction[] = []
+  for (const rec of records) {
+    const paid = n(rec.paid)
+    if (paid <= 0) continue
+    const key = `${rec.property_id}|${rec.room}`
+    const unitId = unitIdOf.get(key)
+    // 号室が突き合わない記録は従来どおり足す
+    if (unitId && booked.has(`${unitId}|${rec.year}-${String(rec.month).padStart(2, '0')}`)) continue
+
+    // 月次記録は既に「何月分か」で持っているので、これ以上ずらしてはいけない。
+    // accountingMonth は11日以降を翌月に寄せるため、日は必ず10日以前にする。
+    const date = `${rec.year}-${String(rec.month).padStart(2, '0')}-01`
+    const base = { property_id: rec.property_id, type: 'income' as const, date }
+    const idBase = `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`
+
+    if (kddiRooms.has(key)) {
+      out.push({ ...base, id: idBase, category: 'KDDI', amount: paid })
+      continue
+    }
+
+    const u = unitOf.get(key)
+    // 賃料＋共益費を払いきった残りを、契約の駐輪駐車欄の額まで駐車・駐輪に回す
+    const pk = parkingYen(u?.parking)
+    const afterRent = Math.max(0, paid - (n(u?.rent) + n(u?.kyoeki)))
+    const parkingPart = splitParkingFrom(rec.year, rec.month) ? Math.min(afterRent, pk) : 0
+
+    out.push({ ...base, id: idBase, category: CAT_RENT, amount: paid - parkingPart })
+    if (parkingPart > 0) {
+      out.push({ ...base, id: `${idBase}-pk`, category: CAT_PARKING, amount: parkingPart })
+    }
+  }
+  return out
 }
+
+/**
+ * 駐車・駐輪を分けて計上する対象の月か。2025年度（2024年9月）以降だけ分ける。
+ * それ以前の収支表は既に確定して見慣れた数字になっているので、行の内訳を動かさない。
+ * 対象を広げるならこの境目を変える（収入合計は変わらず、行の内訳だけが移る）。
+ */
+const PARKING_SPLIT_FROM = 2024 * 12 + (9 - 1) // 2024年9月
+const splitParkingFrom = (year: number, month: number) =>
+  year * 12 + (month - 1) >= PARKING_SPLIT_FROM
 
 /**
  * 賃料・共益費が既に記帳されている「号室×帰属月」の集合を作る。
