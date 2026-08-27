@@ -11,6 +11,14 @@ function unwrap<T>(data: T | null, error: { message: string } | null): T {
 
 // Supabase/PostgREST は 1回のクエリで最大1000行しか返さない。
 // 全件が必要な取得は 1000行ずつ range で辿って全ページ結合する。
+//
+// 【重要】makeQuery には必ず「一意に定まる並び順」を付けること。
+// Postgres は ORDER BY の無い（または同順位のある）取得で行の順序を保証しない。
+// 順序が揺れるとページの境目で行が重複したり抜け落ちたりする。しかも UPDATE した行は
+// 物理位置が変わるので、1行直すたびに抜ける行が入れ替わる。
+// 実際 payment_records（6,783行・堂島だけで2,745行）で、判定を1つ変えると無関係な
+// 号室の請求額・判定まで一斉に変わる不具合になっていた（記録が抜けた行が自動計算に
+// フォールバックするため）。同順位が出ないよう主キーまで並び順に含める。
 const PAGE = 1000
 async function fetchAllPages<T>(
   makeQuery: () => { range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }> },
@@ -149,7 +157,13 @@ export const transactionsRepo = {
   async list(filter: TxFilter = {}): Promise<Transaction[]> {
     return fetchAllPages<Transaction>(() => {
       // 論理削除(deleted_at)済みは除外
-      let q = supabase.from('transactions').select('*').is('deleted_at', null).order('date', { ascending: false })
+      // 同じ日付の記帳が多数あるので、id まで並べてページングの順序を確定させる
+      let q = supabase
+        .from('transactions')
+        .select('*')
+        .is('deleted_at', null)
+        .order('date', { ascending: false })
+        .order('id')
       if (filter.propertyId) q = q.eq('property_id', filter.propertyId)
       if (filter.from) q = q.gte('date', filter.from)
       if (filter.to) q = q.lte('date', filter.to)
@@ -237,7 +251,14 @@ export const paymentRecordsRepo = {
   /** 物件の月次記録を取得（propertyId=null は全件） */
   async list(propertyId: string | null): Promise<PaymentRecord[]> {
     return fetchAllPages<PaymentRecord>(() => {
-      let q = supabase.from('payment_records').select('*')
+      // 主キー（property_id, room, year, month）順に並べてページングの順序を確定させる
+      let q = supabase
+        .from('payment_records')
+        .select('*')
+        .order('property_id')
+        .order('room')
+        .order('year')
+        .order('month')
       if (propertyId) q = q.eq('property_id', propertyId)
       return q
     })
