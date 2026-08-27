@@ -164,6 +164,8 @@ export interface WaterPatch {
  *
  * 入金額は「固定分をきちんと払っている月」だけ水道代を足す。
  * 未入金・一部入金の月に足すと、受け取っていないお金を受け取ったことにしてしまうため。
+ * 通帳取込で既に水道代ぶんまで入っている月（入金額が請求額＋水道代に届いている月）も
+ * 触らない。ここを見ないと、記帳から入った水道代の上にもう一度足して二重になる。
  */
 export function waterPatch(
   unit: Unit,
@@ -174,10 +176,11 @@ export function waterPatch(
   const fixed = fixedAmount(unit)
   const baseBilled = rec?.billed != null ? n(rec.billed) - prev : fixed
   const basePaid = rec?.paid != null ? n(rec.paid) - prev : 0
-  const raise = basePaid > 0 && basePaid >= baseBilled
+  const goal = baseBilled + water
+  const raise = basePaid > 0 && basePaid >= baseBilled && basePaid < goal
   return {
-    billed: baseBilled + water,
-    paid: raise ? basePaid + water : basePaid,
+    billed: goal,
+    paid: raise ? goal : basePaid,
     memo: writeWaterTag(rec?.memo, water),
     paidRaised: raise,
   }

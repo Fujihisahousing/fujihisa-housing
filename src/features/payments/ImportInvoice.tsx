@@ -35,8 +35,9 @@ export function ImportInvoice({
   const [units, setUnits] = useState<Unit[]>([])
   const [lines, setLines] = useState<Line[]>([])
   const [pay, setPay] = useState<{ year: number; month: number } | null>(null)
-  // 入金日の何か月あとの請求額に足すか。既定は指定どおり2か月あと（7月末入金→9月分）
-  const [offset, setOffset] = useState(2)
+  // 入金日の何か月あとの請求額に足すか。既定は翌月（7月末入金→8月分）。
+  // 通帳では2026年7月分の水道代が8月上旬に入金されており、前家賃と同じ寄せ方になる。
+  const [offset, setOffset] = useState(1)
   const [fileName, setFileName] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -202,8 +203,8 @@ export function ImportInvoice({
                 className="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
                 title="請求書の入金日から何か月あとの請求額に足すか"
               >
-                <option value={2}>入金日の2か月あと（7月末→9月分）</option>
                 <option value={1}>入金日の翌月（7月末→8月分）</option>
+                <option value={2}>入金日の2か月あと（7月末→9月分）</option>
                 <option value={0}>入金日と同じ月（7月末→7月分）</option>
               </select>
             </div>
