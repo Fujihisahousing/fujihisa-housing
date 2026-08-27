@@ -721,6 +721,48 @@ function ArrearsRow({
   )
 }
 
+/** 全角数字を半角にする。入金額を全角で打たれても拾えるように */
+const toHalfWidth = (s: string) =>
+  s.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+
+/**
+ * 入金額の入力欄。ふだんは ¥1,234,567 と￥・カンマ付きで見せ、フォーカス中だけ
+ * 数字だけの素の値に戻して打ちやすくする。保存時は数字だけを取り出して渡す。
+ * type="number" のままだと￥もカンマも入力値として認められないので type="text" にし、
+ * スマホで数字キーパッドが出るよう inputMode="numeric" を付けている。
+ */
+function PaidInput({ value, onSave }: { value: number | null; onSave: (v: string) => void }) {
+  const raw = value != null ? String(value) : ''
+  const [text, setText] = useState(raw === '' ? '' : yen(value))
+  const [editing, setEditing] = useState(false)
+  // 保存後の再読み込みで値が変わったら表示も追従させる（編集中は書き換えない）
+  useEffect(() => {
+    if (!editing) setText(raw === '' ? '' : yen(value))
+  }, [raw, value, editing])
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={text}
+      placeholder="¥0"
+      title="入金額を入力（0円で未入金・満額で入金済に自動判定）"
+      onFocus={() => {
+        setEditing(true)
+        setText(raw)
+      }}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={(e) => {
+        setEditing(false)
+        // ￥・カンマ・空白を落として数字だけにする
+        const digits = toHalfWidth(e.target.value).replace(/[^0-9]/g, '')
+        setText(digits === '' ? '' : yen(Number(digits)))
+        if (digits !== raw) onSave(digits)
+      }}
+      className="w-28 rounded border border-transparent bg-transparent px-2 py-1 text-right tabular-nums hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+    />
+  )
+}
+
 export function PayRow({
   d,
   onMemo,
@@ -748,18 +790,7 @@ export function PayRow({
         {vacant ? (
           <span className="text-slate-400">—</span>
         ) : (
-          <input
-            type="number"
-            defaultValue={d.paid != null ? String(d.paid) : ''}
-            onBlur={(e) => {
-              const v = e.target.value.trim()
-              const cur = d.paid != null ? String(d.paid) : ''
-              if (v !== cur) onPaid(d, v)
-            }}
-            placeholder="0"
-            title="入金額を入力（0円で未入金・満額で入金済に自動判定）"
-            className="w-24 rounded border border-transparent bg-transparent px-2 py-1 text-right tabular-nums hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
-          />
+          <PaidInput value={d.paid} onSave={(v) => onPaid(d, v)} />
         )}
       </td>
       <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{d.paidDate ? formatDate(d.paidDate) : '—'}</td>
