@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Loader2, FileSpreadsheet, Upload, ListChecks } from 'lucide-react'
 import { ImportCsv } from './ImportCsv'
+import { ImportInvoice } from './ImportInvoice'
 import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo, arrearsNotesRepo, moveEventsRepo } from '../../lib/repositories'
 import { calcPaymentStatus, calcArrearsList, deriveJudgement, tenantViewFor, moveOutYmByUnit, type ArrearsUnitRow } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
@@ -67,6 +68,8 @@ export function PaymentStatus({
   const [arrearsNotes, setArrearsNotes] = useState<ArrearsNote[]>([])
   const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
+  // 水道代の請求書（検針表Excel）からの取込
+  const [invoiceOpen, setInvoiceOpen] = useState(false)
   const [mode, setMode] = useState<'monthly' | 'arrears'>('monthly')
 
   // 表示上限＝翌月（前家賃の記入分まで）。それ以降の未来月は選べない。月が進めば自動で解放。
@@ -439,6 +442,14 @@ export function PaymentStatus({
         >
           <Upload className="w-4 h-4" /> 通帳から取込（入力タブ）
         </button>
+        {/* 水道代は2か月に1回・変動額なので、こちらで作った請求書（検針表）から取り込む */}
+        <button
+          onClick={() => setInvoiceOpen(true)}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+          title="水道代の検針表Excelを読み、対象月の請求額に足します"
+        >
+          <FileSpreadsheet className="w-4 h-4" /> 請求書から取込
+        </button>
         <button
           onClick={() => setMode((m) => (m === 'arrears' ? 'monthly' : 'arrears'))}
           className={
@@ -458,6 +469,15 @@ export function PaymentStatus({
           <FileSpreadsheet className="w-4 h-4" /> Excel出力
         </button>
       </div>
+
+      {invoiceOpen && (
+        <ImportInvoice
+          properties={properties}
+          defaultPropertyId={activeProperty}
+          onClose={() => setInvoiceOpen(false)}
+          onDone={() => void load()}
+        />
+      )}
 
       {importing && (
         <ImportCsv

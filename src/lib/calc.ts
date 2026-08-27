@@ -1,5 +1,5 @@
 // 集計ロジック（レントロール・利回り・収支表・入金状況）。UI から分離（SOW 設計方針）。
-import { CAT_RENT, CAT_KYOEKI, CAT_PARKING } from '../types'
+import { CAT_RENT, CAT_KYOEKI, CAT_PARKING, CAT_UTILITY } from '../types'
 import type { MoveEvent, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
@@ -538,12 +538,13 @@ const finishRow = (r: StatementRow): StatementRow => ({
  * そこで booked（既に賃料が記帳されている 号室×月）に当たる記録は足さない。
  * 記帳のほうを優先するのは、収支表が入金日ベース（現金主義）だから。
  *
- * 受取額のうち駐車場代・駐輪代にあたる分は「駐車・駐輪」として分けて出す。
- * 以前は受取額をまるごと賃料にしていたため、駐車場代・駐輪代が収支表の
- * 「家賃+共益費」行に混ざり、「駐車・駐輪」行はいつも0円だった。
- * 充当の順番は 賃料→共益費→駐車・駐輪 で、まとめ入金の按分（allocateDeposit）と揃えている。
- * ＝賃料と共益費を払いきった残りが、契約の駐輪駐車欄（units.parking）の額まで駐車・駐輪。
- * それを超える分は従来どおり賃料に残す（光熱費まで分けると収支表の見え方が変わりすぎるため）。
+ * 受取額は 賃料→共益費→駐車・駐輪→光熱費 の順に振り分けて出す。まとめ入金の按分
+ * （allocateDeposit）と同じ順番。以前は受取額をまるごと賃料にしていたため、駐車場代・
+ * 駐輪代が収支表の「家賃+共益費」行に混ざり、「駐車・駐輪」行はいつも0円だった。
+ *   賃料＋共益費を払いきった残り … 契約の駐輪駐車欄（units.parking）の額まで「駐車・駐輪」
+ *   それも超えた残り             … 「光熱費」（入居者負担の水道代など）
+ * ルネスプランドール守口のように水道代を上乗せして請求する物件があり、その分が
+ * 家賃側に乗ったままだと収支表の家賃が実態より膨らむ。
  */
 export function paymentRecordsToTransactions(
   records: PaymentRecord[],
@@ -578,14 +579,20 @@ export function paymentRecordsToTransactions(
     }
 
     const u = unitOf.get(key)
+    const split = splitParkingFrom(rec.year, rec.month)
     // 賃料＋共益費を払いきった残りを、契約の駐輪駐車欄の額まで駐車・駐輪に回す
     const pk = parkingYen(u?.parking)
     const afterRent = Math.max(0, paid - (n(u?.rent) + n(u?.kyoeki)))
-    const parkingPart = splitParkingFrom(rec.year, rec.month) ? Math.min(afterRent, pk) : 0
+    const parkingPart = split ? Math.min(afterRent, pk) : 0
+    // それも超えた残りは光熱費（水道代など入居者負担分）
+    const utilityPart = split ? Math.max(0, afterRent - parkingPart) : 0
 
-    out.push({ ...base, id: idBase, category: CAT_RENT, amount: paid - parkingPart })
+    out.push({ ...base, id: idBase, category: CAT_RENT, amount: paid - parkingPart - utilityPart })
     if (parkingPart > 0) {
       out.push({ ...base, id: `${idBase}-pk`, category: CAT_PARKING, amount: parkingPart })
+    }
+    if (utilityPart > 0) {
+      out.push({ ...base, id: `${idBase}-ut`, category: CAT_UTILITY, amount: utilityPart })
     }
   }
   return out
