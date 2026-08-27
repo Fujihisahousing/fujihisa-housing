@@ -8,7 +8,7 @@ import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rent
 import { calcPaymentStatus, calcArrearsList, deriveJudgement, tenantViewFor, moveOutYmByUnit, type ArrearsUnitRow } from '../../lib/calc'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
-import { yen, percent, formatDate, today } from '../../lib/format'
+import { yen, percent, today } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { PAYMENT_JUDGEMENTS } from '../../types'
 import type { ArrearsNote, MoveEvent, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
@@ -361,6 +361,22 @@ export function PaymentStatus({
     [baseRecord, load],
   )
 
+  // 入金日の手入力：記帳が無い月や、実際の入金日が記帳と違う月に手で入れられるようにする。
+  // 触るのは入金日だけで、請求額・入金額・判定は動かさない。
+  const savePaidDate = useCallback(
+    async (row: DisplayRow, value: string) => {
+      const rec = baseRecord(row)
+      rec.paid_on = value.trim() || null
+      try {
+        await paymentRecordsRepo.upsert(rec)
+        await load()
+      } catch (e) {
+        alert('入金日の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
+      }
+    },
+    [baseRecord, load],
+  )
+
   // 滞納月数の手入力：空欄にすると自動計算に戻す
   const saveArrears = useCallback(
     async (row: DisplayRow, value: string) => {
@@ -393,7 +409,8 @@ export function PaymentStatus({
         ...baseRecord(row), // 手入力済みの滞納月数などを引き継ぐ
         billed,
         paid,
-        paid_on: paid > 0 ? today() : null,
+        // 既に入金日が入っていればそれを残す（手で入れた日付を本日で潰さない）
+        paid_on: paid > 0 ? row.paidDate ?? today() : null,
         judgement,
       }
       try {
@@ -573,6 +590,7 @@ export function PaymentStatus({
                           d={d}
                           onMemo={saveMemo}
                           onPaid={savePaid}
+                          onPaidDate={savePaidDate}
                           onJudgement={saveJudgement}
                           onArrears={saveArrears}
                         />
@@ -584,6 +602,7 @@ export function PaymentStatus({
                           d={d}
                           onMemo={saveMemo}
                           onPaid={savePaid}
+                          onPaidDate={savePaidDate}
                           onJudgement={saveJudgement}
                           onArrears={saveArrears}
                         />)}
@@ -787,12 +806,14 @@ export function PayRow({
   d,
   onMemo,
   onPaid,
+  onPaidDate,
   onJudgement,
   onArrears,
 }: {
   d: DisplayRow
   onMemo: (d: DisplayRow, memo: string) => void
   onPaid: (d: DisplayRow, paid: string) => void
+  onPaidDate: (d: DisplayRow, date: string) => void
   onJudgement: (d: DisplayRow, judgement: string) => void
   onArrears: (d: DisplayRow, months: string) => void
 }) {
@@ -813,7 +834,23 @@ export function PayRow({
           <PaidInput value={d.paid} onSave={(v) => onPaid(d, v)} />
         )}
       </td>
-      <td className="px-3 py-2 text-slate-500 whitespace-nowrap">{d.paidDate ? formatDate(d.paidDate) : '—'}</td>
+      <td className="px-2 py-1 whitespace-nowrap">
+        {vacant ? (
+          <span className="px-1 text-slate-400">—</span>
+        ) : (
+          <input
+            type="date"
+            defaultValue={d.paidDate ? String(d.paidDate).slice(0, 10) : ''}
+            onChange={(e) => {
+              const v = e.target.value
+              // 日付が途中の状態では保存しない。空欄はクリアとして受ける
+              if (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) onPaidDate(d, v)
+            }}
+            title="入金日を入力（空欄にすると消えます）"
+            className="w-36 rounded border border-transparent bg-transparent px-2 py-1 text-slate-600 hover:border-slate-300 focus:border-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-900"
+          />
+        )}
+      </td>
       <td className="px-3 py-2 text-right tabular-nums">
         {vacant || shortfall <= 0 ? <span className="text-slate-400">—</span> : <span className="text-rose-700">{yen(shortfall)}</span>}
       </td>
