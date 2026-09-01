@@ -147,6 +147,15 @@
   white-space: nowrap;
 }
 
+/* 戸数の多い物件でレントロールの行を追いやすくするための階ごとの帯。
+   1階おきに薄い色を敷いて濃淡を切り替える（Prospectus.tsx が .pr-floor-band を付ける）。
+   背景色は既定だと印刷で落ちるので print-color-adjust: exact を付けておくこと。 */
+.pr-rentroll tbody tr.pr-floor-band > td {
+  background: #eef2f7;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
 /* 収入サマリーは概要書でいちばん見たい数字なので、レントロール本体の倍ほどの大きさで出す */
 .pr-sheet .pr-summary {
   font-size: 9pt;

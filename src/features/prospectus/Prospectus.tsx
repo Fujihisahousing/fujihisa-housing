@@ -34,9 +34,9 @@ import {
   fiscalYearOf, fiscalYearRange, FISCAL_MONTHS, FISCAL_PREV_YEAR_COLS,
   type OpexActual, type RepairByYear, type IncomeStatementResult, type StatementRow,
 } from '../../lib/calc'
-import { unitCompare } from '../../lib/sortUnits'
+import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { fitSheets } from '../../reports/fitToPage'
-import { yen, percent, formatDate, num } from '../../lib/format'
+import { yen, percent, formatDate, num, areaM2 } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import type {
   Property, Unit, Transaction, PaymentRecord,
@@ -794,6 +794,14 @@ export function RentRollTable({
   const moneyOf = (u: Unit) => ({ rent: n(u.rent), kyoeki: n(u.kyoeki), park: parkingYen(u.parking) })
   const sum = (f: (u: Unit) => number) => units.reduce((s, u) => s + f(u), 0)
 
+  // 戸数が多いと行を目で追えなくなるので、階が変わるごとに薄い帯を敷いて濃淡を切り替える。
+  // 帯の色は prospectus.css の .pr-floor-band。階の区切りは画面レントロールと同じ isGroupBreak。
+  let band = 0
+  const bandOf = units.map((u, i) => {
+    if (i > 0 && isGroupBreak(units[i - 1], u)) band = band === 0 ? 1 : 0
+    return band
+  })
+
   // report-block（break-inside: avoid）は付けない。1枚に収まらない長さになると
   // ブロックごと次ページへ送られて前のページに大きな空白が残るため。
   // 行が割れないことと見出しの繰り返しは prospectus.css 側で担保している。
@@ -828,14 +836,14 @@ export function RentRollTable({
             </tr>
           </thead>
           <tbody>
-            {units.map((u) => {
+            {units.map((u, i) => {
               const m = moneyOf(u)
               return (
-                <tr key={u.id} className="border-b border-slate-100">
+                <tr key={u.id} className={'border-b border-slate-100' + (bandOf[i] === 1 ? ' pr-floor-band' : '')}>
                   <td className="py-1 pr-2 font-medium whitespace-nowrap">{u.room}</td>
                   <td className="py-1 pr-2 whitespace-nowrap">{u.use_type ?? ''}</td>
                   <td className="py-1 pr-2 whitespace-nowrap">{u.layout ?? ''}</td>
-                  <td className="py-1 pr-2 text-right tabular-nums">{u.area != null ? num(u.area) : ''}</td>
+                  <td className="py-1 pr-2 text-right tabular-nums">{u.area != null ? areaM2(u.area) : ''}</td>
                   <td className="py-1 pr-2 text-center whitespace-nowrap">
                     {u.tenant_type ? `（${u.tenant_type}）` : ''}
                   </td>

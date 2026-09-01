@@ -42,6 +42,14 @@ export function num(value: number | null | undefined): string {
   return n.toLocaleString('ja-JP')
 }
 
+/** 専有面積の表記。小数第2位で固定する（49.5 -> "49.50"）。
+ *  レントロール（画面・物件概要書）で桁が揃わないと見比べにくいため、全物件共通でここを通す。 */
+export function areaM2(value: number | null | undefined): string {
+  const n = Number(value ?? 0)
+  if (!Number.isFinite(n)) return ''
+  return n.toFixed(2)
+}
+
 /** 西暦の日付表記。例: "2026-06-24" -> "2026/06/24" */
 export function formatDate(value: string | Date | null | undefined): string {
   if (!value) return ''

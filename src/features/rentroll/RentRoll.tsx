@@ -6,7 +6,7 @@ import { calcRentRoll, isDisposedForRentRoll } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
 import { applyDueMoveIns } from '../properties/MoveEvents'
-import { yen, percent, formatDate, maxRoomDigits, padRoom } from '../../lib/format'
+import { yen, percent, formatDate, maxRoomDigits, padRoom, areaM2 } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { UNIT_STATUSES, type MoveEvent, type Property, type Unit } from '../../types'
 
@@ -361,7 +361,7 @@ function UnitRow({
     >
       <Td className="font-medium tabular-nums">{padRoom(u.room, roomDigits)}</Td>
       <Td>{u.layout || '—'}</Td>
-      <Td className="text-right" narrow>{u.area ? `${Number(u.area).toFixed(2)}㎡` : '—'}</Td>
+      <Td className="text-right" narrow>{u.area ? `${areaM2(u.area)}㎡` : '—'}</Td>
       <Td>{u.use_type || '—'}</Td>
       <Td narrow>{u.tenant_type || '—'}</Td>
       <Td className="text-right tabular-nums">{money(u.rent)}</Td>
