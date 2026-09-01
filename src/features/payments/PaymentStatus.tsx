@@ -227,42 +227,49 @@ export function PaymentStatus({
         // 「中島聡」と「中島　聡」のように空白の有無だけが違う表記ゆれが多いため、
         // 比較は空白（半角・全角）を除いた文字列同士で行う。
         const kana = rec.kana || (sameTenant(rec.tenant, u.tenant) ? u.tenant_kana : null) || ''
+        // 判定が「空室」の月は誰も住んでいないので契約者を出さない（ユーザー指定）。
+        // 退去タブ（退去日）が無い昔の空室期間——退去タブを使い始める前の退去——でも
+        // 名前が残らないよう、退去日ではなく判定で切る。記録に入っている名前自体は消さない
+        // （表示だけ伏せる。当時の控えとして残しておきたいため）。
+        const hide = rec.judgement === '空室'
         return {
           unit: u,
-          tenant: rec.tenant ? rec.tenant + view.suffix : '',
+          tenant: hide || !rec.tenant ? '' : rec.tenant + view.suffix,
           tenantRaw: rec.tenant ?? '',
           vacant: false,
-          tenantType: rec.tenant_type ?? '',
-          kana,
+          tenantType: hide ? '' : rec.tenant_type ?? '',
+          kana: hide ? '' : kana,
           billed: rec.billed ?? null,
           calcBilled: row.billed,
           paid: rec.paid ?? null,
           paidDate: rec.paid_on ?? null,
           judgement: rec.judgement ?? '—',
-          guarantor: rec.guarantor ?? '',
+          guarantor: hide ? '' : rec.guarantor ?? '',
           memo: rec.memo ?? '',
           arrears: arrearsMonths,
           arrearsManual: arrearsIsManual,
           fromRecord: true,
         }
       }
-      // 退去（退去日が入っていて、部屋の状況も入居・退予でない）月の翌月以降は
-      // 契約者を出さない＝「—」表示にする。退去のときに部屋の契約者名を消し忘れていても、
-      // 入金状況にいつまでも前の入居者の名前が残らないようにするため（ユーザー指定）。
+      // 記録の無い月。契約者は部屋の現在値から出すが、次のどちらかなら出さない（「—」表示）。
+      //   ・部屋の状況が「空室」  … レントロールの状況だけ空室に変えて契約者名が残っている
+      //                            部屋でも、空室の月に前の入居者の名前を出さないため
+      //   ・退去日の翌月以降で今も空室 … 退去タブを使った部屋の退去後
       // 退去月そのものは、その月の家賃を払った人なので「◯◯（旧）」のまま残す。
+      const hideUnit = u.status === '空室' || view.vacant
       return {
         unit: u,
-        tenant: view.vacant ? '' : u.tenant ?? '',
-        tenantRaw: view.vacant ? '' : u.tenant ?? '',
+        tenant: hideUnit ? '' : u.tenant ?? '',
+        tenantRaw: hideUnit ? '' : u.tenant ?? '',
         vacant: view.vacant,
-        tenantType: view.vacant ? '' : u.tenant_type ?? '',
-        kana: view.vacant ? '' : u.tenant_kana ?? '',
+        tenantType: hideUnit ? '' : u.tenant_type ?? '',
+        kana: hideUnit ? '' : u.tenant_kana ?? '',
         billed: view.vacant ? 0 : row.billed,
         calcBilled: view.vacant ? 0 : row.billed,
         paid: view.useUnit && view.vacant ? null : row.paid,
         paidDate: view.useUnit && view.vacant ? null : row.paidDate,
         judgement: view.vacant ? '空室' : row.judgement,
-        guarantor: view.vacant ? '' : u.guarantor ?? '',
+        guarantor: hideUnit ? '' : u.guarantor ?? '',
         memo: notes[u.id] ?? '',
         arrears: arrearsMonths,
         arrearsManual: arrearsIsManual,
