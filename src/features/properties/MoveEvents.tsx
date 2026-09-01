@@ -486,17 +486,15 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
     )
   }
 
-  // 退去は退去日が入った時点で「済み」。一覧には予定だけを出し、済みは過去案件に落とす
-  const pending = useMemo(() => (isMoveIn ? rows : rows.filter((e) => !e.actual_date)), [rows, isMoveIn])
-  const past = useMemo(
-    () =>
-      isMoveIn
-        ? []
-        : rows
-            .filter((e) => e.actual_date)
-            .sort((a, b) => String(b.actual_date).localeCompare(String(a.actual_date))),
-    [rows, isMoveIn],
-  )
+  // 退去は退去日が入った時点で「済み」。一覧には予定だけを出し、済みは過去案件に落とす。
+  // ここは loading の早期リターンより後ろなので useMemo にしてはいけない
+  // （フックの数がレンダーごとに変わって画面が落ちる）。ただの絞り込みなので素で書く。
+  const pending = isMoveIn ? rows : rows.filter((e) => !e.actual_date)
+  const past = isMoveIn
+    ? []
+    : rows
+        .filter((e) => e.actual_date)
+        .sort((a, b) => String(b.actual_date).localeCompare(String(a.actual_date)))
 
   const renderRow = (e: MoveEvent) => {
             const u = unitById.get(e.unit_id)
