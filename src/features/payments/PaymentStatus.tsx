@@ -25,7 +25,12 @@ const judgeStyle = (j: string) => JUDGE_STYLE[j] ?? 'bg-slate-100 text-slate-600
 
 interface DisplayRow {
   unit: Unit
+  /** 画面に出す契約者名。退去月は「（旧）」付き */
   tenant: string
+  /** 保存に使う契約者名（「（旧）」の付かない素の名前） */
+  tenantRaw: string
+  /** 退去済みで今も空室の月。契約者名を出さず、保存しても名前を書き込まない */
+  vacant: boolean
   tenantType: string
   kana: string
   billed: number | null
@@ -225,6 +230,8 @@ export function PaymentStatus({
         return {
           unit: u,
           tenant: rec.tenant ? rec.tenant + view.suffix : '',
+          tenantRaw: rec.tenant ?? '',
+          vacant: false,
           tenantType: rec.tenant_type ?? '',
           kana,
           billed: rec.billed ?? null,
@@ -239,17 +246,23 @@ export function PaymentStatus({
           fromRecord: true,
         }
       }
+      // 退去（退去日が入っていて、部屋の状況も入居・退予でない）月の翌月以降は
+      // 契約者を出さない＝「—」表示にする。退去のときに部屋の契約者名を消し忘れていても、
+      // 入金状況にいつまでも前の入居者の名前が残らないようにするため（ユーザー指定）。
+      // 退去月そのものは、その月の家賃を払った人なので「◯◯（旧）」のまま残す。
       return {
         unit: u,
-        tenant: u.tenant ?? '',
-        tenantType: u.tenant_type ?? '',
-        kana: u.tenant_kana ?? '',
+        tenant: view.vacant ? '' : u.tenant ?? '',
+        tenantRaw: view.vacant ? '' : u.tenant ?? '',
+        vacant: view.vacant,
+        tenantType: view.vacant ? '' : u.tenant_type ?? '',
+        kana: view.vacant ? '' : u.tenant_kana ?? '',
         billed: view.vacant ? 0 : row.billed,
         calcBilled: view.vacant ? 0 : row.billed,
         paid: view.useUnit && view.vacant ? null : row.paid,
         paidDate: view.useUnit && view.vacant ? null : row.paidDate,
         judgement: view.vacant ? '空室' : row.judgement,
-        guarantor: u.guarantor ?? '',
+        guarantor: view.vacant ? '' : u.guarantor ?? '',
         memo: notes[u.id] ?? '',
         arrears: arrearsMonths,
         arrearsManual: arrearsIsManual,
@@ -321,14 +334,16 @@ export function PaymentStatus({
         room: u.room ?? '',
         year,
         month,
-        tenant: row.tenant || u.tenant || null,
-        tenant_type: row.tenantType || u.tenant_type || null,
-        kana: row.kana || u.tenant_kana || null,
+        // 空室月（退去済み）は名前を持たせない。部屋に前の入居者の名前が残っていても書き戻さない。
+        // 退去月は画面上「◯◯（旧）」と出しているので、保存には接尾辞の付かない tenantRaw を使う。
+        tenant: row.vacant ? null : row.tenantRaw || u.tenant || null,
+        tenant_type: row.vacant ? null : row.tenantType || u.tenant_type || null,
+        kana: row.vacant ? null : row.kana || u.tenant_kana || null,
         billed: row.billed != null ? Number(row.billed) : row.calcBilled,
         paid: row.paid != null ? Number(row.paid) : 0,
         paid_on: row.paidDate ?? null,
         judgement: row.judgement,
-        guarantor: row.guarantor || u.guarantor || null,
+        guarantor: row.vacant ? null : row.guarantor || u.guarantor || null,
         memo: row.memo || null,
         arrears_months: row.arrearsManual ? row.arrears : null,
       }
