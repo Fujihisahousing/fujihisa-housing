@@ -1,7 +1,7 @@
 // 収支表（画面）。行=項目 / 列=1〜12月＋合計。Excel出力は M4。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, FileSpreadsheet } from 'lucide-react'
-import { transactionsRepo, paymentRecordsRepo, unitsRepo } from '../../lib/repositories'
+import { transactionsRepo, paymentRecordsRepo, unitsRepo, rentHistoryRepo } from '../../lib/repositories'
 import {
   calcIncomeStatement,
   fiscalYearOf,
@@ -9,6 +9,7 @@ import {
   isStatementRowVisible,
   paymentRecordsToTransactions,
   bookedRentKeys,
+  rentHistoryMapOf,
   FISCAL_MONTHS,
   FISCAL_PREV_YEAR_COLS,
   type IncomeStatementResult,
@@ -17,7 +18,7 @@ import {
 import { exportIncomeStatementExcel } from '../../reports/exportExcel'
 import { yen } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
-import type { PaymentRecord, Transaction, Unit } from '../../types'
+import type { PaymentRecord, RentHistory, Transaction, Unit } from '../../types'
 
 // 収支表の年度プルダウンに常に出す最も古い会計年度（データの有無に関わらず選べるようにする）。
 // 年度は締める年で呼ぶので、2023年度＝2022-09〜2023-08 が最古。
@@ -29,6 +30,8 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
   const [txs, setTxs] = useState<Transaction[]>([])
   const [records, setRecords] = useState<PaymentRecord[]>([])
   const [units, setUnits] = useState<Unit[]>([])
+  // 賃料履歴。入金額を家賃／駐車・駐輪／光熱費に振り分けるとき、その月の賃料を知るのに要る
+  const [rentHistory, setRentHistory] = useState<RentHistory[]>([])
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
@@ -42,6 +45,7 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
       setTxs(t)
       setRecords(rec)
       setUnits(u)
+      setRentHistory(await rentHistoryRepo.listByUnitIds(u.map((x) => x.id)))
     } finally {
       setLoading(false)
     }
@@ -55,8 +59,11 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
   // 記帳している号室・月は、記帳のほうを採って二重計上を避ける。
   // 変換の中身は管理表と食い違わないよう calc.ts に共通化してある。
   const allTxs = useMemo(
-    () => [...txs, ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs))],
-    [txs, records, units],
+    () => [
+      ...txs,
+      ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs), rentHistoryMapOf(rentHistory)),
+    ],
+    [txs, records, units, rentHistory],
   )
 
   const r = useMemo(() => calcIncomeStatement(allTxs, year), [allTxs, year])

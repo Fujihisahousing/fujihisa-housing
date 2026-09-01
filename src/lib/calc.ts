@@ -546,10 +546,21 @@ const finishRow = (r: StatementRow): StatementRow => ({
  * ルネスプランドール守口のように水道代を上乗せして請求する物件があり、その分が
  * 家賃側に乗ったままだと収支表の家賃が実態より膨らむ。
  */
+/** 賃料履歴を unit_id ごとにまとめる。収支表・管理表・物件概要書で同じ形にして渡す */
+export function rentHistoryMapOf(list: RentHistory[]): Map<string, RentHistory[]> {
+  const m = new Map<string, RentHistory[]>()
+  for (const h of list) {
+    if (!m.has(h.unit_id)) m.set(h.unit_id, [])
+    m.get(h.unit_id)!.push(h)
+  }
+  return m
+}
+
 export function paymentRecordsToTransactions(
   records: PaymentRecord[],
   units: Unit[],
   booked: ReadonlySet<string> = new Set(),
+  rentHistoryByUnit?: Map<string, RentHistory[]>,
 ): Transaction[] {
   const kddiRooms = new Set<string>()
   for (const u of units) if (u.tenant === 'KDDI') kddiRooms.add(`${u.property_id}|${u.room}`)
@@ -582,7 +593,18 @@ export function paymentRecordsToTransactions(
     const split = splitParkingFrom(rec.year, rec.month)
     // 賃料＋共益費を払いきった残りを、契約の駐輪駐車欄の額まで駐車・駐輪に回す
     const pk = parkingYen(u?.parking)
-    const afterRent = Math.max(0, paid - (n(u?.rent) + n(u?.kyoeki)))
+    // 差し引く「賃料＋共益費」は、部屋の現在値と賃料履歴の当月額のうち高いほう。
+    //   ・値下げした部屋（守口703：70,000→68,000）に今の額を当てると、過去の月の差額が
+    //     光熱費に回ってしまう。当時の額のほうが高いので履歴を採る。
+    //   ・逆に値上げのときに履歴の安い額まで下げないのは、改定日より前から実際の入金が
+    //     新しい額で動いていることがあるため（堂島）。下げると差額が光熱費に流れる。
+    // 賃料履歴を渡さない呼び出しは従来どおり部屋の現在値だけを使う。
+    let rentBase = n(u?.rent) + n(u?.kyoeki)
+    if (u && rentHistoryByUnit) {
+      const eff = effectiveRentKyoeki(u, rentHistoryByUnit.get(u.id), rec.year, rec.month)
+      rentBase = Math.max(rentBase, n(eff.rent) + n(eff.kyoeki))
+    }
+    const afterRent = Math.max(0, paid - rentBase)
     const parkingPart = split ? Math.min(afterRent, pk) : 0
     // それも超えた残りは光熱費（水道代など入居者負担分）
     const utilityPart = split ? Math.max(0, afterRent - parkingPart) : 0

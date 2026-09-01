@@ -12,7 +12,7 @@
 // 日割りは手入力。実日数・30日それぞれの目安は出すが、仲介会社によって計算が違うので
 // 自動では入れない（契約書の額をそのまま入れてもらう）。
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react'
-import { Loader2, Plus, Trash2, LogIn, LogOut } from 'lucide-react'
+import { Loader2, Plus, Pencil, Trash2, LogIn, LogOut } from 'lucide-react'
 import { useAuth } from '../../auth/AuthProvider'
 import {
   moveEventsRepo, moveOutLedgerRepo, paymentRecordsRepo, unitsRepo, rentHistoryRepo,
@@ -251,6 +251,42 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
     setForm({ kind })
   }
 
+  /** 登録済みの記録を開き直す。退去は「予告だけ先に登録して、実際の退去日は後で入れる」
+   *  運用なので、一覧から編集できないと退去日を入れる手立てが無かった（ユーザー指摘）。
+   *  号室を選び直したときに契約者名で戻されないよう tenant だけ手入力扱いにしておく。
+   *  最終請求月はあえて手入力扱いにしない——退去日を入れたらその月に付いてくるのが既定のため。 */
+  function startEdit(e: MoveEvent) {
+    setError(null)
+    const u = unitById.get(e.unit_id)
+    const l = ledgerOf.get(e.id)
+    // 入居は「入れる予定の契約内容」を unit_patch に持っているので、そこから戻す。
+    // 退去には unit_patch が無いので、部屋の今の値がそのまま入る。
+    const patch = (e.unit_patch ?? {}) as Partial<Unit>
+    const pick = <T,>(a: T | null | undefined, b: T | null | undefined) => (a ?? b ?? null)
+    setForm({
+      ...e,
+      property_id: u?.property_id ?? null,
+      tenant: pick(e.tenant, patch.tenant ?? u?.tenant),
+      tenant_kana: pick(e.tenant_kana, patch.tenant_kana ?? u?.tenant_kana),
+      tenant_type: pick(patch.tenant_type, u?.tenant_type),
+      guarantor: pick(patch.guarantor, u?.guarantor),
+      payment_method: pick(patch.payment_method, u?.payment_method),
+      use_type: pick(patch.use_type, u?.use_type),
+      contract_start: pick(patch.contract_start, u?.contract_start),
+      parking: pick(patch.parking, u?.parking),
+      rent: pick(patch.rent, u?.rent),
+      kyoeki: pick(patch.kyoeki, u?.kyoeki),
+      deposit: pick(patch.deposit, u?.deposit),
+      hoshokin: pick(patch.hoshokin, u?.hoshokin),
+      key_money: pick(patch.key_money, u?.key_money),
+      kaiyakubiki: pick(patch.kaiyakubiki, u?.kaiyakubiki),
+      refund: pick(patch.refund, u?.refund),
+      contact: l?.contact ?? '',
+      forwarding_address: l?.forwarding_address ?? '',
+      touched: { tenant: true },
+    })
+  }
+
   /** 号室を選んだら、その部屋の今の条件をフォームに引いてくる。
    *  募集条件（賃料・共益費・敷金など）は部屋に入っているので、
    *  入居のたびに一から打ち直さなくて済む。契約者欄は空のままにする。
@@ -450,49 +486,19 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
     )
   }
 
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold text-slate-600">
-          {isMoveIn ? '入居' : '退去'}（{rows.length}）
-        </span>
-        {/* この画面の主役の操作なので、上のタブや「物件を追加」と同じ大きさで出す */}
-        <button
-          onClick={startNew}
-          className="flex items-center gap-1.5 rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-medium hover:bg-slate-800"
-        >
-          <Plus className="w-4 h-4" /> {isMoveIn ? '入居を登録' : '退去を登録'}
-        </button>
-      </div>
+  // 退去は退去日が入った時点で「済み」。一覧には予定だけを出し、済みは過去案件に落とす
+  const pending = useMemo(() => (isMoveIn ? rows : rows.filter((e) => !e.actual_date)), [rows, isMoveIn])
+  const past = useMemo(
+    () =>
+      isMoveIn
+        ? []
+        : rows
+            .filter((e) => e.actual_date)
+            .sort((a, b) => String(b.actual_date).localeCompare(String(a.actual_date))),
+    [rows, isMoveIn],
+  )
 
-      {form && (
-        <MoveForm
-          kind={kind}
-          form={form}
-          setForm={setForm}
-          units={sortedUnits}
-          properties={properties}
-          onUnitChange={onUnitChange}
-          onDateChange={onDateChange}
-          onScheduledChange={onScheduledChange}
-          isAdmin={isAdmin}
-          monthlyOf={monthlyOf}
-          saving={saving}
-          error={error}
-          onCancel={() => setForm(null)}
-          onSave={() => void save()}
-        />
-      )}
-
-      {rows.length === 0 ? (
-        <p className="text-center text-slate-400 text-xs py-6">
-          {isMoveIn
-            ? '入居の記録はありません。入居日と日割り家賃を登録すると、その月の請求額に反映されます。'
-            : '退去の記録はありません。退去予告を受けた時点で登録してください。'}
-        </p>
-      ) : (
-        <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
-          {rows.map((e) => {
+  const renderRow = (e: MoveEvent) => {
             const u = unitById.get(e.unit_id)
             return (
               <div key={e.id} className="flex items-start gap-3 px-3 py-2 text-xs">
@@ -537,13 +543,78 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
                   )}
                   {e.memo && <div className="text-slate-400">{e.memo}</div>}
                 </div>
+                {/* 登録した後で実際の退去日や最終請求月を入れ直せるように、削除の隣に編集を置く */}
+                <button
+                  onClick={() => startEdit(e)}
+                  className="text-slate-400 hover:text-slate-700"
+                  title={isMoveIn ? '入居の記録を編集' : '退去の記録を編集'}
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
                 <button onClick={() => void remove(e.id)} className="text-slate-400 hover:text-rose-600">
                   <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             )
-          })}
+          }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-slate-600">
+          {isMoveIn ? '入居' : '退去'}（{pending.length}）
+        </span>
+        {/* この画面の主役の操作なので、上のタブや「物件を追加」と同じ大きさで出す */}
+        <button
+          onClick={startNew}
+          className="flex items-center gap-1.5 rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-medium hover:bg-slate-800"
+        >
+          <Plus className="w-4 h-4" /> {isMoveIn ? '入居を登録' : '退去を登録'}
+        </button>
+      </div>
+
+      {form && (
+        <MoveForm
+          kind={kind}
+          form={form}
+          setForm={setForm}
+          units={sortedUnits}
+          properties={properties}
+          onUnitChange={onUnitChange}
+          onDateChange={onDateChange}
+          onScheduledChange={onScheduledChange}
+          isAdmin={isAdmin}
+          monthlyOf={monthlyOf}
+          saving={saving}
+          error={error}
+          onCancel={() => setForm(null)}
+          onSave={() => void save()}
+        />
+      )}
+
+      {/* 退去は「これから退去する予定」を上に出し、退去日が入った済みの案件は
+          下の「過去案件」に落とす。予定だけを見たいのに済んだ分で埋まるのを防ぐため。 */}
+      {pending.length === 0 ? (
+        <p className="text-center text-slate-400 text-xs py-6">
+          {isMoveIn
+            ? '入居の記録はありません。入居日と日割り家賃を登録すると、その月の請求額に反映されます。'
+            : '予定の退去はありません。退去予告を受けた時点で登録してください。'}
+        </p>
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+          {pending.map(renderRow)}
         </div>
+      )}
+
+      {past.length > 0 && (
+        <details className="rounded-lg border border-slate-200 bg-slate-50/60">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-500">
+            過去案件（退去日入力済み・{past.length}件）
+          </summary>
+          <div className="bg-white divide-y divide-slate-100 border-t border-slate-200">
+            {past.map(renderRow)}
+          </div>
+        </details>
       )}
     </div>
   )
@@ -613,6 +684,16 @@ function MoveForm({
 
   return (
     <div className="rounded-xl border border-slate-300 bg-white p-4 space-y-3">
+      {/* 一覧から開いたときに、新規なのか登録済みの修正なのかが分かるようにしておく */}
+      <div className="text-xs font-semibold text-slate-500">
+        {form.id
+          ? isMoveIn
+            ? '入居の記録を編集'
+            : '退去の記録を編集'
+          : isMoveIn
+            ? '入居を登録'
+            : '退去を登録'}
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="マンション名">
           <Select

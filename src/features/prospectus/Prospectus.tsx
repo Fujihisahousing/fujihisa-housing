@@ -24,13 +24,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Printer, Loader2, FileText } from 'lucide-react'
 import {
-  unitsRepo, transactionsRepo, paymentRecordsRepo,
+  unitsRepo, transactionsRepo, paymentRecordsRepo, rentHistoryRepo,
   propertyDocumentsRepo, propertyInspectionsRepo, propertyOpexRepo, propertyRepairsRepo,
 } from '../../lib/repositories'
 import {
   calcRentRoll, buildingAgeYears, parkingYen,
   calcOpexActual, calcRepairByFiscalYear, calcIncomeStatement,
-  paymentRecordsToTransactions, bookedRentKeys,
+  paymentRecordsToTransactions, bookedRentKeys, rentHistoryMapOf,
   fiscalYearOf, fiscalYearRange, FISCAL_MONTHS, FISCAL_PREV_YEAR_COLS,
   type OpexActual, type RepairByYear, type IncomeStatementResult, type StatementRow,
 } from '../../lib/calc'
@@ -40,7 +40,7 @@ import { fitSheets } from '../../reports/fitToPage'
 import { yen, percent, formatDate, num, areaM2 } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import type {
-  Property, Unit, Transaction, PaymentRecord,
+  Property, Unit, Transaction, PaymentRecord, RentHistory,
   PropertyDocument, PropertyInspection, PropertyOpex, PropertyRepair,
 } from '../../types'
 import { OpexTab, RepairsTab, InspectionsTab, DocumentsTab } from './ProspectusTables'
@@ -80,6 +80,8 @@ export function Prospectus({ properties }: { properties: Property[] }) {
   const [repairs, setRepairs] = useState<PropertyRepair[]>([])
   const [inspections, setInspections] = useState<PropertyInspection[]>([])
   const [docs, setDocs] = useState<PropertyDocument[]>([])
+  // 賃料履歴。入金額を家賃／駐車・駐輪／光熱費に振り分けるとき、その月の賃料を知るのに要る
+  const [rentHistory, setRentHistory] = useState<RentHistory[]>([])
 
   const selectedId = activeProperty ?? ''
   const property = useMemo(
@@ -89,7 +91,7 @@ export function Prospectus({ properties }: { properties: Property[] }) {
 
   const load = useCallback(async () => {
     if (!selectedId) {
-      setUnits([]); setTxs([]); setRecords([]); setOpex([]); setRepairs([]); setInspections([]); setDocs([])
+      setUnits([]); setTxs([]); setRecords([]); setOpex([]); setRepairs([]); setInspections([]); setDocs([]); setRentHistory([])
       return
     }
     setLoading(true)
@@ -108,6 +110,7 @@ export function Prospectus({ properties }: { properties: Property[] }) {
       setTxs(t)
       setRecords(rec)
       setOpex(o)
+      setRentHistory(await rentHistoryRepo.listByUnitIds(u.map((x) => x.id)))
       // 新しい修繕を上に。日付未入力は末尾へ落とす
       setRepairs([...r].sort((a, b) => String(b.repaired_on ?? '').localeCompare(String(a.repaired_on ?? ''))))
       setInspections(i)
@@ -188,8 +191,11 @@ export function Prospectus({ properties }: { properties: Property[] }) {
   // 年間収支表。入金状況の月次記録を家賃収入として合算する（同じ家賃を台帳にも
   // 記帳している号室・月は記帳のほうを採る）。変換は収支表・管理表と共通の calc.ts 側。
   const allTxs = useMemo(
-    () => [...txs, ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs))],
-    [txs, records, units],
+    () => [
+      ...txs,
+      ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs), rentHistoryMapOf(rentHistory)),
+    ],
+    [txs, records, units, rentHistory],
   )
   const stCur = useMemo(() => calcIncomeStatement(allTxs, thisFY), [allTxs, thisFY])
   const stPrev = useMemo(() => calcIncomeStatement(allTxs, lastFY), [allTxs, lastFY])

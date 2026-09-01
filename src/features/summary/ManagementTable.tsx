@@ -4,7 +4,7 @@
 // 既存の収支表（行=費目・1物件ぶん）とは別物なので、画面も別タブに分けている。
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Loader2, Printer } from 'lucide-react'
-import { transactionsRepo, paymentRecordsRepo, unitsRepo } from '../../lib/repositories'
+import { transactionsRepo, paymentRecordsRepo, unitsRepo, rentHistoryRepo } from '../../lib/repositories'
 import {
   calcManagementTable,
   fiscalYearOf,
@@ -12,6 +12,7 @@ import {
   fiscalYearRange,
   paymentRecordsToTransactions,
   bookedRentKeys,
+  rentHistoryMapOf,
   FISCAL_MONTHS,
   FISCAL_PREV_YEAR_COLS,
   MGMT_ROW_MEMBERS,
@@ -23,7 +24,7 @@ import {
 import { yen } from '../../lib/format'
 import '../../reports/print.css'
 import '../../reports/mgmtTable.css'
-import type { PaymentRecord, Property, Transaction, Unit } from '../../types'
+import type { PaymentRecord, Property, RentHistory, Transaction, Unit } from '../../types'
 
 // 収支表と同じ運用開始年度（データが無くても過去年度を開けるように）
 const FIRST_YEAR = 2023
@@ -33,6 +34,8 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
   const [txs, setTxs] = useState<Transaction[]>([])
   const [records, setRecords] = useState<PaymentRecord[]>([])
   const [units, setUnits] = useState<Unit[]>([])
+  // 賃料履歴。入金額を家賃／駐車・駐輪／光熱費に振り分けるとき、その月の賃料を知るのに要る
+  const [rentHistory, setRentHistory] = useState<RentHistory[]>([])
   const [loading, setLoading] = useState(true)
 
   // print.css は A4縦。この画面を開いている間だけ A3横に上書きする（現況報告書と同じ手）
@@ -57,6 +60,7 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
       setTxs(t)
       setRecords(rec)
       setUnits(u)
+      setRentHistory(await rentHistoryRepo.listByUnitIds(u.map((x) => x.id)))
     } finally {
       setLoading(false)
     }
@@ -69,8 +73,11 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
   // 入金状況の月次記録も収入に合算する（収支表と同じ扱い）。
   // 同じ家賃を台帳にも記帳している号室・月は、記帳のほうを採って二重計上を避ける。
   const allTxs = useMemo(
-    () => [...txs, ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs))],
-    [txs, records, units],
+    () => [
+      ...txs,
+      ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs), rentHistoryMapOf(rentHistory)),
+    ],
+    [txs, records, units, rentHistory],
   )
 
   // 決済済みの物件は来期から落とす（レントロールと同じ基準）。過去年度を開けば表に残る。
