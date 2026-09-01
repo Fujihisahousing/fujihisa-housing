@@ -35,6 +35,7 @@ import {
   type OpexActual, type RepairByYear, type IncomeStatementResult, type StatementRow,
 } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
+import { lotNumberOf, lotNumbers, propertyForLot } from '../../lib/lots'
 import { fitSheets } from '../../reports/fitToPage'
 import { yen, percent, formatDate, num, areaM2 } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
@@ -66,6 +67,8 @@ const STATEMENT_EXCLUDE = new Set(['元金', '利息'])
 export function Prospectus({ properties }: { properties: Property[] }) {
   const activeProperty = useAppStore((s) => s.activeProperty)
   const [tab, setTab] = useState<TabKey>('cover')
+  // 号地物件（豊野町＝1〜3号地）で選んでいる号地。null＝物件まるごと（従来どおり）
+  const [lot, setLot] = useState<number | null>(null)
   const [printAll, setPrintAll] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
@@ -151,8 +154,30 @@ export function Prospectus({ properties }: { properties: Property[] }) {
     }
   }, [])
 
-  const sortedUnits = useMemo(() => [...units].sort(unitCompare), [units])
-  const rr = useMemo(() => calcRentRoll(sortedUnits, property), [sortedUnits, property])
+  // ---- 号地（1棟ずつ独立した戸建てを1物件にまとめている物件）----
+  // 表紙・概要・レントロールだけを号地単位に切り替える。年間収支表から下の5タブは
+  // 支出（公租公課など）が3邸まとめて記帳されているので、物件まるごとの金額のまま出す
+  // （号地を選んだときはその旨を紙面に注記する）。
+  const lots = useMemo(() => lotNumbers(property, units), [property, units])
+  const lotUnit = useMemo(
+    () => (lot == null || !property ? null : units.find((u) => lotNumberOf(property.name, u.room) === lot) ?? null),
+    [lot, property, units],
+  )
+  // 物件を切り替えたら号地の選択は外す（号地の無い物件に選択が残らないように）
+  useEffect(() => {
+    setLot(null)
+  }, [selectedId])
+
+  /** 表紙・見出し・概要に出す物件。号地を選んでいるときは号地別スペックを重ねたもの */
+  const viewProperty = useMemo(
+    () => (property && lotUnit && lot != null ? propertyForLot(property, lotUnit, lot) : property),
+    [property, lotUnit, lot],
+  )
+  /** レントロールに載せる部屋。号地を選んでいるときはその号地だけ */
+  const viewUnits = useMemo(() => (lotUnit ? [lotUnit] : units), [lotUnit, units])
+
+  const sortedUnits = useMemo(() => [...viewUnits].sort(unitCompare), [viewUnits])
+  const rr = useMemo(() => calcRentRoll(sortedUnits, viewProperty), [sortedUnits, viewProperty])
 
   // 会計年度は9月始まり。今年度はまだ途中なので、収入と支出が1年ぶん揃う「1つ前の年度」を使う。
   const thisFY = fiscalYearOf(new Date())
@@ -200,7 +225,7 @@ export function Prospectus({ properties }: { properties: Property[] }) {
       >
         <div className="flex flex-wrap items-center gap-2">
           <div className="text-sm font-medium text-slate-700">
-            {property ? property.name : '物件を選択してください'}
+            {viewProperty ? viewProperty.name : '物件を選択してください'}
           </div>
           <button
             onClick={() => {
@@ -218,6 +243,38 @@ export function Prospectus({ properties }: { properties: Property[] }) {
             <FileText className="w-4 h-4" /> 全ページ印刷
           </button>
         </div>
+        {/* 号地タブ。1棟ずつ独立した戸建てを1物件にまとめている物件（豊野町＝1〜3号地）でだけ出す。
+            売買は号地ごとなので、表紙・概要・レントロールを号地1邸ぶんに切り替える。 */}
+        {lots.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-500">号地</span>
+            <button
+              onClick={() => setLot(null)}
+              className={
+                'whitespace-nowrap rounded-lg px-3 py-1 text-xs font-medium transition-colors ' +
+                (lot == null
+                  ? 'bg-slate-700 text-white'
+                  : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50')
+              }
+            >
+              全体（{lots.length}邸）
+            </button>
+            {lots.map((n) => (
+              <button
+                key={n}
+                onClick={() => setLot(n)}
+                className={
+                  'whitespace-nowrap rounded-lg px-3 py-1 text-xs font-medium transition-colors ' +
+                  (lot === n
+                    ? 'bg-slate-700 text-white'
+                    : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50')
+                }
+              >
+                {n}号地
+              </button>
+            ))}
+          </div>
+        )}
         <div className="flex gap-2 overflow-x-auto">
           {TABS.map((t) => (
             <button
@@ -236,7 +293,7 @@ export function Prospectus({ properties }: { properties: Property[] }) {
         </div>
       </div>
 
-      {!property ? (
+      {!property || !viewProperty ? (
         <div className="text-center text-slate-400 text-sm py-12">
           画面上部の物件タブから物件を選んでください。
         </div>
@@ -248,23 +305,23 @@ export function Prospectus({ properties }: { properties: Property[] }) {
         // 用紙幅（186mm）が画面より広いことがあるので、はみ出す分だけ横スクロールさせる
         <div className="overflow-x-auto">
           <div id="print-root" ref={rootRef} className="pr-root">
-            {show('cover') && <CoverSheet property={property} />}
+            {show('cover') && <CoverSheet property={viewProperty} />}
 
             {show('overview') && (
-              <Sheet sec="overview" property={property} title="1. 物件概要">
-                <SpecTable property={property} units={units} />
-                {property.notes && (
+              <Sheet sec="overview" property={viewProperty} title="1. 物件概要">
+                <SpecTable property={viewProperty} units={viewUnits} />
+                {viewProperty.notes && (
                   <div className="mt-4">
                     <h3 className="text-sm font-bold text-slate-700 border-b border-slate-300 pb-1 mb-1">備考</h3>
-                    <p className="text-xs text-slate-700 whitespace-pre-wrap">{property.notes}</p>
+                    <p className="text-xs text-slate-700 whitespace-pre-wrap">{viewProperty.notes}</p>
                   </div>
                 )}
               </Sheet>
             )}
 
             {show('rentroll') && (
-              <Sheet sec="rentroll" property={property} title="2. レントロール（賃貸借条件一覧）">
-                <IncomeSummary rr={rr} units={units} />
+              <Sheet sec="rentroll" property={viewProperty} title="2. レントロール（賃貸借条件一覧）">
+                <IncomeSummary rr={rr} units={viewUnits} />
                 <div className="mt-6">
                   <RentRollTable units={sortedUnits} title="現在の契約内容" subtitle={formatDate(new Date()) + ' 時点'} />
                 </div>
@@ -276,13 +333,14 @@ export function Prospectus({ properties }: { properties: Property[] }) {
             )}
 
             {show('statement') && (
-              <Sheet sec="statement" property={property} title="3. 年間収支表">
+              <Sheet sec="statement" property={viewProperty} title="3. 年間収支表">
                 <AnnualStatement prev={stPrev} cur={stCur} prevYear={lastFY} curYear={thisFY} />
+                {lot != null && <LotWholeNote name={property.name} lots={lots.length} />}
               </Sheet>
             )}
 
             {show('opex') && (
-              <Sheet sec="opex" property={property} title={`4. 運営費（${lastFY}年度実績）`}>
+              <Sheet sec="opex" property={viewProperty} title={`4. 運営費（${lastFY}年度実績）`}>
                 <OpexActualTable actual={actual} lastFY={lastFY} />
                 <div className="mt-6">
                   <h3 className="text-sm font-bold text-slate-700 border-b-2 border-slate-800 pb-1 mb-2">
@@ -290,34 +348,49 @@ export function Prospectus({ properties }: { properties: Property[] }) {
                   </h3>
                   <OpexTab rows={opex} propertyId={selectedId} {...handler(propertyOpexRepo)} />
                 </div>
+                {lot != null && <LotWholeNote name={property.name} lots={lots.length} />}
               </Sheet>
             )}
 
             {show('repairs') && (
-              <Sheet sec="repairs" property={property} title="5. 修繕費・修繕履歴">
+              <Sheet sec="repairs" property={viewProperty} title="5. 修繕費・修繕履歴">
                 {/* 前年度より古い年度は出さない（レントロールと同じく今年度・前年度の2年度） */}
                 <RepairByYearTable rows={repairByYear.filter((r) => r.year >= lastFY)} lastFY={lastFY} />
                 <div className="mt-6">
                   <RepairsTab rows={repairs} propertyId={selectedId} {...handler(propertyRepairsRepo)} />
                 </div>
+                {lot != null && <LotWholeNote name={property.name} lots={lots.length} />}
               </Sheet>
             )}
 
             {show('inspections') && (
-              <Sheet sec="inspections" property={property} title="6. 法定点検・維持管理">
+              <Sheet sec="inspections" property={viewProperty} title="6. 法定点検・維持管理">
                 <InspectionsTab rows={inspections} propertyId={selectedId} {...handler(propertyInspectionsRepo)} />
+                {lot != null && <LotWholeNote name={property.name} lots={lots.length} />}
               </Sheet>
             )}
 
             {show('documents') && (
-              <Sheet sec="documents" property={property} title="7. 引継書類">
+              <Sheet sec="documents" property={viewProperty} title="7. 引継書類">
                 <DocumentsTab rows={docs} propertyId={selectedId} {...handler(propertyDocumentsRepo)} />
+                {lot != null && <LotWholeNote name={property.name} lots={lots.length} />}
               </Sheet>
             )}
           </div>
         </div>
       )}
     </div>
+  )
+}
+
+/** 号地を選んでいるときだけ出す注記。年間収支表から下の5タブは、支出（公租公課など）が
+ *  3邸まとめて記帳されているので物件まるごとの金額・内容を出している（ユーザー指定）。
+ *  号地1邸ぶんに見えると誤解されるので、紙面にその旨を書いておく。 */
+function LotWholeNote({ name, lots }: { name: string; lots: number }) {
+  return (
+    <p className="text-[11px] text-slate-500 mt-3">
+      ※ この表は{name}全体（{lots}邸）の金額・内容です。号地ごとには分けていません。
+    </p>
   )
 }
 

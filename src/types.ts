@@ -77,6 +77,21 @@ export interface Property {
   created_at?: string
 }
 
+/** 号地別の物件概要（units.spec）。1棟ずつ独立した戸建てを1物件にまとめている物件
+ *  （豊野町＝1〜3号地）で、物件概要書を号地ごとに出すために使う。
+ *  入っている項目だけが物件（properties）のスペックを上書きし、空欄は物件の値のまま出る。 */
+export type UnitSpec = Partial<
+  Pick<
+    Property,
+    | 'address' | 'chiban' | 'access'
+    | 'land_area' | 'building_area' | 'standard_floor_area' | 'max_height'
+    | 'structure' | 'main_use' | 'unit_count_label'
+    | 'parking' | 'parking_count' | 'basement'
+    | 'zoning' | 'bcr' | 'far' | 'fire_zone' | 'height_district' | 'road'
+    | 'built' | 'building_cert_no' | 'building_cert' | 'inspection_cert' | 'inspection_date'
+  >
+>
+
 /** 5.2 units（部屋） */
 export interface Unit {
   id: string
@@ -104,6 +119,8 @@ export interface Unit {
   contract_start?: string | null
   contract_end?: string | null
   notes?: string | null
+  /** 号地別の物件概要。号地ごとに物件概要書を出す物件だけで使う（それ以外は null） */
+  spec?: UnitSpec | null
   created_at?: string
 }
 

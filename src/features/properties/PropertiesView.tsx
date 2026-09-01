@@ -7,10 +7,11 @@ import { MoveEventsPanel, applyDueMoveIns } from './MoveEvents'
 import { useAuth } from '../../auth/AuthProvider'
 import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo, moveEventsRepo, moveOutLedgerRepo } from '../../lib/repositories'
 import { unitCompare } from '../../lib/sortUnits'
+import { isLotProperty, lotName, lotNumberOf, LOT_SPEC_FIELDS } from '../../lib/lots'
 import { effectiveRentKyoeki, deriveJudgement } from '../../lib/calc'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, today } from '../../lib/format'
-import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type MoveEvent, type MoveOutLedgerEntry, type Property, type RentHistory, type Unit } from '../../types'
+import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type MoveEvent, type MoveOutLedgerEntry, type Property, type RentHistory, type Unit, type UnitSpec } from '../../types'
 
 export function PropertiesView({ onChanged }: { onChanged: () => void }) {
   const [properties, setProperties] = useState<Property[]>([])
@@ -260,6 +261,9 @@ function UnitsPanel({ property }: { property: Property }) {
       <UnitModal
         value={editing}
         propertyId={property.id}
+        property={property}
+        // 号地物件（豊野町＝1〜3号地）だけ、号地別の物件概要を入力できるようにする
+        lotProperty={isLotProperty(property, units)}
         onClose={() => setEditing(null)}
         onSaved={async () => {
           setEditing(null)
@@ -578,15 +582,22 @@ function PropertyModal({
 function UnitModal({
   value,
   propertyId,
+  property,
+  lotProperty,
   onClose,
   onSaved,
 }: {
   value: Partial<Unit> | null
   propertyId: string
+  property: Property
+  /** 号地物件か（号地別の物件概要の入力欄を出すかどうか） */
+  lotProperty: boolean
   onClose: () => void
   onSaved: () => void
 }) {
   const [f, setF] = useState<Record<string, string>>({})
+  // 号地別の物件概要（units.spec）。空欄の項目は物件のスペックがそのまま概要書に出る
+  const [spec, setSpec] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [history, setHistory] = useState<RentHistory[]>([])
@@ -620,10 +631,18 @@ function UnitModal({
       contract_end: value.contract_end ?? '',
       notes: value.notes ?? '',
     })
+    const sp = (value.spec ?? {}) as Record<string, unknown>
+    setSpec(
+      Object.fromEntries(
+        LOT_SPEC_FIELDS.map((fd) => [fd.key, sp[fd.key] != null ? String(sp[fd.key]) : '']),
+      ),
+    )
     setError(null)
     if (value.id) void rentHistoryRepo.listByUnit(value.id).then(setHistory)
     else setHistory([])
   }, [value])
+
+  const setSpecField = (k: string) => (v: string) => setSpec((p) => ({ ...p, [k]: v }))
 
   const set = (k: string) => (v: string) => setF((p) => ({ ...p, [k]: v }))
 
@@ -690,6 +709,18 @@ function UnitModal({
         notes: f.notes || null,
       }
 
+      // 号地物件だけ、号地別の物件概要を持たせる。入力のある項目だけ入れる
+      // （空欄の項目は物件のスペックが概要書にそのまま出る）。
+      if (lotProperty) {
+        const out: Record<string, unknown> = {}
+        for (const fd of LOT_SPEC_FIELDS) {
+          const raw = (spec[fd.key] ?? '').trim()
+          if (!raw) continue
+          out[fd.key] = fd.type === 'number' ? Number(raw) : raw
+        }
+        payload.spec = Object.keys(out).length > 0 ? (out as UnitSpec) : null
+      }
+
       let unitId = value?.id
       if (isEdit && unitId) await unitsRepo.update(unitId, payload)
       else unitId = (await unitsRepo.create(payload)).id
@@ -705,6 +736,34 @@ function UnitModal({
           payload.tenant_type ?? null,
           payload.tenant_kana ?? null,
         )
+
+        // 契約者名・読み方・属性を書き換えたときは、今の契約の期間ぶんの記録もそろえる。
+        // 「パナソニック」を「株式会社パナソニック」に直したのに入金状況が古い表記のまま、
+        // という食い違いを無くすため（ユーザー指定）。
+        //   ・入居開始日がある部屋 … その年月以降の記録をまとめて新しい名前にする。
+        //     それより前は前の入居者の記録なので触らない。表記ゆれがあっても期間で切るので直る。
+        //   ・入居開始日が無い部屋 … 期間を切れないので、前の名前と一致する記録だけ差し替える。
+        const nameChanged =
+          isEdit &&
+          ((value?.tenant ?? '') !== (payload.tenant ?? '') ||
+            (value?.tenant_kana ?? '') !== (payload.tenant_kana ?? '') ||
+            (value?.tenant_type ?? '') !== (payload.tenant_type ?? ''))
+        if (nameChanged) {
+          const start = payload.contract_start ?? ''
+          const sy = Number(start.slice(0, 4))
+          const sm = Number(start.slice(5, 7))
+          if (sy && sm) {
+            await paymentRecordsRepo.syncTenantFrom(
+              propertyId, payload.room!, sy, sm,
+              payload.tenant, payload.tenant_type ?? null, payload.tenant_kana ?? null,
+            )
+          } else if (value?.tenant) {
+            await paymentRecordsRepo.renameTenant(
+              propertyId, payload.room!, value.tenant, payload.tenant,
+              payload.tenant_type ?? null, payload.tenant_kana ?? null,
+            )
+          }
+        }
       }
 
       if (rentChanged && (newRent > 0 || newKyoeki > 0 || newParking)) {
@@ -929,6 +988,35 @@ function UnitModal({
           <TextField label="契約満了" value={f.contract_end ?? ''} onChange={set('contract_end')} type="date" />
         </div>
         <TextField label="メモ（備考）" value={f.notes ?? ''} onChange={set('notes')} />
+
+        {/* 号地別の物件概要。豊野町のように1棟ずつ独立した戸建てを1物件にまとめている
+            物件でだけ出す。物件概要書の号地タブ（概要）はここの値を優先して出し、
+            空欄の項目は物件側のスペックがそのまま出る。 */}
+        {lotProperty && (
+          <details className="rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2">
+            <summary className="cursor-pointer text-xs font-semibold text-slate-600">
+              号地別の物件概要（売買資料用）
+              {lotNumberOf(property.name, f.room) != null &&
+                `　— ${lotName(property.name, lotNumberOf(property.name, f.room)!)}`}
+            </summary>
+            <p className="mt-2 text-[11px] text-slate-500">
+              物件概要書の号地タブに出す項目です。空欄にしておくと {property.name} 全体に登録した
+              スペックがそのまま出ます。号地ごとに違うところ（土地・建物面積、確認番号など）だけ
+              入れてください。
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-3">
+              {LOT_SPEC_FIELDS.map((fd) => (
+                <TextField
+                  key={fd.key}
+                  label={fd.label}
+                  value={spec[fd.key] ?? ''}
+                  onChange={setSpecField(fd.key)}
+                  type={fd.type === 'number' ? 'number' : undefined}
+                />
+              ))}
+            </div>
+          </details>
+        )}
         {error && (
           <div className="rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm p-3">{error}</div>
         )}

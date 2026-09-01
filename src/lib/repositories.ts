@@ -370,6 +370,67 @@ export const paymentRecordsRepo = {
       .eq('tenant', '')
     if (e2) throw new Error(e2.message)
   },
+
+  /**
+   * 部屋の契約者名を書き換えたときに、入金状況の月次記録の契約者名をそろえる。
+   *
+   * 月次記録は「その月の控え」なので原則あとから書き換えない（過去の入居者の名前を
+   * 守るため）。ただし今入居している契約者の名前を直したときだけは、その契約の
+   * 期間ぶんも直したい——「パナソニック」を「株式会社パナソニック」にしたのに
+   * 入金状況が古い表記のまま、という食い違いを無くすのが狙い。
+   *
+   * 対象は「入居開始日(contract_start)の年月以降」の記録だけ。それより前は前の入居者の
+   * 記録なので絶対に触らない。表記ゆれ（㈱／（）の全角半角など）があっても期間で切るので
+   * まとめてそろう。入居開始日が未入力の部屋は期間を切れないので何もしない
+   * （呼び出し側で renameTenant を使う）。
+   *
+   * @returns 書き換えた記録の件数
+   */
+  async syncTenantFrom(
+    property_id: string,
+    room: string,
+    year: number,
+    month: number,
+    tenant: string,
+    tenant_type: string | null,
+    kana: string | null,
+  ): Promise<number> {
+    const { data, error } = await supabase
+      .from('payment_records')
+      .update({ tenant, tenant_type, kana, updated_at: new Date().toISOString() })
+      .match({ property_id, room })
+      // (year, month) >= (year, month) を1本の条件で書けないので、
+      // 「翌年以降」または「同年かつ当月以降」で拾う（listFrom と同じ書き方）
+      .or(`year.gt.${year},and(year.eq.${year},month.gte.${month})`)
+      .select('id')
+    if (error) throw new Error(error.message)
+    return (data ?? []).length
+  },
+
+  /**
+   * 前の契約者名がそのまま残っている記録だけを新しい名前に差し替える。
+   * 入居開始日が未入力で期間を切れない部屋の受け皿。名前が一致した記録しか触らないので、
+   * 別人の記録を巻き込む心配は無い。
+   *
+   * @returns 書き換えた記録の件数
+   */
+  async renameTenant(
+    property_id: string,
+    room: string,
+    from: string,
+    to: string,
+    tenant_type: string | null,
+    kana: string | null,
+  ): Promise<number> {
+    if (!from || from === to) return 0
+    const { data, error } = await supabase
+      .from('payment_records')
+      .update({ tenant: to, tenant_type, kana, updated_at: new Date().toISOString() })
+      .match({ property_id, room, tenant: from })
+      .select('id')
+    if (error) throw new Error(error.message)
+    return (data ?? []).length
+  },
 }
 
 // ---------------------------------------------------------------------
