@@ -14,11 +14,17 @@ import { parkingYen } from './calc'
 
 const n = (v: unknown) => Number(v ?? 0) || 0
 
-/** 全角数字・全角空白を半角に寄せる。号室や金額が全角で入っていても拾えるように */
+/** 全角の英数字・空白を半角に寄せる。号室や金額が全角で入っていても拾えるように */
 export const toHalf = (s: string) =>
   String(s)
-    .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+    .replace(/[０-９Ａ-Ｚａ-ｚ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
     .replace(/　/g, ' ')
+
+/**
+ * 号室の突き合わせ用に整える。全角→半角・大文字・空白除去。
+ * 阿波座の号室は台帳側が「1Ｆ」（全角Ｆ）なので、Excelに「1F」と書いても当たるようにする。
+ */
+export const normRoom = (s: unknown) => toHalf(String(s ?? '')).replace(/\s/g, '').toUpperCase()
 
 /** セルの値を数値にする。'1,234' や '￥1,234'、全角数字も拾う。数字でなければ null */
 export function cellNumber(v: unknown): number | null {
@@ -156,6 +162,8 @@ export interface WaterPatch {
   memo: string
   /** 入金額に水道代を足したか。未入金・一部入金の月には足さない */
   paidRaised: boolean
+  /** 請求額の土台を固定分に引き直したか（既に水道代ぶんが乗っていた月） */
+  rebased: boolean
 }
 
 /**
@@ -174,7 +182,12 @@ export function waterPatch(
 ): WaterPatch {
   const prev = readWaterTag(rec?.memo)
   const fixed = fixedAmount(unit)
-  const baseBilled = rec?.billed != null ? n(rec.billed) - prev : fixed
+  let baseBilled = rec?.billed != null ? n(rec.billed) - prev : fixed
+  // 目印が無いのに請求額が固定分を上回っている月は、通帳の総額をそのまま請求額にしていて
+  // 既に水道代ぶんが乗っている（阿波座1F：家賃600,000に対し請求額603,835）。
+  // そのまま足すと二重になるので、土台を固定分に引き直す。
+  const rebased = prev === 0 && fixed > 0 && baseBilled > fixed
+  if (rebased) baseBilled = fixed
   const basePaid = rec?.paid != null ? n(rec.paid) - prev : 0
   const goal = baseBilled + water
   const raise = basePaid > 0 && basePaid >= baseBilled && basePaid < goal
@@ -183,5 +196,114 @@ export function waterPatch(
     paid: raise ? goal : basePaid,
     memo: writeWaterTag(rec?.memo, water),
     paidRaised: raise,
+    rebased,
   }
+}
+
+// ---------------------------------------------------------------------
+// 一覧形式（年月ごとの水道代を並べたExcel）の読み取り
+// ---------------------------------------------------------------------
+// 検針表は「1か月ぶん・号室が縦」の形だが、月をまたいだ一覧をこちらで作って渡す
+// 使い方もある（阿波座は号室が1つなので、縦に並ぶのは月になる）。
+// 見出しに「年月」を含む列があればこちらの形として読む。
+
+/** 見出しの表記ゆれを吸収するための正規化 */
+const normHead = (v: unknown) => toHalf(String(v ?? '')).replace(/\s/g, '')
+
+/**
+ * Excelのシリアル値を年月にする。1900年うるう年バグに合わせて基準は1899-12-30。
+ * セルを日付書式にしていると raw:true では数値で届くため必要。
+ */
+function serialToYm(serial: number): { year: number; month: number } | null {
+  if (!Number.isFinite(serial) || serial < 1 || serial > 60000) return null
+  const d = new Date(Date.UTC(1899, 11, 30) + Math.round(serial) * 86400000)
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 }
+}
+
+/**
+ * 年月のセルを { year, month } にする。次の書き方を受ける。
+ *   2024-09 / 2024/9 / 2024年9月 / 2024年9月分 / 令和6年9月 / 202409 / Excelの日付
+ * 読めなければ null。
+ */
+export function parseYm(v: unknown): { year: number; month: number } | null {
+  if (typeof v === 'number') {
+    // 202409 のような6桁は年月そのもの。それ以外の数値はExcelのシリアル値とみなす
+    if (v >= 190001 && v <= 299912) {
+      const y = Math.floor(v / 100)
+      const m = v % 100
+      if (m >= 1 && m <= 12) return { year: y, month: m }
+    }
+    return serialToYm(v)
+  }
+  const s = toHalf(String(v ?? '')).trim()
+  if (!s) return null
+  const wareki = s.match(/令和\s*(\d{1,2})\s*年\s*(\d{1,2})\s*月/)
+  if (wareki) return { year: 2018 + Number(wareki[1]), month: Number(wareki[2]) }
+  const sep = s.match(/^(\d{4})\s*[-/年.]\s*(\d{1,2})/)
+  if (sep) {
+    const m = Number(sep[2])
+    if (m >= 1 && m <= 12) return { year: Number(sep[1]), month: m }
+  }
+  const six = s.match(/^(\d{4})(\d{2})$/)
+  if (six) {
+    const m = Number(six[2])
+    if (m >= 1 && m <= 12) return { year: Number(six[1]), month: m }
+  }
+  const num = Number(s)
+  return Number.isFinite(num) ? parseYm(num) : null
+}
+
+/** 一覧形式の1行。年月を行ごとに持つので、1つのファイルで複数月を扱える */
+export interface WaterListRow {
+  year: number
+  month: number
+  room: string
+  name: string
+  amount: number
+}
+
+/**
+ * 一覧形式のシートを読む。見出し行は「年月」「号室（号数・部屋）」「水道代（金額）」を
+ * 含む行として探す。氏名の列は任意（あれば控えとして表に出す）。
+ * 「年月」の列が見つからなければ null を返す（＝検針表として読み直す合図）。
+ */
+export function parseWaterListSheet(grid: unknown[][]): WaterListRow[] | null {
+  let head = -1
+  let cYm = -1
+  let cRoom = -1
+  let cName = -1
+  let cAmount = -1
+  for (let r = 0; r < Math.min(grid.length, 15); r++) {
+    const row = (grid[r] ?? []).map(normHead)
+    const iYm = row.findIndex((v) => /^(年月|対象月|請求月|月分)/.test(v))
+    if (iYm < 0) continue
+    const iRoom = row.findIndex((v) => /^(号室|号数|部屋)/.test(v))
+    const iAmt = row.findIndex((v) => /(水道代|水道|金額)/.test(v))
+    if (iAmt < 0) continue
+    head = r
+    cYm = iYm
+    cRoom = iRoom
+    cName = row.findIndex((v) => /^(氏名|契約者|入居者)/.test(v))
+    cAmount = iAmt
+    break
+  }
+  if (head < 0) return null
+
+  const rows: WaterListRow[] = []
+  for (let r = head + 1; r < grid.length; r++) {
+    const row = grid[r] ?? []
+    const ym = parseYm(row[cYm])
+    if (!ym) continue // 合計行や注記はここで落ちる
+    const amount = cellNumber(row[cAmount])
+    if (amount == null || amount <= 0) continue
+    // 号室の列が無いファイル（1戸だけの物件）は空にしておき、画面側で号室を選ばせる
+    const room = cRoom >= 0 ? normRoom(row[cRoom]) : ''
+    rows.push({
+      ...ym,
+      room,
+      name: cName >= 0 ? toHalf(String(row[cName] ?? '')).replace(/\s+/g, ' ').trim() : '',
+      amount,
+    })
+  }
+  return rows
 }
