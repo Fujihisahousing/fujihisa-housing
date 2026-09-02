@@ -15,9 +15,10 @@ import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from
 import { Loader2, Plus, Pencil, Trash2, LogIn, LogOut } from 'lucide-react'
 import { useAuth } from '../../auth/AuthProvider'
 import {
-  moveEventsRepo, moveOutLedgerRepo, paymentRecordsRepo, unitsRepo, rentHistoryRepo,
+  moveEventsRepo, moveOutLedgerRepo, unitsRepo, rentHistoryRepo,
 } from '../../lib/repositories'
 import { effectiveRentKyoeki } from '../../lib/calc'
+import { resyncUnit } from '../../lib/resync'
 import { unitCompare } from '../../lib/sortUnits'
 import { yen, formatDate } from '../../lib/format'
 import { TENANT_TYPES, PAYMENT_METHODS, USE_TYPES } from '../../types'
@@ -434,19 +435,10 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
         }
       }
 
-      // その月だけの例外を入金状況の請求額に書き戻す。
-      // 通常月は賃料履歴から自動計算されるので、ここでは例外月だけを触る。
-      const room = u?.room
-      const propertyId = u?.property_id
-      if (room && propertyId) {
-        if (isMoveIn && saved.prorated_ym && saved.prorated_amount != null) {
-          await writeBilled(propertyId, room, saved.prorated_ym, Number(saved.prorated_amount))
-        }
-        if (!isMoveIn && saved.final_ym) {
-          const full = monthlyOf(saved.unit_id, saved.final_ym)
-          if (full > 0) await writeBilled(propertyId, room, saved.final_ym, full)
-        }
-      }
+      // 入退去を登録したら、その部屋の入金状況をマスタから作り直す。
+      // 入居月の日割り・退去月の満額・退去後の空室は、入退去シートの内容から
+      // 自動で決まる（lib/derive.ts）ので、ここで例外月を手で書き戻す必要は無い。
+      if (u) await resyncUnit({ id: u.id, property_id: u.property_id })
       // 転居先住所は暗号化して退去帳簿へ。move_events は誰でも読めるので置かない。
       // 予告の時点でまだ分からないことが多いので、後から一覧のその場編集でも足せる。
       // 退去名簿。控え（物件名・号室・契約者名・日付・最終請求月・メモ）はサーバ側で
@@ -473,8 +465,12 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
   }
 
   async function remove(id: string) {
-    if (!window.confirm('この記録を削除しますか？（入金状況の請求額はそのまま残ります）')) return
+    if (!window.confirm('この記録を削除しますか？（入金状況の請求額も作り直されます）')) return
+    const target = rows.find((e) => e.id === id)
     await moveEventsRepo.remove(id)
+    // 入居期間の根拠が変わるので、その部屋の入金状況を作り直す
+    const u = target ? units.find((x) => x.id === target.unit_id) : null
+    if (u) await resyncUnit({ id: u.id, property_id: u.property_id })
     await onChanged()
   }
 
@@ -1114,13 +1110,6 @@ export async function applyDueMoveIns(units: Unit[], events: MoveEvent[]): Promi
     done++
   }
   return done
-}
-
-/** 入金状況の請求額を1か月だけ上書きする。記録が無ければ作る */
-async function writeBilled(propertyId: string, room: string, ym: string, billed: number) {
-  const [y, m] = ym.split('-').map(Number)
-  if (!y || !m) return
-  await paymentRecordsRepo.upsertBilled(propertyId, room, y, m, billed)
 }
 
 /** タブの見出しに使うアイコン。呼び出し側（PropertiesView）から参照する */

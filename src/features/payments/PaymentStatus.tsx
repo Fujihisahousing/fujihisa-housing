@@ -1,10 +1,12 @@
 // 入金状況（画面）。月次。マンション帯でグループ表示。
-// payment_records に記録があればそれを表示、無ければ記帳からの自動計算。備考は編集可。
+// 表示は payment_records の月次記録。記録は部屋・賃料履歴・入退去・台帳から自動で作り直され
+// （lib/resync.ts）、この画面での手入力は「手動上書き」として残る。備考は編集可。
 import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Loader2, FileSpreadsheet, Upload, ListChecks } from 'lucide-react'
+import { Loader2, FileSpreadsheet, Upload, ListChecks, RefreshCw } from 'lucide-react'
 import { ImportCsv } from './ImportCsv'
 import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo, arrearsNotesRepo, moveEventsRepo } from '../../lib/repositories'
-import { calcPaymentStatus, calcArrearsList, deriveJudgement, tenantViewFor, moveOutYmByUnit, type ArrearsUnitRow } from '../../lib/calc'
+import { calcPaymentStatus, calcArrearsList, tenantViewFor, moveOutYmByUnit, type ArrearsUnitRow } from '../../lib/calc'
+import { clearOverrides, resyncProperty, resyncUnit, setOverride } from '../../lib/resync'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
 import { yen, percent, today } from '../../lib/format'
@@ -318,6 +320,9 @@ export function PaymentStatus({
         )
         try {
           await paymentRecordsRepo.setMemo(u.property_id, u.room ?? '', year, month, memo)
+          // 備考には水道代の目印が入るので、請求額を作り直してから読み込み直す
+          await resyncUnit({ id: u.id, property_id: u.property_id })
+          await load()
         } catch (e) {
           alert('備考の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
         }
@@ -333,71 +338,108 @@ export function PaymentStatus({
     [year, month],
   )
 
-  // 手入力の保存に使う payment_records の下地。記録の無い月でも新規作成できるようにする。
-  const baseRecord = useCallback(
-    (row: DisplayRow): PaymentRecord => {
-      const u = row.unit
-      return {
-        property_id: u.property_id,
-        room: u.room ?? '',
+  // 手入力の宛先。月次記録のキーと、作り直しの対象になる部屋
+  const targetOf = useCallback(
+    (row: DisplayRow) => ({
+      key: {
+        property_id: row.unit.property_id,
+        room: row.unit.room ?? '',
         year,
         month,
-        // 空室月（退去済み）は名前を持たせない。部屋に前の入居者の名前が残っていても書き戻さない。
-        // 退去月は画面上「◯◯（旧）」と出しているので、保存には接尾辞の付かない tenantRaw を使う。
-        tenant: row.vacant ? null : row.tenantRaw || u.tenant || null,
-        tenant_type: row.vacant ? null : row.tenantType || u.tenant_type || null,
-        kana: row.vacant ? null : row.kana || u.tenant_kana || null,
-        billed: row.billed != null ? Number(row.billed) : row.calcBilled,
-        paid: row.paid != null ? Number(row.paid) : 0,
-        paid_on: row.paidDate ?? null,
-        judgement: row.judgement,
-        guarantor: row.vacant ? null : row.guarantor || u.guarantor || null,
-        memo: row.memo || null,
-        arrears_months: row.arrearsManual ? row.arrears : null,
-      }
-    },
+      },
+      unit: { id: row.unit.id, property_id: row.unit.property_id },
+    }),
     [year, month],
   )
+
+  // 手入力はすべて「手動上書き」として保存する（payment_records.overrides）。
+  // 上書きした項目はマスタからの作り直しで消えず、それ以外——判定や滞納月数——は
+  // その値を土台に作り直される。値を空にすると上書きが外れて自動導出に戻る。
+  const applyOverride = useCallback(
+    async (row: DisplayRow, patch: Record<string, unknown>, label: string) => {
+      const { key, unit } = targetOf(row)
+      try {
+        await setOverride(key, patch, unit)
+        await load() // 月次・未入金一覧の両方に反映
+      } catch (e) {
+        alert(label + 'の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
+      }
+    },
+    [targetOf, load],
+  )
+
+  // この物件（全体表示なら選べない）の入金状況を、マスタから丸ごと作り直す。
+  // 普段は編集のたびに自動で作り直されるので押す必要は無い。SQLで直接データを入れた
+  // あとや、古いデータをまとめて今の計算に合わせたいときの手当て。
+  const [resyncing, setResyncing] = useState(false)
+  const runResync = useCallback(async () => {
+    if (!activeProperty) return
+    if (
+      !window.confirm(
+        [
+          propertyName + ' の入金状況を、部屋・賃料履歴・入退去・台帳から作り直します。',
+          '',
+          '・請求額・契約者名・保証会社・判定は自動計算に合わせて書き換わります',
+          '・この画面で手入力した値と備考は残ります',
+          '・入退去の記録が無い期間は、いまの記録がそのまま残ります',
+        ].join('\n'),
+      )
+    ) {
+      return
+    }
+    setResyncing(true)
+    try {
+      const res = await resyncProperty(activeProperty)
+      alert(res.scanned + 'か月ぶんを見直して、' + res.updated + '件を書き換えました。')
+      await load()
+    } catch (e) {
+      alert('再計算に失敗しました：' + (e instanceof Error ? e.message : ''))
+    } finally {
+      setResyncing(false)
+    }
+  }, [activeProperty, propertyName, load])
 
   // 判定の手入力：その月の状態を確定させる。
   // 空室を選んだ月は請求も入金も無かった月として扱う（契約者名・請求額・入金額をクリア）。
   const saveJudgement = useCallback(
     async (row: DisplayRow, judgement: string) => {
-      const rec = baseRecord(row)
-      rec.judgement = judgement
-      if (judgement === '空室') {
-        rec.tenant = null
-        rec.kana = null
-        rec.guarantor = null
-        rec.billed = 0
-        rec.paid = 0
-        rec.paid_on = null
-        rec.arrears_months = null
+      if (judgement === '__auto__') {
+        // この月の手入力を全部取り消して、マスタからの自動導出に戻す
+        const { key, unit } = targetOf(row)
+        try {
+          await clearOverrides(key, unit)
+          await load()
+        } catch (e) {
+          alert('自動に戻せませんでした：' + (e instanceof Error ? e.message : ''))
+        }
+        return
       }
-      try {
-        await paymentRecordsRepo.upsert(rec)
-        await load() // 月次・未入金一覧の両方に反映
-      } catch (e) {
-        alert('判定の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
-      }
+      const patch: Record<string, unknown> =
+        judgement === '空室'
+          ? {
+              judgement,
+              billed: 0,
+              paid: 0,
+              paid_on: null,
+              // 空文字で「空のまま固定」。null は上書きを外す指示になるので使わない
+              tenant: '',
+              kana: '',
+              guarantor: '',
+              arrears_months: null,
+            }
+          : { judgement }
+      await applyOverride(row, patch, '判定')
     },
-    [baseRecord, load],
+    [applyOverride, targetOf, load],
   )
 
   // 入金日の手入力：記帳が無い月や、実際の入金日が記帳と違う月に手で入れられるようにする。
-  // 触るのは入金日だけで、請求額・入金額・判定は動かさない。
+  // 空欄にすると台帳の記帳から決まる日付に戻る。
   const savePaidDate = useCallback(
     async (row: DisplayRow, value: string) => {
-      const rec = baseRecord(row)
-      rec.paid_on = value.trim() || null
-      try {
-        await paymentRecordsRepo.upsert(rec)
-        await load()
-      } catch (e) {
-        alert('入金日の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
-      }
+      await applyOverride(row, { paid_on: value.trim() || null }, '入金日')
     },
-    [baseRecord, load],
+    [applyOverride],
   )
 
   // 滞納月数の手入力：空欄にすると自動計算に戻す
@@ -406,44 +448,31 @@ export function PaymentStatus({
       const s = value.trim()
       const n = s === '' ? null : Number(s)
       if (n != null && (!Number.isFinite(n) || n < 0)) return
-      const rec = baseRecord(row)
-      rec.arrears_months = n
-      try {
-        await paymentRecordsRepo.upsert(rec)
-        await load()
-      } catch (e) {
-        alert('滞納月数の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
-      }
+      await applyOverride(row, { arrears_months: n }, '滞納月数')
     },
-    [baseRecord, load],
+    [applyOverride],
   )
 
-  // 入金額の手入力：payment_records を作成/更新し、判定は請求額との比較で自動導出する
+  // 入金額の手入力：台帳に記帳が無い入金を手で入れる。
+  // 判定は請求額との比較で作り直されるので、ここでは触らない（手で直しても連動する）。
   const savePaid = useCallback(
     async (row: DisplayRow, paidStr: string) => {
-      const u = row.unit
-      const paid = paidStr.trim() === '' ? 0 : Number(paidStr)
+      const s = paidStr.trim()
+      if (s === '') {
+        // 空欄＝手入力を取り消して、台帳の記帳から決まる入金額に戻す
+        await applyOverride(row, { paid: null, paid_on: null }, '入金額')
+        return
+      }
+      const paid = Number(s)
       if (!Number.isFinite(paid)) return
-      const billed = row.billed != null ? Number(row.billed) : row.calcBilled
-      const occupied = u.status === '入居' || u.status === '退予'
-      // 判定は金額のみで導出（既存の手入力データと同じく保証会社の有無で分けない）
-      const judgement = deriveJudgement(occupied, billed, paid, false)
-      const rec: PaymentRecord = {
-        ...baseRecord(row), // 手入力済みの滞納月数などを引き継ぐ
-        billed,
-        paid,
+      await applyOverride(
+        row,
         // 既に入金日が入っていればそれを残す（手で入れた日付を本日で潰さない）
-        paid_on: paid > 0 ? row.paidDate ?? today() : null,
-        judgement,
-      }
-      try {
-        await paymentRecordsRepo.upsert(rec)
-        await load() // 月次・未入金一覧の両方を更新
-      } catch (e) {
-        alert('入金額の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
-      }
+        { paid, paid_on: paid > 0 ? (row.paidDate ?? today()) : null },
+        '入金額',
+      )
     },
-    [baseRecord, load],
+    [applyOverride],
   )
 
   return (
@@ -500,6 +529,16 @@ export function PaymentStatus({
           }
         >
           <ListChecks className="w-4 h-4" /> 未入金一覧
+        </button>
+        {/* 普段は編集のたびに自動で作り直されるので、押すのはSQLで直接データを入れたあとくらい */}
+        <button
+          onClick={() => void runResync()}
+          disabled={!activeProperty || resyncing}
+          title={activeProperty ? '部屋・賃料履歴・入退去・台帳から入金状況を作り直します' : '物件を選んでから実行してください'}
+          className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          <RefreshCw className={'w-4 h-4 ' + (resyncing ? 'animate-spin' : '')} />
+          {resyncing ? '再計算中…' : '再計算'}
         </button>
         <button
           onClick={() => void exportPaymentStatusExcel(propertyName, r)}
@@ -873,7 +912,7 @@ export function PayRow({
         <select
           value={d.judgement}
           onChange={(e) => onJudgement(d, e.target.value)}
-          title="判定を選ぶとその月の状態が確定します（空室を選ぶと契約者名・請求額・入金額をクリア）"
+          title="判定を選ぶとその月の状態が確定します（空室を選ぶと契約者名・請求額・入金額をクリア）。「自動に戻す」でこの月の手入力を取り消します"
           className={
             'text-xs rounded-full px-2 py-1 border border-transparent hover:border-slate-300 ' +
             'focus:border-slate-900 focus:outline-none ' +
@@ -888,6 +927,8 @@ export function PayRow({
               {j}
             </option>
           ))}
+          {/* 手で選んだ判定を取り消して、請求額と入金額からの自動判定に戻す */}
+          <option value="__auto__">自動に戻す</option>
         </select>
       </td>
       <td className="px-3 py-2 text-slate-600 whitespace-nowrap">{d.guarantor || '—'}</td>

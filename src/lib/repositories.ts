@@ -277,6 +277,21 @@ export const paymentRecordsRepo = {
       .match({ property_id, room, year, month })
     if (error) throw new Error(error.message)
   },
+  /** 月次記録を1件だけ取得する。手動上書きの読み書きに使う */
+  async get(
+    property_id: string,
+    room: string,
+    year: number,
+    month: number,
+  ): Promise<PaymentRecord | null> {
+    const { data, error } = await supabase
+      .from('payment_records')
+      .select('*')
+      .match({ property_id, room, year, month })
+      .maybeSingle()
+    if (error) throw new Error(error.message)
+    return data ?? null
+  },
   /** 月次記録を作成/更新（手入力用）。キー=property_id+room+year+month */
   async upsert(rec: PaymentRecord): Promise<void> {
     const { error } = await supabase
@@ -291,6 +306,29 @@ export const paymentRecordsRepo = {
    * この号室の、指定年月以降の月次記録を取得する。賃料履歴を変更したときに
    * 請求額を貼り直す対象を拾うのに使う。
    */
+  /**
+   * その号室に月次記録が何件あるか。号室名の変更先が既に埋まっていないかの確認に使う。
+   */
+  async countByRoom(property_id: string, room: string): Promise<number> {
+    const { count, error } = await supabase
+      .from('payment_records')
+      .select('room', { count: 'exact', head: true })
+      .match({ property_id, room })
+    if (error) throw new Error(error.message)
+    return count ?? 0
+  },
+  /**
+   * 号室名を変えたとき、その部屋の月次記録をまとめて新しい号室名へ移す。
+   * payment_records のキーは (property_id, room, year, month) で unit_id を持たないので、
+   * 部屋の号室だけ書き換えると記録が迷子になり、入金状況・滞納一覧から丸ごと消える。
+   */
+  async renameRoom(property_id: string, from: string, to: string): Promise<void> {
+    const { error } = await supabase
+      .from('payment_records')
+      .update({ room: to })
+      .match({ property_id, room: from })
+    if (error) throw new Error(error.message)
+  },
   async listFrom(
     property_id: string,
     room: string,
@@ -368,6 +406,34 @@ export const paymentRecordsRepo = {
       .update(patch)
       .match({ property_id, room })
       .eq('tenant', '')
+    if (e2) throw new Error(e2.message)
+  },
+
+  /**
+   * 部屋詳細で保証会社を入力・更新したときに呼ぶ。この号室の月次記録のうち
+   * 「保証会社が未入力」のものだけを埋める。契約者名と同じく、既に入っている記録は
+   * 当時の控えとして触らない。
+   *
+   * 判定（入金済／保証会社入金済）は手で直していることがあるので、ここでは作り直さない。
+   */
+  async fillMissingGuarantor(
+    property_id: string,
+    room: string,
+    guarantor: string | null,
+  ): Promise<void> {
+    if (!guarantor) return
+    const patch = { guarantor, updated_at: new Date().toISOString() }
+    const { error: e1 } = await supabase
+      .from('payment_records')
+      .update(patch)
+      .match({ property_id, room })
+      .is('guarantor', null)
+    if (e1) throw new Error(e1.message)
+    const { error: e2 } = await supabase
+      .from('payment_records')
+      .update(patch)
+      .match({ property_id, room })
+      .eq('guarantor', '')
     if (e2) throw new Error(e2.message)
   },
 

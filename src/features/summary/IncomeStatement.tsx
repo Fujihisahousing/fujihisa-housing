@@ -7,8 +7,7 @@ import {
   fiscalYearOf,
   accountingFiscalYear,
   isStatementRowVisible,
-  paymentRecordsToTransactions,
-  bookedRentKeys,
+  incomeTransactions,
   rentHistoryMapOf,
   FISCAL_MONTHS,
   FISCAL_PREV_YEAR_COLS,
@@ -55,14 +54,12 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
     void load()
   }, [load])
 
-  // 入金状況の月次記録（入金額）を家賃収入として合算する。同じ家賃を台帳にも
-  // 記帳している号室・月は、記帳のほうを採って二重計上を避ける。
-  // 変換の中身は管理表と食い違わないよう calc.ts に共通化してある。
+  // 家賃収入は入金状況の月次記録の「請求額（契約金額）」で出す。請求額は部屋・賃料履歴・
+  // 入退去から自動で作り直されるので、マスタを直せばこの表まで連動する。
+  // 同じ家賃を台帳にも記帳している号室・月は、記録のほうを採って二重計上を避ける。
+  // 変換の中身は管理表・物件概要書と食い違わないよう calc.ts に共通化してある。
   const allTxs = useMemo(
-    () => [
-      ...txs,
-      ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs), rentHistoryMapOf(rentHistory)),
-    ],
+    () => incomeTransactions(txs, records, units, rentHistoryMapOf(rentHistory)),
     [txs, records, units, rentHistory],
   )
 

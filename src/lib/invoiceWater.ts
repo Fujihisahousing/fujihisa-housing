@@ -137,19 +137,30 @@ export function parseInvoiceSheet(grid: unknown[][]): ParsedInvoice {
 // 記録への足し込み
 // ---------------------------------------------------------------------
 
-/** 月次記録の備考に残す目印。同じ請求書を何度取り込んでも二重に足さないために使う */
-const TAG = /\[水道\s*(-?\d+)\]/
+/**
+ * 月次記録の備考に残す目印。同じ請求書を何度取り込んでも二重に足さないために使うのと、
+ * 請求額に上乗せしている光熱費がいくらなのかを備考欄でそのまま確認できるようにするため。
+ * 備考には `[水道 3835]` のように生のテキストで入る。
+ *
+ * ラベルは取込の種類で変わる（水道／電気／ガス）ほか、昔の記録から引き継いだ分は
+ * 内訳が分からないので `光熱費` にする。読み取りはどのラベルでも金額を拾う。
+ */
+const TAG = /\[(?:水道|電気|ガス|光熱費)\s*(-?\d+)\]/
 
-/** 備考に残っている「前回この取込で足した水道代」。無ければ0 */
+/** 備考に残っている「請求額に上乗せしている光熱費」。無ければ0 */
 export function readWaterTag(memo: string | null | undefined): number {
   const m = TAG.exec(String(memo ?? ''))
   return m ? Number(m[1]) : 0
 }
 
 /** 備考の目印を新しい金額に貼り替える（元の文言は残す） */
-export function writeWaterTag(memo: string | null | undefined, water: number): string {
+export function writeWaterTag(
+  memo: string | null | undefined,
+  water: number,
+  label: '水道' | '電気' | 'ガス' | '光熱費' = '水道',
+): string {
   const base = String(memo ?? '').replace(TAG, '').replace(/\s{2,}/g, ' ').trim()
-  const tag = `[水道 ${water}]`
+  const tag = `[${label} ${water}]`
   return base ? `${base} ${tag}` : tag
 }
 

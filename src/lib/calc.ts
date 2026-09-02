@@ -530,24 +530,6 @@ const finishRow = (r: StatementRow): StatementRow => ({
   total: r.months.reduce((s, v) => s + v, 0),
 })
 
-/**
- * 入金状況の月次記録（payment_records）を収支表用の収入トランザクションに変換する。
- * 収支表と管理表で扱いが食い違わないよう共通化している。
- * KDDI契約の部屋（units.tenant='KDDI'）の入金だけは家賃ではなくKDDI収入として計上する。
- *
- * 家賃は「台帳に記帳する」運用と「入金状況に記録する」運用のどちらもあり得るので、
- * 収支表では両方を足している。ただし同じ家賃を両方に入れている月は二重計上になる。
- * そこで booked（既に賃料が記帳されている 号室×月）に当たる記録は足さない。
- * 記帳のほうを優先するのは、収支表が入金日ベース（現金主義）だから。
- *
- * 受取額は 賃料→共益費→駐車・駐輪→光熱費 の順に振り分けて出す。まとめ入金の按分
- * （allocateDeposit）と同じ順番。以前は受取額をまるごと賃料にしていたため、駐車場代・
- * 駐輪代が収支表の「家賃+共益費」行に混ざり、「駐車・駐輪」行はいつも0円だった。
- *   賃料＋共益費を払いきった残り … 契約の駐輪駐車欄（units.parking）の額まで「駐車・駐輪」
- *   それも超えた残り             … 「光熱費」（入居者負担の水道代など）
- * ルネスプランドール守口のように水道代を上乗せして請求する物件があり、その分が
- * 家賃側に乗ったままだと収支表の家賃が実態より膨らむ。
- */
 /** 賃料履歴を unit_id ごとにまとめる。収支表・管理表・物件概要書で同じ形にして渡す */
 export function rentHistoryMapOf(list: RentHistory[]): Map<string, RentHistory[]> {
   const m = new Map<string, RentHistory[]>()
@@ -556,79 +538,6 @@ export function rentHistoryMapOf(list: RentHistory[]): Map<string, RentHistory[]
     m.get(h.unit_id)!.push(h)
   }
   return m
-}
-
-export function paymentRecordsToTransactions(
-  records: PaymentRecord[],
-  units: Unit[],
-  booked: ReadonlySet<string> = new Set(),
-  rentHistoryByUnit?: Map<string, RentHistory[]>,
-): Transaction[] {
-  const kddiRooms = new Set<string>()
-  for (const u of units) if (u.tenant === 'KDDI') kddiRooms.add(`${u.property_id}|${u.room}`)
-  const unitIdOf = new Map<string, string>()
-  for (const u of units) unitIdOf.set(`${u.property_id}|${u.room}`, u.id)
-  const unitOf = new Map<string, Unit>()
-  for (const u of units) unitOf.set(`${u.property_id}|${u.room}`, u)
-
-  const out: Transaction[] = []
-  for (const rec of records) {
-    const paid = n(rec.paid)
-    if (paid <= 0) continue
-    const key = `${rec.property_id}|${rec.room}`
-    const unitId = unitIdOf.get(key)
-    // 号室が突き合わない記録は従来どおり足す
-    if (unitId && booked.has(`${unitId}|${rec.year}-${String(rec.month).padStart(2, '0')}`)) continue
-
-    // 月次記録は既に「何月分か」で持っているので、これ以上ずらしてはいけない。
-    // accountingMonth は11日以降を翌月に寄せるため、日は必ず10日以前にする。
-    const date = `${rec.year}-${String(rec.month).padStart(2, '0')}-01`
-    const base = { property_id: rec.property_id, type: 'income' as const, date }
-    const idBase = `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`
-
-    if (kddiRooms.has(key)) {
-      out.push({ ...base, id: idBase, category: 'KDDI', amount: paid })
-      continue
-    }
-
-    const u = unitOf.get(key)
-    const split = splitParkingFrom(rec.year, rec.month)
-    // 賃料＋共益費を払いきった残りを、契約の駐輪駐車欄の額まで駐車・駐輪に回す
-    let pk = parkingYen(u?.parking)
-    // 差し引く「賃料＋共益費」は、部屋の現在値と賃料履歴の当月額のうち高いほう。
-    //   ・値下げした部屋（守口703：70,000→68,000）に今の額を当てると、過去の月の差額が
-    //     光熱費に回ってしまう。当時の額のほうが高いので履歴を採る。
-    //   ・逆に値上げのときに履歴の安い額まで下げないのは、改定日より前から実際の入金が
-    //     新しい額で動いていることがあるため（堂島）。下げると差額が光熱費に流れる。
-    // 賃料履歴を渡さない呼び出しは従来どおり部屋の現在値だけを使う。
-    let rentBase = n(u?.rent) + n(u?.kyoeki)
-    if (u && rentHistoryByUnit) {
-      const eff = effectiveRentKyoeki(u, rentHistoryByUnit.get(u.id), rec.year, rec.month)
-      rentBase = Math.max(rentBase, n(eff.rent) + n(eff.kyoeki))
-      // 駐輪駐車もその月の履歴を採る。部屋の現在値だけを見ていると、あとから駐車場を
-      // 借りた部屋（ルネス守口202号：2026年6月から）の契約前の月まで駐車・駐輪に
-      // 計上され、実際には水道代だった分が駐車場代に化ける。
-      // 履歴側が空のときは部屋の現在値で補う（billedAmount と同じ扱い）。
-      // 駐車場が無い期間は履歴の駐輪駐車を '0' にしておくこと（空にすると現在値に落ちる）。
-      pk = parkingYen(eff.parking || u.parking)
-    }
-    // 賃料が0の部屋（停止中・契約額が台帳に無い部屋）は差し引く土台が無いので分けない。
-    // 分けると入金の全額が光熱費に落ちる（阿波座2Fの月120万円など）。
-    const canSplit = split && rentBase > 0
-    const afterRent = Math.max(0, paid - rentBase)
-    const parkingPart = canSplit ? Math.min(afterRent, pk) : 0
-    // それも超えた残りは光熱費（水道代など入居者負担分）
-    const utilityPart = canSplit ? Math.max(0, afterRent - parkingPart) : 0
-
-    out.push({ ...base, id: idBase, category: CAT_RENT, amount: paid - parkingPart - utilityPart })
-    if (parkingPart > 0) {
-      out.push({ ...base, id: `${idBase}-pk`, category: CAT_PARKING, amount: parkingPart })
-    }
-    if (utilityPart > 0) {
-      out.push({ ...base, id: `${idBase}-ut`, category: CAT_UTILITY, amount: utilityPart })
-    }
-  }
-  return out
 }
 
 /**
@@ -641,23 +550,92 @@ const splitParkingFrom = (year: number, month: number) =>
   year * 12 + (month - 1) >= PARKING_SPLIT_FROM
 
 /**
- * 賃料・共益費が既に記帳されている「号室×帰属月」の集合を作る。
- * paymentRecordsToTransactions に渡して、同じ家賃の二重計上を防ぐ。
- * キーは `${unit_id}|YYYY-MM`。号室の紐付いていない記帳は対象外。
+ * 収支表・管理表・物件概要書に渡す取引の一覧を組み立てる。
  *
- * 記帳の暦月ではなく帰属月で持つのが要点。前家賃なので 6/30 の入金は7月分＝
- * 月次記録では2026-07に載る。暦月（2026-06）で突き合わせると外れてしまい、
- * 同じ家賃が「6月＝記帳」「7月＝記録」の2か所に出てしまう。
+ * 家賃収入は「契約金額ベース」＝入金状況の請求額（賃料＋共益費＋駐輪駐車＋水道代）で出す。
+ * 以前は通帳の入金額で出していたため、部屋の賃料を直しても収支表の金額がまったく動かなかった。
+ * 請求額は入金状況の月次記録に入っていて、部屋・賃料履歴・入退去から自動で作り直される
+ * （lib/derive.ts・lib/resync.ts）ので、マスタを直せば収支表まで連動する。
+ *
+ * 契約金額ベースなので、滞納している月も満額が並ぶ。実際にいくら入ったかは入金状況で見る。
+ *
+ * 台帳の記帳のうち「号室が紐づいた賃料系の収入」は、同じ帰属月に記録があれば落とす
+ * （同じ家賃を記帳と記録の両方に入れている月の二重計上を防ぐ）。記録が無い月は
+ * 従来どおり記帳をそのまま使うので、再計算をかける前でも収入が消えることはない。
+ *
+ * 突き合わせに帰属月を使うのが要点。前家賃なので 6/30 の入金は7月分＝記録では2026-07に載る。
+ * 暦月（2026-06）で突き合わせると外れてしまい、同じ家賃が2か所に出てしまう。
+ *
+ * 内訳は 賃料→共益費→駐車・駐輪→光熱費 の順に振り分ける。まとめ入金の按分
+ * （allocateDeposit）と同じ順番。
+ *   賃料＋共益費を超えた分 … 契約の駐輪駐車欄の額まで「駐車・駐輪」
+ *   それも超えた分         … 「光熱費」（入居者負担の水道代など）
+ * KDDI契約の部屋（units.tenant='KDDI'）だけは家賃ではなくKDDI収入として計上する。
  */
-export function bookedRentKeys(transactions: Transaction[]): Set<string> {
-  const s = new Set<string>()
-  for (const t of transactions) {
-    if (t.type !== 'income' || !t.unit_id) continue
-    if (!RENT_CATEGORIES.has(t.category)) continue
-    const { year, month } = attributionMonth(t.date)
-    s.add(`${t.unit_id}|${year}-${String(month).padStart(2, '0')}`)
+export function incomeTransactions(
+  transactions: Transaction[],
+  records: PaymentRecord[],
+  units: Unit[],
+  rentHistoryByUnit?: Map<string, RentHistory[]>,
+): Transaction[] {
+  const kddiRooms = new Set<string>()
+  for (const u of units) if (u.tenant === 'KDDI') kddiRooms.add(`${u.property_id}|${u.room}`)
+  const unitOf = new Map<string, Unit>()
+  for (const u of units) unitOf.set(`${u.property_id}|${u.room}`, u)
+
+  // 記録で賄った「号室×帰属月」。ここに当たる記帳は落とす
+  const covered = new Set<string>()
+  const out: Transaction[] = []
+
+  for (const rec of records) {
+    const billed = n(rec.billed)
+    if (billed <= 0) continue
+    const key = `${rec.property_id}|${rec.room}`
+    const u = unitOf.get(key)
+    const ym = `${rec.year}-${String(rec.month).padStart(2, '0')}`
+    if (u) covered.add(`${u.id}|${ym}`)
+
+    // 月次記録は既に「何月分か」で持っているので、これ以上ずらしてはいけない。
+    // accountingMonth は11日以降を翌月に寄せるため、日は必ず10日以前にする。
+    const date = `${ym}-01`
+    const base = { property_id: rec.property_id, type: 'income' as const, date }
+    const idBase = `pr-${rec.property_id}-${rec.room}-${rec.year}-${rec.month}`
+
+    if (kddiRooms.has(key)) {
+      out.push({ ...base, id: idBase, category: 'KDDI', amount: billed })
+      continue
+    }
+
+    // その月に効いていた契約額の内訳。履歴が無ければ部屋の現在値に落ちる
+    const eff = u ? effectiveRentKyoeki(u, rentHistoryByUnit?.get(u.id), rec.year, rec.month) : null
+    const rentBase = eff ? n(eff.rent) + n(eff.kyoeki) : 0
+    const pk = eff ? parkingYen(eff.parking || u!.parking) : 0
+    // 賃料が0の部屋（停止中・契約額が台帳に無い部屋）は差し引く土台が無いので分けない。
+    // 分けると請求額の全額が光熱費に落ちる。
+    const canSplit = splitParkingFrom(rec.year, rec.month) && rentBase > 0
+    // 入居月の日割りのように請求額が契約額を下回る月は、賃料の側で頭打ちにする
+    const rent = Math.min(billed, rentBase)
+    const afterRent = Math.max(0, billed - rent)
+    const parkingPart = canSplit ? Math.min(afterRent, pk) : 0
+    const utilityPart = canSplit ? Math.max(0, afterRent - parkingPart) : 0
+
+    out.push({ ...base, id: idBase, category: CAT_RENT, amount: billed - parkingPart - utilityPart })
+    if (parkingPart > 0) {
+      out.push({ ...base, id: `${idBase}-pk`, category: CAT_PARKING, amount: parkingPart })
+    }
+    if (utilityPart > 0) {
+      out.push({ ...base, id: `${idBase}-ut`, category: CAT_UTILITY, amount: utilityPart })
+    }
   }
-  return s
+
+  for (const t of transactions) {
+    if (t.type === 'income' && t.unit_id && RENT_CATEGORIES.has(t.category)) {
+      const { year, month } = attributionMonth(t.date)
+      if (covered.has(`${t.unit_id}|${year}-${String(month).padStart(2, '0')}`)) continue
+    }
+    out.push(t)
+  }
+  return out
 }
 
 /**

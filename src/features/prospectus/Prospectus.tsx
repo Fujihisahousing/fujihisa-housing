@@ -30,7 +30,7 @@ import {
 import {
   calcRentRoll, buildingAgeYears, parkingYen,
   calcOpexActual, calcRepairByFiscalYear, calcIncomeStatement,
-  paymentRecordsToTransactions, bookedRentKeys, rentHistoryMapOf,
+  incomeTransactions, rentHistoryMapOf,
   fiscalYearOf, fiscalYearRange, FISCAL_MONTHS, FISCAL_PREV_YEAR_COLS,
   type OpexActual, type RepairByYear, type IncomeStatementResult, type StatementRow,
 } from '../../lib/calc'
@@ -191,10 +191,7 @@ export function Prospectus({ properties }: { properties: Property[] }) {
   // 年間収支表。入金状況の月次記録を家賃収入として合算する（同じ家賃を台帳にも
   // 記帳している号室・月は記帳のほうを採る）。変換は収支表・管理表と共通の calc.ts 側。
   const allTxs = useMemo(
-    () => [
-      ...txs,
-      ...paymentRecordsToTransactions(records, units, bookedRentKeys(txs), rentHistoryMapOf(rentHistory)),
-    ],
+    () => incomeTransactions(txs, records, units, rentHistoryMapOf(rentHistory)),
     [txs, records, units, rentHistory],
   )
   const stCur = useMemo(() => calcIncomeStatement(allTxs, thisFY), [allTxs, thisFY])

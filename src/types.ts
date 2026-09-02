@@ -169,6 +169,12 @@ export interface PaymentRecord {
   memo?: string | null
   /** 滞納月数の手入力値。null なら自動計算値を表示する */
   arrears_months?: number | null
+  /**
+   * 手で直した値だけを入れる箱。ここにあるキーは、マスタからの作り直しで上書きしない。
+   * 例: { "billed": 63000, "judgement": "保証会社請求中" }
+   * 詳しくは lib/derive.ts と supabase/add_payment_record_overrides.sql
+   */
+  overrides?: Record<string, unknown> | null
 }
 
 /** 入金状況の判定（手入力のプルダウンで選べる値） */

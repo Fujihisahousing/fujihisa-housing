@@ -8,7 +8,8 @@ import { useAuth } from '../../auth/AuthProvider'
 import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo, moveEventsRepo, moveOutLedgerRepo } from '../../lib/repositories'
 import { unitCompare } from '../../lib/sortUnits'
 import { isLotProperty, lotName, lotNumberOf, LOT_SPEC_FIELDS } from '../../lib/lots'
-import { effectiveRentKyoeki, deriveJudgement } from '../../lib/calc'
+import { effectiveRentKyoeki } from '../../lib/calc'
+import { resyncUnit } from '../../lib/resync'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, today } from '../../lib/format'
 import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type MoveEvent, type MoveOutLedgerEntry, type Property, type RentHistory, type Unit, type UnitSpec } from '../../types'
@@ -340,37 +341,31 @@ function ymLabel(date: string): string {
   return m ? `${m[1]}年${Number(m[2])}月分` : String(date)
 }
 
-async function repriceRecords(
-  propertyId: string,
-  room: string,
-  unitId: string,
-  history: RentHistory[],
-  effectiveDate: string,
-) {
-  const [fromYear, fromMonth] = effectiveDate.split('-').map(Number)
-  if (!fromYear || !fromMonth) return
-  const records = await paymentRecordsRepo.listFrom(propertyId, room, fromYear, fromMonth)
-  for (const rec of records) {
-    // effectiveRentKyoeki は units の現在値をフォールバックに使うが、ここでは
-    // 履歴だけで決めたいので rent/kyoeki は 0 の器を渡す（履歴が無ければ 0 になり、
-    // その月は貼り直しの対象外として下で弾く）。
-    const eff = effectiveRentKyoeki(
-      { id: unitId, rent: 0, kyoeki: 0 } as Unit,
-      history,
-      rec.year,
-      rec.month,
-    )
-    const billed = eff.rent + eff.kyoeki
-    if (billed === 0) continue // その月をカバーする履歴が無い＝据え置き
-    if (Number(rec.billed ?? -1) === billed) continue // 変化なし
-    const judgement = deriveJudgement(
-      rec.judgement !== '空室',
-      billed,
-      Number(rec.paid ?? 0),
-      Boolean(rec.guarantor),
-    )
-    await paymentRecordsRepo.setBilled(propertyId, room, rec.year, rec.month, billed, judgement)
-  }
+/** 'YYYY-MM-01' の前月を [年, 月] で返す */
+function prevMonthOf(date: string): [number, number] {
+  const [y, m] = String(date).slice(0, 10).split('-').map(Number)
+  return m === 1 ? [y - 1, 12] : [y, m - 1]
+}
+
+/** 'YYYY-MM-01' の翌月1日。適用終了月の翌月＝元の額に戻す月を作るのに使う */
+function nextMonthOf(date: string): string {
+  const [y, m] = String(date).slice(0, 10).split('-').map(Number)
+  const ny = m === 12 ? y + 1 : y
+  const nm = m === 12 ? 1 : m + 1
+  return `${ny}-${String(nm).padStart(2, "0")}-01`
+}
+
+/**
+ * 履歴1行の適用期間の表示。'2026年4月分 〜 2026年9月分' / '2026年10月分 〜 継続中'。
+ *
+ * 終了月は列として持たず「次の履歴の開始月の前月」から導く。履歴は「開始月が新しいほど
+ * 優先」の階段なので、次の行が始まった時点でその行の期間は終わっている＝この導出で一致する。
+ * 次の行が無い行＝いま効いている額なので「継続中」。
+ */
+function ymRangeLabel(from: string, nextFrom?: string): string {
+  if (!nextFrom) return `${ymLabel(from)} 〜 継続中`
+  const [y, m] = prevMonthOf(nextFrom)
+  return `${ymLabel(from)} 〜 ${y}年${m}月分`
 }
 
 /** 物件モーダルの項目が増えたので、区切りの小見出しを入れて探しやすくする */
@@ -618,6 +613,8 @@ function UnitModal({
       kyoeki: value.kyoeki != null ? String(value.kyoeki) : '',
       variation: value.variation ?? '',
       rent_apply_ym: thisYm(),
+      // 終了月は既定で空欄＝「現在も続いている」。期間を区切りたいときだけ入れてもらう
+      rent_end_ym: '',
       deposit: value.deposit != null ? String(value.deposit) : '',
       hoshokin: value.hoshokin != null ? String(value.hoshokin) : '',
       key_money: value.key_money != null ? String(value.key_money) : '',
@@ -648,12 +645,38 @@ function UnitModal({
 
   async function removeHistory(id: string) {
     if (!window.confirm('この賃料履歴を削除しますか？')) return
+    const removed = history.find((h) => h.id === id)
     await rentHistoryRepo.remove(id)
-    setHistory((prev) => prev.filter((h) => h.id !== id))
+    const rest = history.filter((h) => h.id !== id)
+    setHistory(rest)
+    // 履歴を消したら、その部屋の入金状況をマスタから作り直す
+    if (removed && value?.id) {
+      await resyncUnit({ id: value.id, property_id: propertyId })
+    }
   }
 
   async function save() {
     if (!f.room?.trim()) return setError('号室を入力してください。')
+
+    // 適用期間のチェック。終了月は「その月分まで」の意味で、翌月から改定前の額に戻す。
+    const endYm = (f.rent_end_ym ?? '').trim()
+    if (endYm) {
+      if (!(f.rent_apply_ym ?? '').trim()) {
+        return setError('適用終了月を入れるときは、適用開始月も選んでください。')
+      }
+      if (endYm < (f.rent_apply_ym ?? '')) {
+        return setError('適用終了月は、適用開始月と同じ月かそれ以降にしてください。')
+      }
+      // 終了したあと戻す額が無いと請求額が0円になってしまうので、先に止める。
+      if (!isEdit) {
+        return setError(
+          '新しく追加する部屋には適用終了月を設定できません（終了後に戻す額が無いため）。いったん保存してから編集してください。',
+        )
+      }
+      if ((Number(value?.rent) || 0) + (Number(value?.kyoeki) || 0) <= 0 && history.length === 0) {
+        return setError('期間の終了後に戻す賃料が分かりません。適用終了月は空欄にしてください。')
+      }
+    }
 
     // 「空室」に変えた＝退去が確定した時点。契約者まわりの情報を消す。
     // 賃料・共益費・駐輪駐車は次の募集条件としてそのまま使うので残す
@@ -681,6 +704,15 @@ function UnitModal({
         newRent !== (Number(value?.rent) || 0) ||
         newKyoeki !== (Number(value?.kyoeki) || 0) ||
         newParking !== (value?.parking ?? null)
+      // 履歴を1行書くかどうか。金額がどれも入っていない部屋（停止中など）は履歴を作らない
+      const willWriteHistory = rentChanged && (newRent > 0 || newKyoeki > 0 || Boolean(newParking))
+      // 適用期間は履歴を書くときの設定なので、金額を変えずに終了月だけ入れても効かない。
+      // 黙って無視すると「入力したのに反映されない」になるので、ここで理由を出して止める。
+      if (endYm && !willWriteHistory) {
+        return setError(
+          '適用期間は、賃料・共益費・駐輪駐車の金額を変えたときの設定です。金額を変えずに期間だけ直したいときは、下の履歴一覧から不要な行を削除してください。',
+        )
+      }
 
       const payload: Partial<Unit> = {
         property_id: propertyId,
@@ -721,6 +753,21 @@ function UnitModal({
         payload.spec = Object.keys(out).length > 0 ? (out as UnitSpec) : null
       }
 
+      // 号室を変えたときは、月次記録（payment_records）も新しい号室名へ移す。
+      // 記録のキーは (物件, 号室, 年, 月) で unit_id を持たないため、部屋だけ改名すると
+      // その部屋の入金状況・滞納一覧の記録が丸ごと消えたように見える。
+      const oldRoom = (value?.room ?? '').trim()
+      const newRoom = payload.room!
+      if (isEdit && oldRoom && oldRoom !== newRoom) {
+        // 変更先の号室に既に記録があると主キーがぶつかるので、勝手に混ぜずに止める
+        if ((await paymentRecordsRepo.countByRoom(propertyId, newRoom)) > 0) {
+          return setError(
+            `号室「${newRoom}」には既に入金状況の記録があります。先にそちらを整理してから号室を変更してください。`,
+          )
+        }
+        await paymentRecordsRepo.renameRoom(propertyId, oldRoom, newRoom)
+      }
+
       let unitId = value?.id
       if (isEdit && unitId) await unitsRepo.update(unitId, payload)
       else unitId = (await unitsRepo.create(payload)).id
@@ -728,6 +775,12 @@ function UnitModal({
       // 入金状況の月次記録のうち「契約者名が未入力」のものだけ、ここで
       // 入力した契約者情報を反映する。既に契約者名が入っている記録
       // （前の入居者の分など）には触らない——過去の履歴を保護するため。
+      // 保証会社は判定（保証会社入金済）と滞納一覧の表示に使う。契約者名と同じ扱いで、
+      // 保証会社欄が空のままの記録だけを埋める。
+      if (payload.guarantor) {
+        await paymentRecordsRepo.fillMissingGuarantor(propertyId, payload.room!, payload.guarantor)
+      }
+
       if (payload.tenant) {
         await paymentRecordsRepo.fillMissingTenant(
           propertyId,
@@ -766,7 +819,7 @@ function UnitModal({
         }
       }
 
-      if (rentChanged && (newRent > 0 || newKyoeki > 0 || newParking)) {
+      if (willWriteHistory) {
         // 適用開始月の1日を反映開始日にする。effectiveRentKyoeki は対象月の1日と
         // 文字列比較するので、1日にしておけば「その月分から」がそのまま成り立つ。
         const applyDate = ymToDate(f.rent_apply_ym) || today()
@@ -797,6 +850,36 @@ function UnitModal({
           kyoeki: newKyoeki,
           parking: newParking,
         })
+
+        // 適用終了月が入っていれば、その翌月から改定前の額に戻す履歴を足す。
+        // 履歴は「開始月が新しいほど優先」の階段なので、戻す行を1本置くことが
+        // 「この額はここまで」を表す唯一の方法になる（終了月の列は持たない）。
+        // 終了月が空欄なら行を足さない＝いまも続いている。
+        if (endYm) {
+          const revertDate = nextMonthOf(ymToDate(endYm)!)
+          // 既に翌月から始まる履歴があるなら、そこで自然に切り替わるので足さない
+          const already = before.some((h) => String(h.effective_date).slice(0, 10) === revertDate)
+          if (!already) {
+            // 戻す額＝この改定の直前に効いていた額。改定前の units の値をフォールバックに
+            // して、それまでの履歴から求める（履歴が無ければ改定前の units の値そのもの）。
+            const [py, pm] = prevMonthOf(applyDate)
+            const prev = effectiveRentKyoeki(
+              { id: unitId, rent: oldRent, kyoeki: oldKyoeki, parking: value?.parking ?? null } as Unit,
+              before,
+              py,
+              pm,
+            )
+            if (prev.rent > 0 || prev.kyoeki > 0) {
+              await rentHistoryRepo.create({
+                unit_id: unitId,
+                effective_date: revertDate,
+                rent: prev.rent,
+                kyoeki: prev.kyoeki,
+                parking: prev.parking,
+              })
+            }
+          }
+        }
         // 適用開始月が過去（バックデート修正）の場合、「今日時点で最新の履歴」を units の現在値として再計算する。
         const allHistory = await rentHistoryRepo.listByUnit(unitId)
         const todayStr = today()
@@ -809,11 +892,11 @@ function UnitModal({
         ) {
           await unitsRepo.update(unitId, { rent: current.rent, kyoeki: current.kyoeki, parking: current.parking ?? null })
         }
-        // 入金状況の月次記録は、作られた時点の請求額を持ったまま固まっている
-        // （記録がある月は物件情報にフォールバックしない設計）。賃料履歴を直しても
-        // 画面が変わらないのを防ぐため、反映開始日以降の記録の請求額を貼り直す。
-        await repriceRecords(propertyId, payload.room!, unitId, allHistory, ymToDate(f.rent_apply_ym) || todayStr)
       }
+      // 部屋の情報・賃料履歴を直したら、入金状況の月次記録をマスタから作り直す。
+      // 請求額・契約者名・保証会社・判定がここで全部つながる（手で直した値は残る）。
+      if (unitId) await resyncUnit({ id: unitId, property_id: propertyId })
+
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存に失敗しました。')
@@ -905,21 +988,37 @@ function UnitModal({
         </div>
         <TextField label="変動値（家賃変動・自由入力）" value={f.variation ?? ''} onChange={set('variation')} />
         <div>
-          <TextField
-            label="適用開始月（何月分の賃料から新しい額にするか。賃料・共益費・駐輪駐車を変えたときだけ使う）"
-            value={f.rent_apply_ym ?? ''}
-            onChange={set('rent_apply_ym')}
-            type="month"
-          />
+          <label className="block text-xs font-medium text-slate-600 mb-1">
+            適用期間（この賃料・共益費・駐輪駐車がいつからいつまでか。金額を変えたときだけ使う）
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <TextField
+              label="開始月（この月分から）"
+              value={f.rent_apply_ym ?? ''}
+              onChange={set('rent_apply_ym')}
+              type="month"
+            />
+            <TextField
+              label="終了月（この月分まで／空欄＝現在も継続）"
+              value={f.rent_end_ym ?? ''}
+              onChange={set('rent_end_ym')}
+              type="month"
+            />
+          </div>
           <p className="mt-1 text-[11px] text-slate-500">
-            例：2026年8月分から値上げ → 2026-08 を選ぶ。7月以前の請求額と収支表は変わりません。
+            例：2026年8月分から値上げ → 開始 2026-08・終了は空欄。7月以前の請求額と収支表は変わりません。
             過去の月を選べば遡って直せます。
+            <br />
+            終了月を入れると、その翌月分から改定前の額に自動で戻ります（一時的な減額・免除など）。
           </p>
           {history.length > 0 && (
             <div className="mt-2 rounded-lg border border-slate-200 divide-y divide-slate-100">
-              {history.map((h) => (
+              {/* history は開始月の降順。1つ手前（＝1つ新しい行）の開始月が、この行の終了月になる */}
+              {history.map((h, i) => (
                 <div key={h.id} className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-600">
-                  <span className="w-24 shrink-0">{ymLabel(h.effective_date)}〜</span>
+                  <span className="w-44 shrink-0">
+                    {ymRangeLabel(h.effective_date, history[i - 1]?.effective_date)}
+                  </span>
                   <span className="flex-1">
                     賃料 {yen(h.rent)}／共益費 {yen(h.kyoeki)}
                     {h.parking && `／駐輪駐車 ${h.parking}`}

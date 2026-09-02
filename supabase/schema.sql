@@ -101,6 +101,11 @@ create table if not exists payment_records (
   updated_at timestamptz default now(),
   primary key (property_id, room, year, month)
 );
+-- 手で直した値だけを入れる箱。ここにあるキーはマスタからの作り直しで上書きしない
+-- （詳しくは supabase/payment_record_overrides.sql と src/lib/derive.ts）
+alter table payment_records add column if not exists overrides jsonb not null default '{}'::jsonb;
+-- 滞納月数の手入力（null なら自動計算）
+alter table payment_records add column if not exists arrears_months int;
 alter table payment_records enable row level security;
 drop policy if exists "auth all payment_records" on payment_records;
 create policy "auth all payment_records" on payment_records for all to authenticated using (true) with check (true);

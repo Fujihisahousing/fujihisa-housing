@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { X, Upload, Loader2, FileSpreadsheet, Download } from 'lucide-react'
 import { unitsRepo, paymentRecordsRepo } from '../../lib/repositories'
+import { resyncProperty } from '../../lib/resync'
 import { deriveJudgement } from '../../lib/calc'
 import { yen } from '../../lib/format'
 import {
@@ -232,6 +233,9 @@ export function ImportWater({
           judgement: deriveJudgement(occupied, patch!.billed, patch!.paid, Boolean(guarantor)),
         })
       }
+      // 請求額・判定はマスタから作り直す。水道代は備考に残した目印から拾われるので、
+      // あとで賃料を直しても「契約額＋水道代」で組み直される（lib/derive.ts）。
+      await resyncProperty(propertyId)
       // 反映後の請求額を表に出し続けるため、記録を読み直す
       setRecords(await paymentRecordsRepo.list(propertyId))
       setDone(
