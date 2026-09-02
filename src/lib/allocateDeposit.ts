@@ -40,6 +40,11 @@ export interface AllocationResult {
 
 /** 1戸ぶんを賃料→共益費→駐車・駐輪→光熱費の順に充てる */
 function splitOne(u: Unit, amount: number): Omit<Allocation, 'unitId'> {
+  // 契約額が台帳に無い部屋（停止中など賃料0）は差し引く土台が無いので分けない。
+  // 分けると入金の全額が光熱費に落ちてしまうので、従来どおり全額を賃料に充てる。
+  if (contractAmount(u) <= 0) {
+    return { rent: amount, kyoeki: 0, parking: 0, utility: 0, total: amount }
+  }
   const rent = Math.min(amount, n(u.rent))
   const afterRent = Math.max(0, amount - rent)
   const kyoeki = Math.min(afterRent, n(u.kyoeki))

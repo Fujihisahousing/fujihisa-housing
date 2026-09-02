@@ -201,7 +201,9 @@ export const PROPERTY_HIDDEN_ROWS: ReadonlyMap<string, ReadonlySet<string>> = ne
   ['プランドール堂島', new Set(['看板', '保険料（賠償責任）'])],
   ['シャーメゾン新大阪', new Set(['看板', '保険料（賠償責任）'])],
   ['ルネスプランドール守口', new Set(['看板', '保険料（賠償責任）'])],
-  ['プランドール阿波座', new Set(['光熱費（入居者負担）', '看板'])],
+  // 阿波座は1Fテナントから家賃とは別に水道代を受け取っている（入金は総額で届き、
+  // 家賃を超えた分が水道代）。2026-09 に「光熱費（入居者負担）」を出す側へ移した。
+  ['プランドール阿波座', new Set(['看板'])],
   ['近畿吉田ビル', new Set(['看板', 'アルソック', '清掃費', 'ゴミ処理代', '保険料（賠償責任）'])],
   ['富士マンション', new Set(KODATE_LIKE_HIDDEN)],
   // 川西市久代（戸建てグループには入れず、全体タブでも単体の帯で表示する）。
@@ -592,7 +594,7 @@ export function paymentRecordsToTransactions(
     const u = unitOf.get(key)
     const split = splitParkingFrom(rec.year, rec.month)
     // 賃料＋共益費を払いきった残りを、契約の駐輪駐車欄の額まで駐車・駐輪に回す
-    const pk = parkingYen(u?.parking)
+    let pk = parkingYen(u?.parking)
     // 差し引く「賃料＋共益費」は、部屋の現在値と賃料履歴の当月額のうち高いほう。
     //   ・値下げした部屋（守口703：70,000→68,000）に今の額を当てると、過去の月の差額が
     //     光熱費に回ってしまう。当時の額のほうが高いので履歴を採る。
@@ -603,11 +605,20 @@ export function paymentRecordsToTransactions(
     if (u && rentHistoryByUnit) {
       const eff = effectiveRentKyoeki(u, rentHistoryByUnit.get(u.id), rec.year, rec.month)
       rentBase = Math.max(rentBase, n(eff.rent) + n(eff.kyoeki))
+      // 駐輪駐車もその月の履歴を採る。部屋の現在値だけを見ていると、あとから駐車場を
+      // 借りた部屋（ルネス守口202号：2026年6月から）の契約前の月まで駐車・駐輪に
+      // 計上され、実際には水道代だった分が駐車場代に化ける。
+      // 履歴側が空のときは部屋の現在値で補う（billedAmount と同じ扱い）。
+      // 駐車場が無い期間は履歴の駐輪駐車を '0' にしておくこと（空にすると現在値に落ちる）。
+      pk = parkingYen(eff.parking || u.parking)
     }
+    // 賃料が0の部屋（停止中・契約額が台帳に無い部屋）は差し引く土台が無いので分けない。
+    // 分けると入金の全額が光熱費に落ちる（阿波座2Fの月120万円など）。
+    const canSplit = split && rentBase > 0
     const afterRent = Math.max(0, paid - rentBase)
-    const parkingPart = split ? Math.min(afterRent, pk) : 0
+    const parkingPart = canSplit ? Math.min(afterRent, pk) : 0
     // それも超えた残りは光熱費（水道代など入居者負担分）
-    const utilityPart = split ? Math.max(0, afterRent - parkingPart) : 0
+    const utilityPart = canSplit ? Math.max(0, afterRent - parkingPart) : 0
 
     out.push({ ...base, id: idBase, category: CAT_RENT, amount: paid - parkingPart - utilityPart })
     if (parkingPart > 0) {
