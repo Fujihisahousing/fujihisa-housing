@@ -140,26 +140,39 @@ export function parseInvoiceSheet(grid: unknown[][]): ParsedInvoice {
 /**
  * 月次記録の備考に残す目印。同じ請求書を何度取り込んでも二重に足さないために使うのと、
  * 請求額に上乗せしている光熱費がいくらなのかを備考欄でそのまま確認できるようにするため。
- * 備考には `[水道 3835]` のように生のテキストで入る。
+ * 備考には `[水道 1617] [電気 69094]` のように生のテキストで入る。
  *
- * ラベルは取込の種類で変わる（水道／電気／ガス）ほか、昔の記録から引き継いだ分は
- * 内訳が分からないので `光熱費` にする。読み取りはどのラベルでも金額を拾う。
+ * ラベルは費目ごとに分かれていて、水道と電気の両方を上乗せしている物件（道頓堀）では
+ * 2つ並ぶ。昔の記録から引き継いだ分は内訳が分からないので `光熱費` にまとめる。
+ * 読み取りは並んでいる目印を全部足す。書き込みは同じラベルの目印だけを貼り替えるので、
+ * 水道代を取り込んでも電気代の目印は消えない。
  */
-const TAG = /\[(?:水道|電気|ガス|光熱費)\s*(-?\d+)\]/
+const UTILITY_LABELS = ['水道', '電気', 'ガス', '光熱費'] as const
+export type UtilityLabel = (typeof UTILITY_LABELS)[number]
 
-/** 備考に残っている「請求額に上乗せしている光熱費」。無ければ0 */
+/** `[水道 1617]` を拾う正規表現。ラベルごとに作る */
+const tagRe = (label: string) => new RegExp('\\[' + label + '\\s*(-?\\d+)\\]', 'g')
+
+/** 備考に残っている「請求額に上乗せしている光熱費」の合計。無ければ0 */
 export function readWaterTag(memo: string | null | undefined): number {
-  const m = TAG.exec(String(memo ?? ''))
-  return m ? Number(m[1]) : 0
+  const s = String(memo ?? '')
+  let sum = 0
+  for (const label of UTILITY_LABELS) {
+    for (const m of s.matchAll(tagRe(label))) sum += Number(m[1]) || 0
+  }
+  return sum
 }
 
-/** 備考の目印を新しい金額に貼り替える（元の文言は残す） */
+/** 備考の目印を新しい金額に貼り替える（元の文言と、他の費目の目印は残す） */
 export function writeWaterTag(
   memo: string | null | undefined,
   water: number,
-  label: '水道' | '電気' | 'ガス' | '光熱費' = '水道',
+  label: UtilityLabel = '水道',
 ): string {
-  const base = String(memo ?? '').replace(TAG, '').replace(/\s{2,}/g, ' ').trim()
+  const base = String(memo ?? '')
+    .replace(tagRe(label), '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
   const tag = `[${label} ${water}]`
   return base ? `${base} ${tag}` : tag
 }
