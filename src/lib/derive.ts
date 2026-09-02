@@ -273,21 +273,32 @@ export function mergeMonth(
 
   // 請求額の初回引き継ぎ。この仕組みを入れる前の記録は、請求額の内訳がどこにも
   // 残っていないので、いまの材料だけで作り直すと差額が消えてしまう。
-  //   ・契約額を上回っている … 上乗せして請求している実費（水道代など）。備考の目印に
-  //     移しておけば「契約額＋実費」で組み直せるので、あとで賃料を直しても連動し続ける。
-  //     阿波座1Fが該当：家賃600,000に対し請求額603,835で、目印は付いていなかった。
-  //   ・契約額を下回っている … 入居月の日割りなど、いまの材料からは作り直せない額。
-  //     手動上書きとして凍結する（自動に戻したいときは画面から外せる）。
+  //   ① 請求額が契約額を上回っている … 上乗せして請求している実費（水道代・電気代など）。
+  //      備考の目印に移しておけば「契約額＋実費」で組み直せるので、あとで賃料を直しても
+  //      連動し続ける。阿波座1F・道頓堀3Fが該当：目印は付いていなかった。
+  //   ② 請求額は契約額ちょうどなのに入金額がそれを上回っている … 実費を請求額に乗せず、
+  //      入金額にだけ出していた月（道頓堀5Fが該当）。以前の収支表は「入金額 − 契約額」を
+  //      光熱費として出していたので、その差額を目印に移せば同じ数字が再現できる。
+  //   ③ それ以外で請求額が作り直せない … 入居月の日割りや、賃料履歴に入っていない改定
+  //      （道頓堀2F：当時330,000／いまの契約額385,000）。手動上書きとして凍結する
+  //      （自動に戻したいときは画面の判定から「自動に戻す」で外せる）。
   let water = d.water
   let memo = rec?.memo ?? null
-  if (!('billed' in ov) && rec && d.known && n(rec.billed) !== d.billed) {
-    const stored = n(rec.billed)
-    if (d.water === 0 && d.contract > 0 && stored > d.contract) {
-      water = stored - d.contract
+  if (!('billed' in ov) && rec && d.known) {
+    const storedBilled = n(rec.billed)
+    const storedPaid = n(rec.paid)
+    // 目印を付けられるのは、まだ目印が無く、契約額が分かっている月だけ
+    const canTag = d.water === 0 && d.contract > 0
+    if (canTag && storedBilled > d.contract) {
+      water = storedBilled - d.contract
       memo = writeWaterTag(memo, water, '光熱費')
-    } else {
-      ov.billed = stored
+    } else if (canTag && storedBilled === d.contract && storedPaid > d.contract) {
+      water = storedPaid - d.contract
+      memo = writeWaterTag(memo, water, '光熱費')
+    } else if (storedBilled !== d.billed) {
+      ov.billed = storedBilled
     }
+    // 上のどれにも当たらない月＝いまの材料でそのまま作り直せるので、何もしない
   }
 
   const pick = <T,>(key: OverridableField, derived: T, kept: T): T =>
