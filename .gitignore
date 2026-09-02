@@ -27,6 +27,7 @@ supabase/migrate_*.sql
 supabase/update_*.sql
 supabase/add_*.sql
 supabase/rebuild_*.sql
+supabase/fix_*.sql
 
 # 手元の運用スクリプト・エディタ設定（service_role キーを扱うものを含む）
 scripts/
