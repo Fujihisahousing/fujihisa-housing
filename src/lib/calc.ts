@@ -324,16 +324,16 @@ export function fiscalMonthIndex(d: Date): number {
 const fiscalYearOfYM = (y: number, m: number) => (m >= FISCAL_START_MONTH ? y + 1 : y)
 const fiscalMonthIndexOfM = (m: number) => (m - FISCAL_START_MONTH + 12) % 12
 
-/** 収入のうち、入金した月の収入として扱う費目。月々の家賃と違い一時金なので寄せない */
-const INCOME_SAME_MONTH = new Set(['礼金', '敷金'])
-
 /**
  * 収支表・支出表で、その記帳を「何年何月の欄に載せるか」。
  *
- * 収入（礼金・敷金を除く）は前家賃なので、入金した月ではなく対象月に寄せる。
- * 判定は入金状況とまったく同じ規則（11日以降の入金は翌月分）なので、
- * 入金状況の「○月分」と収支表の列が必ず一致する。
- * 支出と礼金・敷金は入金日の月のまま（現金の動きどおり）。
+ * 前家賃で翌月に寄せるのは **家賃系（賃料・共益費・駐車・駐輪）だけ**。判定は入金状況と
+ * まったく同じ規則（11日以降の入金は翌月分）なので、入金状況の「○月分」と収支表の列が
+ * 必ず一致する。
+ * それ以外（支出・礼金・敷金・看板・KDDI・タイムズ・その他・水道代など）は入金日の月に
+ * そのまま載せる。前家賃ではないので寄せる理由がない。
+ *   ※以前は「収入は礼金・敷金以外すべて寄せる」にしていたため、7/27に受け取った
+ *     その他収入845,000円が8月の収入になっていた（入力欄の表示は7月と出ていて食い違う）。
  */
 export function accountingMonth(t: {
   type?: string
@@ -345,7 +345,7 @@ export function accountingMonth(t: {
   // 日付からは「何月分か」を決められないものがあるため（8/31の支払いが9月分など）。
   const picked = parseYm(t.accounting_ym)
   if (picked) return picked
-  if (t.type === 'income' && !INCOME_SAME_MONTH.has(t.category ?? '')) {
+  if (t.type === 'income' && isRentCategory(t.category ?? '')) {
     return attributionMonth(t.date)
   }
   return ledgerMonth(t.date)

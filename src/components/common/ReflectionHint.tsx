@@ -9,7 +9,14 @@
 // 「何月分か」を決められない支払いがあるため（月末に翌月分を払う借入返済など。
 // 8/31の支払いが8月分なのか9月分なのかは日付からは分からない）。選ばなければ
 // 従来どおり日付から自動で決める。選んだ月は transactions.accounting_ym に入る。
-import { addMonths, attributionMonth, ledgerMonth, parseYm, ymString } from '../../lib/calc'
+import {
+  accountingMonth,
+  addMonths,
+  attributionMonth,
+  ledgerMonth,
+  parseYm,
+  ymString,
+} from '../../lib/calc'
 
 const ym = (v: { year: number; month: number }) => `${v.year}年${v.month}月`
 
@@ -21,11 +28,17 @@ export function ReflectionHint({
   accountingYm = null,
   /** 渡すと月を選べるようになる。null で「日付から自動」に戻す */
   onPick,
+  /** 記帳の種別・費目。渡すと accountingMonth と同じ規則で自動の月を出す。
+   *  費目が混ざる画面（建物まとめ・部屋ごと）は省略してよい */
+  txType,
+  category,
 }: {
   date: string
   toPayments?: boolean
   accountingYm?: string | null
   onPick?: (v: string | null) => void
+  txType?: string
+  category?: string
 }) {
   if (!date) return null
   const led = ledgerMonth(date)
@@ -33,8 +46,13 @@ export function ReflectionHint({
   const attr = attributionMonth(date)
   const sameMonth = led.year === attr.year && led.month === attr.month
   const picked = parseYm(accountingYm)
-  // 自動で決まる月（＝収入は帰属月、支出は暦月）。選択肢はこの前後1か月から出す
-  const auto = toPayments ? attr : led
+  // 自動で決まる月。費目が分かっていれば本番の判定（accountingMonth）をそのまま使い、
+  // 分からない画面では入金状況に出るかどうかで代用する。選択肢はこの前後1か月から出す
+  const auto = txType
+    ? accountingMonth({ type: txType, category, date })
+    : toPayments
+      ? attr
+      : led
   const shown = picked ?? auto
   const options = [addMonths(auto, -1), auto, addMonths(auto, 1)]
 

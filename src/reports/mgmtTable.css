@@ -254,25 +254,42 @@
 /* ---------------- 3枚に分けて刷るとき ---------------- */
 /* 1ページあたりの帯が1/3になるぶん、行の高さと文字を上げて読みやすくする。
    列構成・色分けは1枚のときと同じなので、寸法だけを上書きする。 */
-/* 字の大きさは横幅で頭打ちになる。A3横の中身404mmから物件列52mm・項目列24mmを引くと
-   金額13列は1列24mm前後。'¥14,814,804' が左右paddingを除いた21mmに収まる上限が11pt強なので、
-   余裕をみて10pt にしてある（1枚のとき5.6pt の約1.8倍）。ここを上げると列がはみ出すので注意。 */
+/* 列幅は固定にする。自動レイアウトのままだと、合計行のある最後の1枚だけ
+   '¥-162,822,890'（13文字）に引っぱられて物件列が 54.7mm → 39mm まで削られ、
+   3枚目だけ別の表に見えていた。固定にすれば3枚とも同じ幅で刷れる。
+   割り付け：物件48mm＋項目22mm＋年間合計30mm。width は内容量ぶんなので、左右padding
+   （0.8mm×2）と罫線が外側に付く。残りを12か月で等分すると1列24.9mm・中身23.3mm。
+   字の大きさは横幅で頭打ちになる。10pt なら最長の '¥-32,184,960' が22.4mmで収まる。
+   ここを上げるか列を広げると桁が欠けるので、変えたら必ず実寸で測り直すこと。 */
 .mt-split .mt-table {
   font-size: 10pt;
   line-height: 1.15;
+  table-layout: fixed;
+}
+/* 固定レイアウトの列幅は先頭行のセルで決まる（2段目の月セルは触らなくてよい） */
+.mt-split .mt-table thead tr:first-child th:nth-child(1) {
+  width: 48mm;
+}
+.mt-split .mt-table thead tr:first-child th:nth-child(2) {
+  width: 22mm;
+}
+.mt-split .mt-table thead tr:first-child th:last-child {
+  width: 30mm;
 }
 .mt-split .mt-table th,
 .mt-split .mt-table td {
-  padding: 0.6mm 1.2mm;
+  padding: 0.6mm 0.8mm;
 }
 .mt-split .mt-table thead th {
   font-size: 10.5pt;
 }
+/* 合計行を本文より大きくすると、いちばん長い '¥-162,822,890' が列に収まらなくなる。
+   太字と上下の罫線で目立たせているので、字は本文と同じ大きさで足りる */
 .mt-split .mt-grand > td {
-  font-size: 10.5pt;
+  font-size: 10pt;
 }
 .mt-split .mt-name {
-  width: 52mm;
+  width: 48mm;
 }
 .mt-split .mt-name strong {
   font-size: 12pt;
@@ -284,7 +301,7 @@
   font-size: 9.5pt;
 }
 .mt-split .mt-item {
-  width: 24mm;
+  width: 22mm;
 }
 .mt-split .mt-item.detail {
   padding-left: 4.5mm;

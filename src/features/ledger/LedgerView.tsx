@@ -472,6 +472,8 @@ function EditModal({
             toPayments={Boolean(unitId) && isRentCategory(category)}
             accountingYm={accountingYm}
             onPick={setAccountingYm}
+            txType={tx?.type}
+            category={category}
           />
         </Row>
         <Row label="支払方法（任意）">
