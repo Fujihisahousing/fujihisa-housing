@@ -335,6 +335,8 @@ function EditModal({
   const [unitId, setUnitId] = useState('')
   const [method, setMethod] = useState('')
   const [memo, setMemo] = useState('')
+  // 収支表・支出表に載せる月の手動指定（'YYYY-MM'）。null なら日付から自動
+  const [accountingYm, setAccountingYm] = useState<string | null>(null)
   const [units, setUnits] = useState<Unit[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -348,6 +350,7 @@ function EditModal({
     setUnitId(tx.unit_id ?? '')
     setMethod(tx.method ?? '')
     setMemo(tx.memo ?? '')
+    setAccountingYm(tx.accounting_ym ?? null)
     setError(null)
   }, [tx])
 
@@ -377,6 +380,7 @@ function EditModal({
         unit_id: unitId || null,
         method: method || null,
         memo: memo || null,
+        accounting_ym: accountingYm,
       })
       // 入金状況にも反映する。日付や号室を動かした場合は移動前・移動後の
       // 両方の月を貼り直す必要があるので、変更前後の内容を両方渡す。
@@ -461,8 +465,14 @@ function EditModal({
             onChange={(e) => setDate(e.target.value)}
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
           />
-          {/* 入金状況に出るのは家賃（賃料・共益費）で部屋を指定した記帳だけ */}
-          <ReflectionHint date={date} toPayments={Boolean(unitId) && isRentCategory(category)} />
+          {/* 入金状況に出るのは家賃（賃料・共益費）で部屋を指定した記帳だけ。
+              収支表に載せる月は、日付では決められない支払いのためにここで選べる */}
+          <ReflectionHint
+            date={date}
+            toPayments={Boolean(unitId) && isRentCategory(category)}
+            accountingYm={accountingYm}
+            onPick={setAccountingYm}
+          />
         </Row>
         <Row label="支払方法（任意）">
           <input

@@ -120,9 +120,13 @@ create table if not exists transactions (
   category text not null,
   amount numeric not null default 0,
   method text, status text, memo text, created_at timestamptz default now(),
-  deleted_at timestamptz  -- 論理削除（NULLでない＝削除済み。会計データは物理削除しない）
+  deleted_at timestamptz,  -- 論理削除（NULLでない＝削除済み。会計データは物理削除しない）
+  -- 収支表・支出表・管理表で載せる月を手で指定したときの 'YYYY-MM'。null なら日付から自動
+  -- （支出は暦月、収入は前家賃の帰属月）。月末に翌月分を払う借入返済などで使う。
+  accounting_ym text check (accounting_ym is null or accounting_ym ~ '^\d{4}-(0[1-9]|1[0-2])$')
 );
 alter table transactions add column if not exists deleted_at timestamptz;
+alter table transactions add column if not exists accounting_ym text;
 
 -- 監査ログ（変更履歴）：台帳(transactions)の作成・変更・削除を自動記録。detail に old/new を保存。
 create table if not exists audit_logs (

@@ -138,6 +138,9 @@ export interface Transaction {
   memo?: string | null
   created_at?: string
   deleted_at?: string | null // 論理削除（NULLでない＝削除済み）
+  /** 収支表・支出表・管理表で載せる月を手で指定したときの 'YYYY-MM'。
+   *  null なら日付から自動で決める。月末に翌月分を払う借入返済などで使う */
+  accounting_ym?: string | null
 }
 
 /** 監査ログ（変更履歴）。detail に変更前(old)・変更後(new)の行を保持 */

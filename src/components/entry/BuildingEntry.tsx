@@ -31,6 +31,8 @@ export function BuildingEntry({
 }) {
   const [propertyId, setPropertyId] = useState(defaultPropertyId ?? properties[0]?.id ?? '')
   const [date, setDate] = useState(today())
+  // 収支表・支出表に載せる月の手動指定（'YYYY-MM'）。null なら日付から自動
+  const [accountingYm, setAccountingYm] = useState<string | null>(null)
   const [method, setMethod] = useState('')
   const [values, setValues] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -120,7 +122,13 @@ export function BuildingEntry({
     if (!propertyId) return setError('物件を選択してください。')
 
     const rows: Partial<Transaction>[] = []
-    const base = { date, property_id: propertyId, unit_id: null, method: method || null }
+    const base = {
+      date,
+      property_id: propertyId,
+      unit_id: null,
+      method: method || null,
+      accounting_ym: accountingYm,
+    }
     for (const cat of BUILDING_INCOME_CATEGORIES) {
       const v = n(values[keyOf('income', cat)])
       if (v > 0) rows.push({ ...base, type: 'income', category: cat, amount: v })
@@ -135,6 +143,7 @@ export function BuildingEntry({
     try {
       await transactionsRepo.createMany(rows)
       setValues({})
+      setAccountingYm(null) // 指定は1回きり。次の入力に持ち越さない
       touched.current = false
       lastKey.current = ''
       setPrefillNote(null)
@@ -170,8 +179,14 @@ export function BuildingEntry({
             onChange={(e) => setDate(e.target.value)}
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900"
           />
-          {/* 建物まとめは号室に紐づかないので入金状況には出ない */}
-          <ReflectionHint date={date} toPayments={false} />
+          {/* 建物まとめは号室に紐づかないので入金状況には出ない。
+              月末に翌月分を払う借入返済があるので、載せる月を選べるようにしてある */}
+          <ReflectionHint
+            date={date}
+            toPayments={false}
+            accountingYm={accountingYm}
+            onPick={setAccountingYm}
+          />
         </Field>
       </div>
 

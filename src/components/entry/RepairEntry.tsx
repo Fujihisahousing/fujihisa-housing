@@ -26,6 +26,8 @@ export function RepairEntry({
   const [propertyId, setPropertyId] = useState(defaultPropertyId ?? properties[0]?.id ?? '')
   const [scope, setScope] = useState<string>('共用部')
   const [date, setDate] = useState(today())
+  // 収支表・支出表に載せる月の手動指定（'YYYY-MM'）。null なら日付から自動
+  const [accountingYm, setAccountingYm] = useState<string | null>(null)
   const [kind, setKind] = useState('')
   const [place, setPlace] = useState('')
   const [content, setContent] = useState('')
@@ -70,11 +72,13 @@ export function RepairEntry({
             type: 'expense',
             category: '修繕費',
             amount: validCost,
+            accounting_ym: accountingYm,
             memo: [scope, place.trim(), content.trim()].filter(Boolean).join(' '),
           },
         ])
       }
       setKind(''); setPlace(''); setContent(''); setVendor(''); setCost(''); setNote('')
+      setAccountingYm(null) // 指定は1回きり。次の入力に持ち越さない
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存に失敗しました。')
@@ -120,8 +124,14 @@ export function RepairEntry({
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="修繕日付">
             <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={INPUT} />
-            {/* 修繕は号室に紐づけないので入金状況には出ない */}
-            <ReflectionHint date={date} toPayments={false} />
+            {/* 修繕は号室に紐づけないので入金状況には出ない。
+                月をまたいで払うことがあるので、載せる月を選べるようにしてある */}
+            <ReflectionHint
+              date={date}
+              toPayments={false}
+              accountingYm={accountingYm}
+              onPick={setAccountingYm}
+            />
           </Field>
           <Field label="分類（任意）">
             <input

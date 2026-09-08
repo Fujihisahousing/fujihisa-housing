@@ -294,7 +294,8 @@ export function calcRepairByFiscalYear(txs: Transaction[]): RepairByYear[] {
   for (const t of txs) {
     if (t.type !== 'expense' || t.deleted_at) continue
     if ((EXPENSE_ROW_OF[t.category] ?? '') !== '修繕費') continue
-    const y = fiscalYearOf(new Date(t.date))
+    // 収支表と同じ年度に入れる（accounting_ym の手動指定もここで効く）
+    const y = accountingFiscalYear(t)
     byYear.set(y, (byYear.get(y) ?? 0) + Number(t.amount ?? 0))
   }
   return [...byYear.entries()]
@@ -338,14 +339,42 @@ export function accountingMonth(t: {
   type?: string
   category?: string
   date: string
+  accounting_ym?: string | null
 }): { year: number; month: number } {
+  // 入力時に月を指定してあればそれが最優先。月末に翌月分を払う借入返済のように、
+  // 日付からは「何月分か」を決められないものがあるため（8/31の支払いが9月分など）。
+  const picked = parseYm(t.accounting_ym)
+  if (picked) return picked
   if (t.type === 'income' && !INCOME_SAME_MONTH.has(t.category ?? '')) {
     return attributionMonth(t.date)
   }
   return ledgerMonth(t.date)
 }
+
+/** 'YYYY-MM' を年月に。読めなければ null（未指定・壊れた値は自動判定に落とす） */
+export function parseYm(s: string | null | undefined): { year: number; month: number } | null {
+  const m = String(s ?? '').match(/^(\d{4})-(\d{2})$/)
+  if (!m) return null
+  const year = Number(m[1])
+  const month = Number(m[2])
+  return month >= 1 && month <= 12 ? { year, month } : null
+}
+
+/** 年月に n か月足す。月をまたぐ計算をここに集約する */
+export function addMonths(v: { year: number; month: number }, n: number) {
+  const i = v.year * 12 + (v.month - 1) + n
+  return { year: Math.floor(i / 12), month: (i % 12) + 1 }
+}
+/** 年月 → 'YYYY-MM' */
+export const ymString = (v: { year: number; month: number }) =>
+  `${v.year}-${String(v.month).padStart(2, '0')}`
 /** その記帳が属する会計年度（accountingMonth 基準） */
-export function accountingFiscalYear(t: { type?: string; category?: string; date: string }): number {
+export function accountingFiscalYear(t: {
+  type?: string
+  category?: string
+  date: string
+  accounting_ym?: string | null
+}): number {
   const a = accountingMonth(t)
   return fiscalYearOfYM(a.year, a.month)
 }
