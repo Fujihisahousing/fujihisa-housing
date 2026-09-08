@@ -14,6 +14,7 @@ import {
   rentHistoryMapOf,
   FISCAL_MONTHS,
   FISCAL_PREV_YEAR_COLS,
+  FISCAL_START_MONTH,
   MGMT_ROW_MEMBERS,
   isDisposedForRentRoll,
   type MgmtPropertyBlock,
@@ -28,8 +29,14 @@ import type { PaymentRecord, Property, RentHistory, Transaction, Unit } from '..
 // 収支表と同じ運用開始年度（データが無くても過去年度を開けるように）
 const FIRST_YEAR = 2023
 
+/** 印刷レイアウト。1枚＝A3横1枚に全物件を詰める／3枚＝物件を3ページに分けて字を大きくする */
+type Layout = 'single' | 'split3'
+const PAGES = 3
+
 export function ManagementTable({ properties }: { properties: Property[] }) {
   const [year, setYear] = useState(fiscalYearOf(new Date()))
+  // 画面のデフォルトは1枚。3枚は「印刷したときに読める大きさで配る」ための切り替え
+  const [layout, setLayout] = useState<Layout>('single')
   const [txs, setTxs] = useState<Transaction[]>([])
   const [records, setRecords] = useState<PaymentRecord[]>([])
   const [units, setUnits] = useState<Unit[]>([])
@@ -76,11 +83,14 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
     [txs, records, units, rentHistory],
   )
 
-  // 決済済みの物件は来期から落とす（レントロールと同じ基準）。過去年度を開けば表に残る。
+  // 決済済みの物件は来期から落とす（レントロールと同じ基準）。
+  // 判定日は「今日」ではなく、表示している年度の初日（前年9/1）にする。今日で判定すると、
+  // まだ所有していた年度を開いても消えてしまう（川西市久代：2026-07-30決済 →
+  // 2026年度は載せる／2027年度からは落とす）。
   const visibleProperties = useMemo(() => {
-    const today = new Date()
-    return properties.filter((p) => !isDisposedForRentRoll(p.disposed_date, today))
-  }, [properties])
+    const yearStart = new Date(year - 1, FISCAL_START_MONTH - 1, 1)
+    return properties.filter((p) => !isDisposedForRentRoll(p.disposed_date, yearStart))
+  }, [properties, year])
 
   const r = useMemo(
     () => calcManagementTable(allTxs, visibleProperties, year),
@@ -113,8 +123,31 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
             </option>
           ))}
         </select>
+        <label className="text-sm text-slate-600 ml-2">印刷</label>
+        <div className="inline-flex rounded-lg border border-slate-300 bg-slate-50 p-0.5">
+          {(
+            [
+              ['single', '1枚に収める'],
+              ['split3', `${PAGES}枚に分ける`],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setLayout(key)}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition ${
+                layout === key
+                  ? 'bg-white text-slate-900 shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
         <span className="text-xs text-slate-500">
-          A3横。印刷ダイアログで用紙をA3・横にして「PDFとして保存」
+          {layout === 'single'
+            ? 'A3横1枚。印刷ダイアログで用紙をA3・横にして「PDFとして保存」'
+            : `A3横${PAGES}枚。物件を分けて字を大きくする。用紙はA3・横のまま`}
         </span>
         <button
           onClick={() => window.print()}
@@ -132,9 +165,25 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
         // 画面でも印刷と同じ紙面を出す（現況報告書と同じ方針）。用紙幅が画面より
         // 広いことがあるので、はみ出す分だけ横スクロールさせる。
         <div className="overflow-x-auto">
-          <div id="print-root">
-            <MgmtSheet r={r} range={range} />
-          </div>
+          {layout === 'single' ? (
+            <div id="print-root">
+              <MgmtSheet r={r} range={range} />
+            </div>
+          ) : (
+            <div id="print-root" className="mt-split">
+              {splitIntoPages(r.blocks, PAGES).map((blocks, i, all) => (
+                <MgmtSheet
+                  key={i}
+                  r={r}
+                  range={range}
+                  blocks={blocks}
+                  // 全物件の合計は最後のページにだけ置く
+                  showGrand={i === all.length - 1}
+                  part={{ no: i + 1, of: all.length }}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -147,14 +196,57 @@ export function ManagementTable({ properties }: { properties: Property[] }) {
 //   収入（薄い青）／支出＝合計（薄い赤）／支出の明細7行（インデント）／利益（黄）
 const PREV = FISCAL_PREV_YEAR_COLS
 
-/** 印刷される本体。データ取得から切り離してあるので単体で表示確認できる */
+/** 帯を pages ページに分ける。帯ごとに行数（収入＋支出＋明細＋利益）が違うので、
+ *  帯の数ではなく行数がなるべく揃うところで切る。帯は途中で割らない。
+ *  ページ数ぶんの帯が無いときは、作れるだけのページを返す。 */
+export function splitIntoPages(
+  blocks: MgmtPropertyBlock[],
+  pages: number,
+): MgmtPropertyBlock[][] {
+  if (pages <= 1 || blocks.length <= 1) return [blocks]
+  const rowsOf = (b: MgmtPropertyBlock) => 3 + b.expenses.length
+  const out: MgmtPropertyBlock[][] = []
+  let cur: MgmtPropertyBlock[] = []
+  let acc = 0
+  let restRows = blocks.reduce((s, b) => s + rowsOf(b), 0)
+  let restPages = Math.min(pages, blocks.length)
+  blocks.forEach((b, i) => {
+    cur.push(b)
+    acc += rowsOf(b)
+    const blocksLeft = blocks.length - i - 1
+    if (restPages <= 1 || blocksLeft < restPages - 1) return // 残りページに1帯ずつは必ず残す
+    // 目標行数に対して、ここで切るのと次の帯まで入れてから切るのとで近いほうを採る。
+    // 「超えたら切る」だけだと最初のページに寄って、後ろのページがスカスカになる。
+    const target = restRows / restPages
+    const next = rowsOf(blocks[i + 1])
+    if (Math.abs(acc - target) <= Math.abs(acc + next - target)) {
+      out.push(cur)
+      restRows -= acc
+      restPages -= 1
+      cur = []
+      acc = 0
+    }
+  })
+  if (cur.length) out.push(cur)
+  return out
+}
+
+/** 印刷される本体。データ取得から切り離してあるので単体で表示確認できる。
+ *  blocks を渡すと、その帯だけを刷る（3枚に分けるとき）。省略時は全帯。 */
 export function MgmtSheet({
   r,
   range,
+  blocks,
+  showGrand = true,
+  part,
 }: {
   r: MgmtTableResult
   range: { from: string; to: string }
+  blocks?: MgmtPropertyBlock[]
+  showGrand?: boolean
+  part?: { no: number; of: number }
 }) {
+  const rows = blocks ?? r.blocks
   return (
     <div className="mt-page">
       <header className="mt-head">
@@ -170,6 +262,7 @@ export function MgmtSheet({
         </div>
         <div className="mt-date">
           {r.year}年度（{range.from} 〜 {range.to}）
+          {part && <b className="mt-part">{part.no} / {part.of}</b>}
         </div>
       </header>
 
@@ -201,14 +294,19 @@ export function MgmtSheet({
           </tr>
         </thead>
         <tbody>
-          {r.blocks.map((b) => (
+          {rows.map((b) => (
             <PropertyBlock key={b.propertyId} b={b} />
           ))}
           {/* 最下段は全物件の 収入／支出／利益。行の色は各帯と同じ。
-              支出は出ていく金額なので常に赤字＋マイナス表記、利益は赤字になったときだけ赤。 */}
-          <GrandRow row={r.grandIncome} cls="mt-row-income" first />
-          <GrandRow row={r.grandExpense} cls="mt-row-expense" tone="red" negate />
-          <GrandRow row={r.grandNet} cls="mt-row-profit" tone="negRed" last />
+              支出は出ていく金額なので常に赤字＋マイナス表記、利益は赤字になったときだけ赤。
+              3枚に分けるときは最後のページにだけ置く。 */}
+          {showGrand && (
+            <>
+              <GrandRow row={r.grandIncome} cls="mt-row-income" first />
+              <GrandRow row={r.grandExpense} cls="mt-row-expense" tone="red" negate />
+              <GrandRow row={r.grandNet} cls="mt-row-profit" tone="negRed" last />
+            </>
+          )}
         </tbody>
       </table>
     </div>
