@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { X, Upload, Loader2, FileSpreadsheet, Download } from 'lucide-react'
 import { unitsRepo, paymentRecordsRepo } from '../../lib/repositories'
 import { resyncProperty } from '../../lib/resync'
+import { monthIdx } from '../../lib/derive'
 import { deriveJudgement } from '../../lib/calc'
 import { yen } from '../../lib/format'
 import {
@@ -235,7 +236,13 @@ export function ImportWater({
       }
       // 請求額・判定はマスタから作り直す。水道代は備考に残した目印から拾われるので、
       // あとで賃料を直しても「契約額＋水道代」で組み直される（lib/derive.ts）。
-      await resyncProperty(propertyId)
+      // 対象は取り込んだ請求書の月だけに絞る。全期間を作り直すと、手で合わせた
+      // ほかの月まで自動計算に巻き戻ってしまう。
+      await resyncProperty(
+        propertyId,
+        undefined,
+        matched.map((p) => monthIdx(p.line.year, p.line.month)),
+      )
       // 反映後の請求額を表に出し続けるため、記録を読み直す
       setRecords(await paymentRecordsRepo.list(propertyId))
       setDone(

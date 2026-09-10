@@ -7,6 +7,7 @@ import { ImportCsv } from './ImportCsv'
 import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo, arrearsNotesRepo, moveEventsRepo } from '../../lib/repositories'
 import { calcPaymentStatus, calcArrearsList, tenantViewFor, moveOutYmByUnit, type ArrearsUnitRow } from '../../lib/calc'
 import { clearOverrides, resyncProperty, resyncUnit, setOverride } from '../../lib/resync'
+import { monthIdx } from '../../lib/derive'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
 import { yen, percent, today } from '../../lib/format'
@@ -320,8 +321,9 @@ export function PaymentStatus({
         )
         try {
           await paymentRecordsRepo.setMemo(u.property_id, u.room ?? '', year, month, memo)
-          // 備考には水道代の目印が入るので、請求額を作り直してから読み込み直す
-          await resyncUnit({ id: u.id, property_id: u.property_id })
+          // 備考には水道代の目印が入るので、請求額を作り直してから読み込み直す。
+          // 直したのはこの月の備考なので、作り直すのもこの月だけでよい
+          await resyncUnit({ id: u.id, property_id: u.property_id }, [monthIdx(year, month)])
           await load()
         } catch (e) {
           alert('備考の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
@@ -368,20 +370,24 @@ export function PaymentStatus({
     [targetOf, load],
   )
 
-  // この物件（全体表示なら選べない）の入金状況を、マスタから丸ごと作り直す。
+  // この物件（全体表示なら選べない）の入金状況を、表示中の月だけマスタから作り直す。
   // 普段は編集のたびに自動で作り直されるので押す必要は無い。SQLで直接データを入れた
-  // あとや、古いデータをまとめて今の計算に合わせたいときの手当て。
+  // あとや、古いデータを今の計算に合わせたいときの手当て。
   const [resyncing, setResyncing] = useState(false)
+  // 再計算は「いま表示している月」だけを対象にする。全期間を一度に作り直すと
+  // 手で合わせた月まで巻き戻る（22室×4年で約1,000か月が対象になっていた）。
   const runResync = useCallback(async () => {
     if (!activeProperty) return
     if (
       !window.confirm(
         [
-          propertyName + ' の入金状況を、部屋・賃料履歴・入退去・台帳から作り直します。',
+          `${propertyName} の ${year}年${month}月分 の再計算でいいですか？`,
+          '',
+          'この月の入金状況を、部屋・賃料履歴・入退去・台帳から作り直します。',
           '',
           '・請求額・契約者名・保証会社・判定は自動計算に合わせて書き換わります',
           '・この画面で手入力した値と備考は残ります',
-          '・入退去の記録が無い期間は、いまの記録がそのまま残ります',
+          '・ほかの月には触れません',
         ].join('\n'),
       )
     ) {
@@ -389,15 +395,15 @@ export function PaymentStatus({
     }
     setResyncing(true)
     try {
-      const res = await resyncProperty(activeProperty)
-      alert(res.scanned + 'か月ぶんを見直して、' + res.updated + '件を書き換えました。')
+      const res = await resyncProperty(activeProperty, undefined, [monthIdx(year, month)])
+      alert(`${year}年${month}月分の${res.scanned}室を見直して、${res.updated}件を書き換えました。`)
       await load()
     } catch (e) {
       alert('再計算に失敗しました：' + (e instanceof Error ? e.message : ''))
     } finally {
       setResyncing(false)
     }
-  }, [activeProperty, propertyName, load])
+  }, [activeProperty, propertyName, year, month, load])
 
   // 判定の手入力：その月の状態を確定させる。
   // 空室を選んだ月は請求も入金も無かった月として扱う（契約者名・請求額・入金額をクリア）。
@@ -530,15 +536,19 @@ export function PaymentStatus({
         >
           <ListChecks className="w-4 h-4" /> 未入金一覧
         </button>
-        {/* 普段は編集のたびに自動で作り直されるので、押すのはSQLで直接データを入れたあとくらい */}
+        {/* 対象は表示中の月だけ。全期間を作り直すと手で合わせた月まで巻き戻るため */}
         <button
           onClick={() => void runResync()}
           disabled={!activeProperty || resyncing}
-          title={activeProperty ? '部屋・賃料履歴・入退去・台帳から入金状況を作り直します' : '物件を選んでから実行してください'}
+          title={
+            activeProperty
+              ? `${year}年${month}月分だけを、部屋・賃料履歴・入退去・台帳から作り直します`
+              : '物件を選んでから実行してください'
+          }
           className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
         >
           <RefreshCw className={'w-4 h-4 ' + (resyncing ? 'animate-spin' : '')} />
-          {resyncing ? '再計算中…' : '再計算'}
+          {resyncing ? '再計算中…' : `${month}月分を再計算`}
         </button>
         <button
           onClick={() => void exportPaymentStatusExcel(propertyName, r)}

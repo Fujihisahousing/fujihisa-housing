@@ -36,12 +36,17 @@ const todayIdx = () => {
 }
 
 /**
- * 物件まるごと作り直す。部屋を1つだけ直したいときは unitIds で絞る。
- * 物件単位で材料を読むのは、記帳・記録の取得が物件単位のクエリしか無いため。
+ * 物件まるごと作り直す。部屋を1つだけ直したいときは unitIds で、
+ * 月を絞りたいときは onlyMonths（monthIdx の配列）で範囲を狭める。
+ *
+ * 月を絞れるようにしてあるのは、全期間を一度に作り直すと影響範囲が読めないため。
+ * 22室×4年ぶん（約1,000か月）を一気に書き換えると、手で合わせた月まで巻き戻る。
+ * 画面からは「いま表示している月だけ」を渡している。
  */
 export async function resyncProperty(
   propertyId: string,
   unitIds?: string[],
+  onlyMonths?: number[],
 ): Promise<ResyncResult> {
   const [units, txs, records] = await Promise.all([
     unitsRepo.listByProperty(propertyId),
@@ -70,6 +75,7 @@ export async function resyncProperty(
   }
 
   const now = todayIdx()
+  const monthFilter = onlyMonths && onlyMonths.length > 0 ? new Set(onlyMonths) : null
   let updated = 0
   let scanned = 0
   for (const unit of targets) {
@@ -82,6 +88,7 @@ export async function resyncProperty(
       records,
     )
     for (const idx of monthsInScope(ctx, now)) {
+      if (monthFilter && !monthFilter.has(idx)) continue
       scanned++
       const { record, changed, known } = mergeMonth(ctx, idx)
       const isNew = !ctx.recByIdx.has(idx)
@@ -99,8 +106,11 @@ export async function resyncProperty(
 }
 
 /** 部屋を1つだけ作り直す */
-export async function resyncUnit(unit: Pick<Unit, 'id' | 'property_id'>): Promise<ResyncResult> {
-  return resyncProperty(unit.property_id, [unit.id])
+export async function resyncUnit(
+  unit: Pick<Unit, 'id' | 'property_id'>,
+  onlyMonths?: number[],
+): Promise<ResyncResult> {
+  return resyncProperty(unit.property_id, [unit.id], onlyMonths)
 }
 
 /** 部屋のIDだけ分かっているとき（台帳・取込から呼ぶ） */
