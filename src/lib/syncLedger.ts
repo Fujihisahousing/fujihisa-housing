@@ -7,7 +7,7 @@
 // 収支表・支出表は毎回 transactions を読み直すので、この処理が無くても台帳の編集は反映される。
 // 反映が要るのは入金状況（と、そこから作る滞納一覧）だけ。
 import { resyncUnitIds } from './resync'
-import { isRentCategory } from './calc'
+import { isPaidCategory } from './calc'
 import type { Transaction } from '../types'
 
 /**
@@ -26,7 +26,7 @@ export async function syncPaymentRecordsFromLedger(affected: Partial<Transaction
   const unitIds = new Set<string>()
   for (const t of affected) {
     if (!t.unit_id) continue
-    if (t.category && !isRentCategory(t.category)) continue
+    if (t.category && !isPaidCategory(t.category)) continue
     unitIds.add(t.unit_id)
   }
   if (unitIds.size === 0) return

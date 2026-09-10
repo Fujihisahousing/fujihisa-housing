@@ -825,11 +825,20 @@ export interface PaymentStatusResult {
 // 入金状況で「賃料系の入金」として数えるカテゴリ。
 // 請求額に駐輪駐車を含める以上、入金側も同じ範囲で拾わないと駐輪代のある戸が
 // 毎月「一部入金」になってしまうので、駐車・駐輪もここに入れる。
-// 光熱費（水道代・電気代）は請求額に含めないので対象外のまま。
 const RENT_CATEGORIES = new Set<string>([CAT_RENT, CAT_KYOEKI, CAT_PARKING])
 const isGuarantor = (s?: string | null) => Boolean(s && /保証/.test(s))
-/** その記帳が賃料系（入金状況で扱う対象）か */
+/** その記帳が賃料系か。台帳と入金状況の突き合わせ（bookedRentKeys）で使う */
 export const isRentCategory = (category: string) => RENT_CATEGORIES.has(category)
+
+// 入金状況の「入金額」に数えるカテゴリ。賃料系に水道代・電気代を足したもの。
+// 水道代の請求書を取り込んだ月は請求額が「契約額＋水道代」になるので、入金側も
+// 同じ範囲で拾わないと、水道代を払っていても永久に「一部入金」のままになる
+// （ルネスプランドール守口の405号・605号が実際にそうなっていた）。
+const PAID_CATEGORIES = new Set<string>([
+  CAT_RENT, CAT_KYOEKI, CAT_PARKING, CAT_UTILITY, '水道代', '電気代',
+])
+/** その記帳を入金状況の入金額に数えるか */
+export const isPaidCategory = (category: string) => PAID_CATEGORIES.has(category)
 
 /**
  * 入金日から「何月分の入金か（帰属月）」を出す。前家賃ルール：
@@ -953,7 +962,7 @@ export function calcPaymentStatus(
     const paidByMonth = new Map<number, number>()
     const selPayments: Transaction[] = []
     for (const t of transactions) {
-      if (t.type !== 'income' || t.unit_id !== u.id || !RENT_CATEGORIES.has(t.category)) continue
+      if (t.type !== 'income' || t.unit_id !== u.id || !isPaidCategory(t.category)) continue
       const idx = attrIdx(new Date(t.date))
       if (idx > selIdx) continue
       paidByMonth.set(idx, (paidByMonth.get(idx) ?? 0) + n(t.amount))

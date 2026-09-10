@@ -5,7 +5,7 @@ import { Modal } from '../../components/common/Modal'
 import { transactionsRepo, unitsRepo, auditLogsRepo } from '../../lib/repositories'
 import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
 import { ReflectionHint } from '../../components/common/ReflectionHint'
-import { isRentCategory, attributionMonth, ledgerMonth } from '../../lib/calc'
+import { isRentCategory, isPaidCategory, attributionMonth, ledgerMonth } from '../../lib/calc'
 import { exportTransactionsCSV, exportAllJSON } from '../../lib/csv'
 import { yen, formatDate } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
@@ -469,7 +469,7 @@ function EditModal({
               収支表に載せる月は、日付では決められない支払いのためにここで選べる */}
           <ReflectionHint
             date={date}
-            toPayments={Boolean(unitId) && isRentCategory(category)}
+            toPayments={Boolean(unitId) && isPaidCategory(category)}
             accountingYm={accountingYm}
             onPick={setAccountingYm}
             txType={tx?.type}

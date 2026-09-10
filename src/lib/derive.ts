@@ -13,7 +13,7 @@ import {
   billedAmount,
   deriveJudgement,
   effectiveRentKyoeki,
-  isRentCategory,
+  isPaidCategory,
 } from './calc'
 import { readWaterTag, writeWaterTag } from './invoiceWater'
 import type { MoveEvent, PaymentRecord, RentHistory, Transaction, Unit } from '../types'
@@ -145,7 +145,7 @@ export function buildUnitContext(
   const paidByIdx = new Map<number, number>()
   const paidOnByIdx = new Map<number, string>()
   for (const t of transactions) {
-    if (t.unit_id !== unit.id || t.type !== 'income' || !isRentCategory(t.category)) continue
+    if (t.unit_id !== unit.id || t.type !== 'income' || !isPaidCategory(t.category)) continue
     const { year, month } = attributionMonth(t.date)
     const idx = monthIdx(year, month)
     paidByIdx.set(idx, (paidByIdx.get(idx) ?? 0) + n(t.amount))
