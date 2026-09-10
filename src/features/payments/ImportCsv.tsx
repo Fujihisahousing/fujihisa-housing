@@ -1,13 +1,22 @@
 // 通帳CSV取込：Gemini等でスキャン→CSV化（日付,契約者名,金額）したものを取り込む。
 // 契約者名で号室に自動マッチ→確認→契約内訳で賃料/共益費/光熱費に自動振り分けして記帳。
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { X, Upload, Loader2, Download } from 'lucide-react'
-import { transactionsRepo, unitsRepo } from '../../lib/repositories'
+import { X, Upload, Download } from 'lucide-react'
+import { paymentRecordsRepo, transactionsRepo, unitsRepo } from '../../lib/repositories'
 import { yen } from '../../lib/format'
-import { CAT_RENT, CAT_KYOEKI, CAT_PARKING, CAT_UTILITY, type Property, type Transaction, type Unit } from '../../types'
+import { CAT_RENT, CAT_KYOEKI, CAT_PARKING, CAT_UTILITY, type PaymentRecord, type Property, type Transaction, type Unit } from '../../types'
 import { matchTenantName, type MatchConfidence } from '../../lib/matchTenant'
 import { allocateDeposit, contractAmount } from '../../lib/allocateDeposit'
+import { splitDeposit, waterMapOf } from '../../lib/depositBreakdown'
+import { attributionMonth } from '../../lib/calc'
+import { BreakdownTable, type BreakdownRow } from './BreakdownTable'
 import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
+
+/** 手で直した内訳につける印。あとから「その月を再計算」しても触らない目印になる */
+export const METHOD_IMPORT = '通帳取込'
+export const METHOD_IMPORT_EDITED = '通帳取込・手修正'
+/** 不明金は「その他」収入として記帳し、備考にこの目印を付けて後から探せるようにする */
+export const UNKNOWN_TAG = '[不明金]'
 
 interface Parsed {
   date: string
@@ -115,6 +124,11 @@ export function ImportCsv({
   const [rows, setRows] = useState<Parsed[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // 水道代の請求書から分かっている額（入金状況の備考タグ）。号室×年月 → 円
+  const [records, setRecords] = useState<PaymentRecord[]>([])
+  // 'match'＝号室の突き合わせ、'breakdown'＝内訳の確認。記帳は内訳の画面からだけ行う
+  const [step, setStep] = useState<'match' | 'breakdown'>('match')
+  const [breakdown, setBreakdown] = useState<BreakdownRow[]>([])
 
   // 選択物件の号室を取得
   useEffect(() => {
@@ -129,7 +143,27 @@ export function ImportCsv({
     }
   }, [propertyId])
 
+  // 水道代の請求書を取り込んであれば、入金状況の備考に [水道 3012] の形で入っている。
+  // 内訳の水道代はこれを上限にする（超えた分は不明金として分けて見せる）。
+  useEffect(() => {
+    if (!propertyId) return setRecords([])
+    let active = true
+    paymentRecordsRepo
+      .list(propertyId)
+      .then((r) => active && setRecords(r))
+      .catch(() => active && setRecords([]))
+    return () => {
+      active = false
+    }
+  }, [propertyId])
+
   const unitsById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units])
+  const waterMap = useMemo(() => waterMapOf(records), [records])
+  /** その戸のその入金日（＝前家賃の帰属月）に対応する水道代。請求書が未取込なら0 */
+  const waterFor = (u: Unit, date: string) => {
+    const a = attributionMonth(date)
+    return waterMap.get(`${u.room}|${a.year}-${String(a.month).padStart(2, '0')}`) ?? 0
+  }
 
   // 既にある賃料の記帳。同じCSVを二度取り込んだときに気づけるようにする
   const [booked, setBooked] = useState<Set<string>>(new Set())
@@ -226,40 +260,81 @@ export function ImportCsv({
   // 推測で入れた行。記帳前に目を通してほしいので件数を分けて出す
   const guessed = rows.filter((r) => !r.manual && (r.confidence === 'prefix' || r.confidence === 'similar'))
 
-  async function save() {
+  /** 号室の突き合わせが済んだ行から内訳の一覧を組み立て、確認画面に移る。
+   *  記帳はこの一覧からだけ行う（自動振り分けのまま保存できないようにしている）。 */
+  function buildBreakdown() {
     setError(null)
-    const tx: Partial<Transaction>[] = []
+    const out: BreakdownRow[] = []
     for (const r of matched) {
       const us = r.unitIds.map((id) => unitsById.get(id)).filter((u): u is Unit => Boolean(u))
       if (us.length === 0) continue
-      // 複数戸のまとめ入金は契約額で割り振る。1戸なら全額をその戸に充てる（従来どおり）
-      const { rows: alloc } = allocateDeposit(us, r.amount)
       // まとめ入金は元が1件の振込なので、摘要に何戸ぶんかを残しておく
       const memo = us.length > 1 ? `通帳取込 まとめ入金${us.length}戸（${r.name}）` : '通帳取込'
-      for (const a of alloc) {
-        const u = unitsById.get(a.unitId)!
-        const base = {
+      const splits = splitDeposit(us, r.amount, (id) => {
+        const u = unitsById.get(id)
+        return u ? waterFor(u, r.date) : 0
+      })
+      splits.forEach((sp, i) => {
+        const u = unitsById.get(sp.unitId)
+        if (!u) return
+        const a = attributionMonth(r.date)
+        const expected = waterFor(u, r.date)
+        out.push({
+          key: `${r.date}|${r.name}|${u.id}|${i}`,
           date: r.date,
-          property_id: u.property_id,
-          unit_id: u.id,
-          type: 'income' as const,
-          method: '通帳取込',
+          ym: `${a.year}-${String(a.month).padStart(2, '0')}`,
+          unitId: u.id,
+          room: u.room ?? '',
+          tenant: u.tenant || r.name,
+          amount: sp.total,
+          rent: sp.rent,
+          kyoeki: sp.kyoeki,
+          parking: sp.parking,
+          water: sp.water,
+          unknown: sp.unknown,
+          edited: false,
           memo,
-        }
-        if (a.rent > 0) tx.push({ ...base, category: CAT_RENT, amount: a.rent })
-        if (a.kyoeki > 0) tx.push({ ...base, category: CAT_KYOEKI, amount: a.kyoeki })
-        if (a.parking > 0) tx.push({ ...base, category: CAT_PARKING, amount: a.parking })
-        if (a.utility > 0) tx.push({ ...base, category: CAT_UTILITY, amount: a.utility })
-      }
+          waterExpected: expected > 0 ? expected : null,
+        })
+      })
     }
-    if (tx.length === 0) return setError('記帳する行がありません（号室を選んだ行が必要です）。')
+    if (out.length === 0) return setError('号室を選んだ行がありません。')
+    setBreakdown(out)
+    setStep('breakdown')
+  }
+
+  async function saveBreakdown() {
+    setError(null)
+    const tx: Partial<Transaction>[] = []
+    for (const r of breakdown) {
+      const u = unitsById.get(r.unitId)
+      if (!u) continue
+      const base = {
+        date: r.date,
+        property_id: u.property_id,
+        unit_id: u.id,
+        type: 'income' as const,
+        // 手で直した行は別の印にして、あとから「その月を再計算」しても触らないようにする
+        method: r.edited ? METHOD_IMPORT_EDITED : METHOD_IMPORT,
+        memo: r.memo,
+      }
+      if (r.rent > 0) tx.push({ ...base, category: CAT_RENT, amount: r.rent })
+      if (r.kyoeki > 0) tx.push({ ...base, category: CAT_KYOEKI, amount: r.kyoeki })
+      if (r.parking > 0) tx.push({ ...base, category: CAT_PARKING, amount: r.parking })
+      if (r.water > 0) tx.push({ ...base, category: CAT_UTILITY, amount: r.water })
+      // 不明金は「その他」収入として残す。通帳の入金額と収支表の収入合計が必ず一致する
+      if (r.unknown > 0)
+        tx.push({ ...base, category: 'その他', amount: r.unknown, memo: `${r.memo} ${UNKNOWN_TAG}` })
+    }
+    if (tx.length === 0) return setError('記帳する金額がありません。')
     setSaving(true)
     try {
       await transactionsRepo.createMany(tx)
-      // 入金状況にも反映する（入力タブ・台帳からの記帳と同じ扱い）。
-      // これが無いと取り込んでも入金状況が空のままになる。
+      // 入金状況にも反映する（入力タブ・台帳からの記帳と同じ扱い）
       await syncPaymentRecordsFromLedger(tx)
       setRows([])
+      setBreakdown([])
+      setStep('match')
       onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : '記帳に失敗しました。')
@@ -346,7 +421,7 @@ export function ImportCsv({
             <div className="rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-sm p-3">{error}</div>
           )}
 
-          {rows.length > 0 && (
+          {step === 'match' && rows.length > 0 && (
             <>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                 <span>{rows.length}件 読込</span>
@@ -524,23 +599,45 @@ export function ImportCsv({
               </div>
             </>
           )}
+
+          {step === 'breakdown' && (
+            <>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setStep('match')}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+                >
+                  ← 号室の確認に戻る
+                </button>
+                <span className="text-sm font-medium text-slate-700">内訳の確認</span>
+              </div>
+              <BreakdownTable
+                rows={breakdown}
+                setRows={setBreakdown}
+                onSave={() => void saveBreakdown()}
+                saving={saving}
+                saveLabel={`${breakdown.length}件を記帳する`}
+                note={
+                  '水道代は請求書（水道代を取込）から分かっている額までを充てます。' +
+                  'まだ請求書を取り込んでいない月は水道代が0で、その分が不明金に出ます。' +
+                  'あとから請求書を取り込んで「その月を再計算」すれば振り替えられます。'
+                }
+              />
+            </>
+          )}
         </div>
 
-        <div className="px-5 py-3 border-t border-slate-200 shrink-0">
-          <button
-            onClick={() => void save()}
-            disabled={saving || matched.length === 0}
-            className="w-full rounded-xl bg-slate-900 text-white py-2.5 text-sm font-medium hover:bg-slate-800 disabled:opacity-60"
-          >
-            {saving ? (
-              <span className="inline-flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" /> 記帳中…
-              </span>
-            ) : (
-              `確定した ${matched.length} 件を記帳する`
-            )}
-          </button>
-        </div>
+        {step === 'match' && (
+          <div className="px-5 py-3 border-t border-slate-200 shrink-0">
+            <button
+              onClick={buildBreakdown}
+              disabled={saving || matched.length === 0}
+              className="w-full rounded-xl bg-slate-900 text-white py-2.5 text-sm font-medium hover:bg-slate-800 disabled:opacity-60"
+            >
+              {`確定した ${matched.length} 件の内訳を確認する`}
+            </button>
+          </div>
+        )}
     </Shell>
   )
 }

@@ -8,6 +8,7 @@ import { RoomEntry } from './components/entry/RoomEntry'
 import { BuildingEntry } from './components/entry/BuildingEntry'
 import { RepairEntry } from './components/entry/RepairEntry'
 import { ImportCsv } from './features/payments/ImportCsv'
+import { RecalcMonth } from './features/payments/RecalcMonth'
 import { ImportWater } from './features/payments/ImportWater'
 import { LedgerView } from './features/ledger/LedgerView'
 import { PropertiesView } from './features/properties/PropertiesView'
@@ -146,12 +147,16 @@ function EntryView({ properties }: { properties: Property[] }) {
       )}
       {tab === 'import' && (
         // まとめ入金は通帳から一括で取り込むので、入力の並びに置く
-        <ImportCsv
-          properties={properties}
-          defaultPropertyId={activeProperty}
-          embedded
-          onDone={onSaved}
-        />
+        <div className="space-y-4">
+          <ImportCsv
+            properties={properties}
+            defaultPropertyId={activeProperty}
+            embedded
+            onDone={onSaved}
+          />
+          {/* 水道代の請求書を後から取り込んだときに、その月だけ振り分け直すための入口 */}
+          <RecalcMonth properties={properties} defaultPropertyId={activeProperty} onDone={onSaved} />
+        </div>
       )}
       {tab === 'water' && (
         // 水道代は家賃と別建てなので、請求額に足す取込をここに置く。
