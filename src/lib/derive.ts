@@ -295,9 +295,13 @@ export function mergeMonth(
     } else if (canTag && storedBilled === d.contract && storedPaid > d.contract) {
       water = storedPaid - d.contract
       memo = writeWaterTag(memo, water, '光熱費')
-    } else if (storedBilled !== d.billed) {
+    } else if (storedBilled > 0 && storedBilled !== d.billed) {
       ov.billed = storedBilled
     }
+    // 記録の請求額が 0 のときは凍結しない。0 は「まだ請求額が入っていない」印であって
+    // 「請求額が0円」ではないため。台帳の入金から先に作られた記録（請求額が空のまま）を
+    // 凍結してしまい、以後どれだけ再計算しても0のままになる事故があった
+    // （プランドール守口303号 2026年9月）。
     // 上のどれにも当たらない月＝いまの材料でそのまま作り直せるので、何もしない
   }
 
