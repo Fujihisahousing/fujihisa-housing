@@ -645,16 +645,24 @@ export function incomeTransactions(
     const eff = u ? effectiveRentKyoeki(u, rentHistoryByUnit?.get(u.id), rec.year, rec.month) : null
     const rentBase = eff ? n(eff.rent) + n(eff.kyoeki) : 0
     const pk = eff ? parkingYen(eff.parking || u!.parking) : 0
-    // 賃料が0の部屋（停止中・契約額が台帳に無い部屋）は差し引く土台が無いので分けない。
-    // 分けると請求額の全額が光熱費に落ちる。
-    const canSplit = splitParkingFrom(rec.year, rec.month) && rentBase > 0
+    // 賃料が0の部屋（停止中・契約額が台帳に無い部屋）は差し引く土台が無いので、光熱費には
+    // 分けない。分けると請求額の全額が光熱費に落ちる（阿波座2F）。
+    // ただし駐車場だけを貸している区画（近畿吉田ビル5・6：賃料0／駐輪駐車12,100）は、
+    // 契約の駐輪駐車欄の額までを駐車・駐輪に回す。土台0のまま全額を家賃にしていたので、
+    // 駐車場代が収支表の家賃に出ていた。
+    const split = splitParkingFrom(rec.year, rec.month)
+    const canSplit = split && rentBase > 0
     // 入居月の日割りのように請求額が契約額を下回る月は、賃料の側で頭打ちにする
     const rent = Math.min(billed, rentBase)
     const afterRent = Math.max(0, billed - rent)
-    const parkingPart = canSplit ? Math.min(afterRent, pk) : 0
+    const parkingPart = split && (rentBase > 0 || pk > 0) ? Math.min(afterRent, pk) : 0
     const utilityPart = canSplit ? Math.max(0, afterRent - parkingPart) : 0
+    const rentPart = billed - parkingPart - utilityPart
 
-    out.push({ ...base, id: idBase, category: CAT_RENT, amount: billed - parkingPart - utilityPart })
+    // 駐車場だけの区画は家賃が0円になるので、空の家賃行は作らない
+    if (rentPart > 0 || parkingPart === 0) {
+      out.push({ ...base, id: idBase, category: CAT_RENT, amount: rentPart })
+    }
     if (parkingPart > 0) {
       out.push({ ...base, id: `${idBase}-pk`, category: CAT_PARKING, amount: parkingPart })
     }
