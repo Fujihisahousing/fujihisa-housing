@@ -614,6 +614,12 @@ export function incomeTransactions(
 
   // 記録で賄った「号室×帰属月」。ここに当たる記帳は落とす
   const covered = new Set<string>()
+  // そのうち請求額に水道代・電気代まで入っている「号室×帰属月」。
+  // ここに当たる光熱費系の記帳も落とす。請求書を取り込んだ月は記録の側で光熱費が
+  // 立つので、通帳取込や手入力の水道代・電気代を足すと同じ額が2回載る
+  // （道頓堀の2026年6〜8月で、経理の光熱費より多く出ていた）。
+  // 請求額に光熱費が入っていない月は記帳が唯一の出どころなので残す（阿波座1Fなど）。
+  const utilityCovered = new Set<string>()
   const out: Transaction[] = []
 
   for (const rec of records) {
@@ -654,6 +660,7 @@ export function incomeTransactions(
     }
     if (utilityPart > 0) {
       out.push({ ...base, id: `${idBase}-ut`, category: CAT_UTILITY, amount: utilityPart })
+      if (u) utilityCovered.add(`${u.id}|${ym}`)
     }
   }
 
@@ -661,6 +668,12 @@ export function incomeTransactions(
     if (t.type === 'income' && t.unit_id && RENT_CATEGORIES.has(t.category)) {
       const { year, month } = attributionMonth(t.date)
       if (covered.has(`${t.unit_id}|${year}-${String(month).padStart(2, '0')}`)) continue
+    }
+    if (t.type === 'income' && t.unit_id && UTILITY_CATEGORIES.has(t.category)) {
+      // 光熱費は家賃と一緒に振り込まれるので、帰属月も家賃と同じ前家賃ルールで決める。
+      // 入力画面で「何月分」を選んであればそれを優先する
+      const { year, month } = parseYm(t.accounting_ym) ?? attributionMonth(t.date)
+      if (utilityCovered.has(`${t.unit_id}|${year}-${String(month).padStart(2, '0')}`)) continue
     }
     out.push(t)
   }
@@ -837,6 +850,8 @@ export const isRentCategory = (category: string) => RENT_CATEGORIES.has(category
 const PAID_CATEGORIES = new Set<string>([
   CAT_RENT, CAT_KYOEKI, CAT_PARKING, CAT_UTILITY, '水道代', '電気代',
 ])
+// 収支表で「光熱費（入居者負担）」に載る収入のカテゴリ
+const UTILITY_CATEGORIES = new Set<string>([CAT_UTILITY, '水道代', '電気代'])
 /** その記帳を入金状況の入金額に数えるか */
 export const isPaidCategory = (category: string) => PAID_CATEGORIES.has(category)
 
