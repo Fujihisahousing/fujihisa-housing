@@ -60,6 +60,8 @@ create table if not exists rent_history (
   created_at timestamptz default now()
 );
 create index if not exists rent_history_unit_date_idx on rent_history(unit_id, effective_date);
+-- 同じ部屋・同じ開始月の行は1本だけ。重なると、どちらが効くかがDBの並び順任せになる
+create unique index if not exists rent_history_unit_date_uniq on rent_history(unit_id, effective_date);
 alter table rent_history enable row level security;
 drop policy if exists "auth all rent_history" on rent_history;
 create policy "auth all rent_history" on rent_history for all to authenticated using (true) with check (true);

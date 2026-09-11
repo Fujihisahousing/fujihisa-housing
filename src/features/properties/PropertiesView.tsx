@@ -9,7 +9,8 @@ import { propertiesRepo, unitsRepo, rentHistoryRepo, paymentRecordsRepo, moveEve
 import { unitCompare } from '../../lib/sortUnits'
 import { isLotProperty, lotName, lotNumberOf, LOT_SPEC_FIELDS } from '../../lib/lots'
 import { effectiveRentKyoeki } from '../../lib/calc'
-import { resyncUnit } from '../../lib/resync'
+import { resyncUnit, saveRentHistoryPlan } from '../../lib/resync'
+import { applyRentHistoryPlan, planRentHistoryEdit, type RentField, type RentValues } from '../../lib/rentHistoryPlan'
 import { statusBadgeClass } from '../../lib/status'
 import { yen, today } from '../../lib/format'
 import { UNIT_STATUSES, USE_TYPES, PAYMENT_METHODS, type MoveEvent, type MoveOutLedgerEntry, type Property, type RentHistory, type Unit, type UnitSpec } from '../../types'
@@ -347,12 +348,18 @@ function prevMonthOf(date: string): [number, number] {
   return m === 1 ? [y - 1, 12] : [y, m - 1]
 }
 
-/** 'YYYY-MM-01' の翌月1日。適用終了月の翌月＝元の額に戻す月を作るのに使う */
-function nextMonthOf(date: string): string {
-  const [y, m] = String(date).slice(0, 10).split('-').map(Number)
-  const ny = m === 12 ? y + 1 : y
-  const nm = m === 12 ? 1 : m + 1
-  return `${ny}-${String(nm).padStart(2, "0")}-01`
+const RENT_FIELD_LABEL: Record<RentField, string> = { rent: '賃料', kyoeki: '共益費', parking: '駐輪駐車' }
+const rentFieldText = (field: RentField, v: unknown) =>
+  field === 'parking' ? String(v ?? '') || '空欄' : yen(Number(v) || 0)
+
+/** 返還金の自動値。レントロールの返還金（RentRoll.tsx の refundValue）と同じ規則：
+ *  敷金があれば敷金、保証金なら保証金−解約引、どちらも無ければ入力済みの値 */
+function autoRefund(p: Record<string, string>): string {
+  const dep = Number(p.deposit) || 0
+  const hosho = Number(p.hoshokin) || 0
+  if (dep > 0) return String(dep)
+  if (hosho > 0) return String(hosho - (Number(p.kaiyakubiki) || 0))
+  return p.refund ?? ''
 }
 
 /**
@@ -655,6 +662,37 @@ function UnitModal({
     }
   }
 
+  /**
+   * 賃料・共益費・駐輪駐車の書き換え計画（lib/rentHistoryPlan.ts）。
+   * 変えた項目だけを「開始月〜終了月（空欄＝現在も継続）」の中の全部の行に当てる。
+   * 保存前の確認（画面が持っている履歴）と保存時（DBから読み直した履歴）の両方で使う。
+   */
+  function rentPlanFor(rows: RentHistory[]) {
+    const oldValues: RentValues = {
+      rent: Number(value?.rent) || 0,
+      kyoeki: Number(value?.kyoeki) || 0,
+      parking: value?.parking ?? null,
+    }
+    const next: RentValues = {
+      rent: numOrNull(f.rent ?? '') ?? 0,
+      kyoeki: numOrNull(f.kyoeki ?? '') ?? 0,
+      parking: f.parking || null,
+    }
+    // 新しい部屋は3項目とも書く。編集は変えた項目だけ
+    const changed: Partial<RentValues> = {}
+    if (!isEdit || next.rent !== oldValues.rent) changed.rent = next.rent
+    if (!isEdit || next.kyoeki !== oldValues.kyoeki) changed.kyoeki = next.kyoeki
+    if (!isEdit || next.parking !== oldValues.parking) changed.parking = next.parking
+    return planRentHistoryEdit({
+      history: rows,
+      fallback: oldValues,
+      changed,
+      startDate: ymToDate(f.rent_apply_ym) ?? firstOfMonth(today())!,
+      endDate: ymToDate((f.rent_end_ym ?? '').trim()),
+      baseDate: firstOfMonth(value?.contract_start),
+    })
+  }
+
   async function save() {
     if (!f.room?.trim()) return setError('号室を入力してください。')
 
@@ -692,6 +730,26 @@ function UnitModal({
 よろしいですか？`,
       )
       if (!ok) return
+    }
+
+    // 開始月より後ろにある履歴の行も、期間に入っていれば同じ項目が書き換わる。
+    // 後から入れた改定を黙って上書きしないよう、保存する前に中身を見せて確かめる。
+    if (isEdit && history.length > 0) {
+      const start = ymToDate(f.rent_apply_ym) ?? firstOfMonth(today())!
+      const later = rentPlanFor(history).updates.filter((u) => u.effective_date > start)
+      if (later.length > 0) {
+        const lines = later.map(
+          (u) =>
+            `・${ymLabel(u.effective_date)}〜：` +
+            (Object.keys(u.patch) as RentField[])
+              .map((k) => `${RENT_FIELD_LABEL[k]} ${rentFieldText(k, u.before[k])} → ${rentFieldText(k, u.patch[k])}`)
+              .join('、'),
+        )
+        const ok = window.confirm(
+          `次の履歴も期間に入っているので、同じように書き換えます。\n\n${lines.join('\n')}\n\nよろしいですか？`,
+        )
+        if (!ok) return
+      }
     }
 
     setSaving(true)
@@ -816,81 +874,50 @@ function UnitModal({
               payload.tenant_type ?? null, payload.tenant_kana ?? null,
             )
           }
-        }
-      }
-
-      if (willWriteHistory) {
-        // 適用開始月の1日を反映開始日にする。effectiveRentKyoeki は対象月の1日と
-        // 文字列比較するので、1日にしておけば「その月分から」がそのまま成り立つ。
-        const applyDate = ymToDate(f.rent_apply_ym) || today()
-
-        // 改定前の額を履歴に残す。これが無いと、適用開始月より前の月を計算する材料が
-        // 無くなり「最古の履歴＝改定後の額」になって過去月まで新家賃になってしまう。
-        // 既に適用開始月より前の履歴があるなら、改定前の額はそこに入っているので触らない。
-        const before = isEdit ? await rentHistoryRepo.listByUnit(unitId) : []
-        const hasEarlier = before.some((h) => String(h.effective_date).slice(0, 10) < applyDate)
-        const oldRent = Number(value?.rent) || 0
-        const oldKyoeki = Number(value?.kyoeki) || 0
-        if (isEdit && !hasEarlier && (oldRent > 0 || oldKyoeki > 0)) {
-          await rentHistoryRepo.create({
-            unit_id: unitId,
-            // 「いつからその額だったか」は分からないので、契約開始日があればそこから、
-            // 無ければ十分過去に置く。過去月の計算で最古の履歴として拾われるのが目的。
-            effective_date: firstOfMonth(value?.contract_start) ?? '2000-01-01',
-            rent: oldRent,
-            kyoeki: oldKyoeki,
-            parking: value?.parking ?? null,
-          })
-        }
-
-        await rentHistoryRepo.create({
-          unit_id: unitId,
-          effective_date: applyDate,
-          rent: newRent,
-          kyoeki: newKyoeki,
-          parking: newParking,
-        })
-
-        // 適用終了月が入っていれば、その翌月から改定前の額に戻す履歴を足す。
-        // 履歴は「開始月が新しいほど優先」の階段なので、戻す行を1本置くことが
-        // 「この額はここまで」を表す唯一の方法になる（終了月の列は持たない）。
-        // 終了月が空欄なら行を足さない＝いまも続いている。
-        if (endYm) {
-          const revertDate = nextMonthOf(ymToDate(endYm)!)
-          // 既に翌月から始まる履歴があるなら、そこで自然に切り替わるので足さない
-          const already = before.some((h) => String(h.effective_date).slice(0, 10) === revertDate)
-          if (!already) {
-            // 戻す額＝この改定の直前に効いていた額。改定前の units の値をフォールバックに
-            // して、それまでの履歴から求める（履歴が無ければ改定前の units の値そのもの）。
-            const [py, pm] = prevMonthOf(applyDate)
-            const prev = effectiveRentKyoeki(
-              { id: unitId, rent: oldRent, kyoeki: oldKyoeki, parking: value?.parking ?? null } as Unit,
-              before,
-              py,
-              pm,
-            )
-            if (prev.rent > 0 || prev.kyoeki > 0) {
-              await rentHistoryRepo.create({
-                unit_id: unitId,
-                effective_date: revertDate,
-                rent: prev.rent,
-                kyoeki: prev.kyoeki,
-                parking: prev.parking,
+          // 入金状況の契約者名は、入退去シートの控え（move_events.tenant）が部屋の値より優先される
+          // （lib/derive.ts）。いまの入居の控えも直さないと、直後の再計算で古い名前に戻る。
+          // 触るのは「最後の入居で、その後に退去が無く、控えが空か前の名前のまま」のものだけ。
+          if (unitId) {
+            const moves = await moveEventsRepo.listByUnitIds([unitId])
+            const dateOfMove = (e: MoveEvent) => String(e.actual_date ?? e.scheduled_date ?? e.created_at ?? '')
+            const lastIn = moves
+              .filter((e) => e.kind === '入居')
+              .sort((a, b) => dateOfMove(b).localeCompare(dateOfMove(a)))[0]
+            const outAfter = lastIn && moves.some((e) => e.kind === '退去' && dateOfMove(e) >= dateOfMove(lastIn))
+            if (lastIn && !outAfter && (!lastIn.tenant || lastIn.tenant === value?.tenant)) {
+              await moveEventsRepo.save({
+                id: lastIn.id,
+                unit_id: lastIn.unit_id,
+                kind: lastIn.kind,
+                tenant: payload.tenant,
+                tenant_kana: payload.tenant_kana ?? null,
               })
             }
           }
         }
-        // 適用開始月が過去（バックデート修正）の場合、「今日時点で最新の履歴」を units の現在値として再計算する。
-        const allHistory = await rentHistoryRepo.listByUnit(unitId)
-        const todayStr = today()
-        const current = allHistory
-          .filter((h) => h.effective_date <= todayStr)
-          .sort((a, b) => (a.effective_date < b.effective_date ? 1 : -1))[0]
-        if (
-          current &&
-          (current.rent !== newRent || current.kyoeki !== newKyoeki || (current.parking ?? null) !== newParking)
-        ) {
-          await unitsRepo.update(unitId, { rent: current.rent, kyoeki: current.kyoeki, parking: current.parking ?? null })
+      }
+
+      if (willWriteHistory) {
+        // 変えた項目だけを「開始月〜終了月」の中の全部の行に当てる（lib/rentHistoryPlan.ts）。
+        // 開始月に1行足すだけだと後ろの行が勝って途中で切れ、変えていない項目まで入力欄の値で
+        // 上書きされていた。改定前の額の行・終了月の翌月に戻す行・同じ月の重なりの整理もここで行う。
+        const before = isEdit ? await rentHistoryRepo.listByUnit(unitId) : []
+        const plan = rentPlanFor(before)
+        await saveRentHistoryPlan(unitId, plan)
+
+        // 部屋の現在値は「今月に効いている額」にそろえる。開始月が未来のときや、終了月を
+        // 入れた一時的な変更では、入力した額ではなく今月の額が現在値になる。
+        const now = new Date()
+        const cur = effectiveRentKyoeki(
+          { ...payload, id: unitId } as Unit,
+          applyRentHistoryPlan(before, plan, unitId),
+          now.getFullYear(),
+          now.getMonth() + 1,
+        )
+        // 履歴の駐輪駐車が空欄の行（古い基準行など）では、部屋の駐輪駐車を消さずに残す
+        const curParking = cur.parking ?? newParking
+        if (cur.rent !== newRent || cur.kyoeki !== newKyoeki || curParking !== newParking) {
+          await unitsRepo.update(unitId, { rent: cur.rent, kyoeki: cur.kyoeki, parking: curParking })
         }
       }
       // 部屋の情報・賃料履歴を直したら、入金状況の月次記録をマスタから作り直す。
@@ -1007,7 +1034,9 @@ function UnitModal({
           </div>
           <p className="mt-1 text-[11px] text-slate-500">
             例：2026年8月分から値上げ → 開始 2026-08・終了は空欄。7月以前の請求額と収支表は変わりません。
-            過去の月を選べば遡って直せます。
+            過去の月を選べば遡って直せます（入金状況・収支表の請求額も作り直します）。
+            <br />
+            変えた項目だけを期間の中の全部の月に当てます。期間の中に後ろの履歴があれば、その行の同じ項目も書き換えます。
             <br />
             終了月を入れると、その翌月分から改定前の額に自動で戻ります（一時的な減額・免除など）。
           </p>
@@ -1039,14 +1068,24 @@ function UnitModal({
           <TextField
             label="敷金（円）"
             value={f.deposit ?? ''}
-            onChange={(v) => setF((p) => ({ ...p, deposit: v, refund: v }))}
+            onChange={(v) => setF((p) => ({ ...p, deposit: v, refund: autoRefund({ ...p, deposit: v }) }))}
             type="number"
           />
-          <TextField label="保証金（円）" value={f.hoshokin ?? ''} onChange={set('hoshokin')} type="number" />
+          <TextField
+            label="保証金（円）"
+            value={f.hoshokin ?? ''}
+            onChange={(v) => setF((p) => ({ ...p, hoshokin: v, refund: autoRefund({ ...p, hoshokin: v }) }))}
+            type="number"
+          />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <TextField label="礼金（円）" value={f.key_money ?? ''} onChange={set('key_money')} type="number" />
-          <TextField label="解約引（円）" value={f.kaiyakubiki ?? ''} onChange={set('kaiyakubiki')} type="number" />
+          <TextField
+            label="解約引（円）"
+            value={f.kaiyakubiki ?? ''}
+            onChange={(v) => setF((p) => ({ ...p, kaiyakubiki: v, refund: autoRefund({ ...p, kaiyakubiki: v }) }))}
+            type="number"
+          />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <TextField label="返還金（円・敷金と連動）" value={f.refund ?? ''} onChange={set('refund')} type="number" />

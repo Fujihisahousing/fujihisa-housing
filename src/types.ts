@@ -178,6 +178,8 @@ export interface PaymentRecord {
    * 詳しくは lib/derive.ts と supabase/add_payment_record_overrides.sql
    */
   overrides?: Record<string, unknown> | null
+  /** 最後に書き換えた日時。自動導出を入れる前の記録かどうかの判定に使う（lib/derive.ts） */
+  updated_at?: string | null
 }
 
 /** 入金状況の判定（手入力のプルダウンで選べる値） */

@@ -116,6 +116,11 @@ export const rentHistoryRepo = {
       .order('effective_date', { ascending: false })
     return unwrap(data, error)
   },
+  /** 渡した項目だけ書き換える（期間を指定した金額変更で、期間の中にある行を直すのに使う） */
+  async update(id: string, patch: Partial<RentHistory>): Promise<void> {
+    const { error } = await supabase.from('rent_history').update(patch).eq('id', id)
+    if (error) throw new Error(error.message)
+  },
   async create(h: Partial<RentHistory>): Promise<RentHistory> {
     const { data, error } = await supabase.from('rent_history').insert(h).select().single()
     return unwrap(data, error)

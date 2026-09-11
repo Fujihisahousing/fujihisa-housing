@@ -209,15 +209,25 @@ export function deriveMonth(ctx: UnitContext, idx: number): Derived {
 
   const contract = known ? contractOf(ctx, idx, period) : 0
   const billed = contract + water
-  const guarantor = occupied ? ctx.unit.guarantor ?? null : null
+
+  // 部屋の現在値（契約者・保証会社・入居者属性）を当ててよいのは、いまの入居者の月だけ。
+  // 以前は全部の入居期間に当てていたため、部屋を編集すると前の入居者の月まで保証会社が
+  // 書き換わり（空室にすると消え）、判定と滞納一覧が過去に遡って変わっていた。
+  // 前の入居者の月は、記録に残っている値をそのまま使う。
+  const latest = ctx.periods.length > 0 ? ctx.periods[ctx.periods.length - 1] : null
+  const unitHoldsTenant = ctx.unit.status === '入居' || ctx.unit.status === '退予'
+  const useUnit = period != null && period === latest && (period.toIdx == null || unitHoldsTenant)
+  const fromUnit = <T,>(unitValue: T | null | undefined, recValue: T | null | undefined): T | null =>
+    useUnit ? unitValue ?? null : recValue ?? null
+  const guarantor = occupied ? fromUnit(ctx.unit.guarantor, rec?.guarantor) : null
 
   return {
     known,
     occupied,
-    // 期間に控えが無い（入退去シートを使う前の入居）ときは部屋の現在値で補う
-    tenant: occupied ? period!.tenant ?? ctx.unit.tenant ?? null : null,
-    kana: occupied ? period!.kana ?? ctx.unit.tenant_kana ?? null : null,
-    tenantType: occupied ? ctx.unit.tenant_type ?? null : null,
+    // 期間に控えが無い（入退去シートを使う前の入居）ときは部屋の現在値か記録の値で補う
+    tenant: occupied ? period!.tenant ?? fromUnit(ctx.unit.tenant, rec?.tenant) : null,
+    kana: occupied ? period!.kana ?? fromUnit(ctx.unit.tenant_kana, rec?.kana) : null,
+    tenantType: occupied ? fromUnit(ctx.unit.tenant_type, rec?.tenant_type) : null,
     guarantor,
     contract,
     water,
@@ -247,6 +257,22 @@ export type OverridableField = (typeof OVERRIDABLE)[number]
 
 export const overridesOf = (rec?: PaymentRecord | null): Overrides =>
   (rec?.overrides as Overrides | undefined) ?? {}
+
+/** overrides に置く「請求額の初回引き継ぎを済ませた」印。手動上書きの項目ではない */
+export const SEEDED_KEY = '_seeded'
+
+/**
+ * 自動導出を入れた日時（commit 4cc3384）。これより後に書かれた記録は、書いた直後の
+ * 再計算でマスタから作り直されているので、初回の引き継ぎはもう要らない。
+ */
+const DERIVED_SINCE = Date.parse('2026-09-02T15:10:13+09:00')
+
+/** 請求額の初回引き継ぎ（mergeMonth の①〜③）をかけるべき記録か */
+export function needsSeeding(rec: PaymentRecord, ov: Overrides): boolean {
+  if (SEEDED_KEY in ov) return false
+  const written = Date.parse(String(rec.updated_at ?? ''))
+  return !(written >= DERIVED_SINCE)
+}
 
 /**
  * 導出結果と既存の記録・手動上書きを重ねて、保存するべき1行を作る。
@@ -282,9 +308,15 @@ export function mergeMonth(
   //   ③ それ以外で請求額が作り直せない … 入居月の日割りや、賃料履歴に入っていない改定
   //      （道頓堀2F：当時330,000／いまの契約額385,000）。手動上書きとして凍結する
   //      （自動に戻したいときは画面の判定から「自動に戻す」で外せる）。
+  //
+  // この引き継ぎは記録1件につき一度きり。以前は再計算のたびに走っていたため、部屋の編集で
+  // 賃料・共益費を変えると「記録の請求額（古い額）≠ 新しい契約額」になり、③で古い額が
+  // 手動上書きとして凍結されていた＝物件詳細を直しても入金状況・収支表が変わらなかった
+  // （道頓堀4F・6F 2026-09-11）。値下げでは差額が①で光熱費の目印に化けていた。
   let water = d.water
   let memo = rec?.memo ?? null
-  if (!('billed' in ov) && rec && d.known) {
+  if (!('billed' in ov) && rec && d.known && needsSeeding(rec, ov)) {
+    ov[SEEDED_KEY] = true
     const storedBilled = n(rec.billed)
     const storedPaid = n(rec.paid)
     // 目印を付けられるのは、まだ目印が無く、契約額が分かっている月だけ

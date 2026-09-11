@@ -22,6 +22,7 @@ import {
   type OverridableField,
 } from './derive'
 import type { PaymentRecord, Unit } from '../types'
+import type { RentHistoryPlan } from './rentHistoryPlan'
 
 export interface ResyncResult {
   /** 書き換えた記録の数 */
@@ -111,6 +112,17 @@ export async function resyncUnit(
   onlyMonths?: number[],
 ): Promise<ResyncResult> {
   return resyncProperty(unit.property_id, [unit.id], onlyMonths)
+}
+
+/**
+ * 賃料履歴の書き換え計画（lib/rentHistoryPlan.ts）を保存する。
+ * 同じ開始月の重なりを消す → 期間の中の行を直す → 足りない行を足す、の順。
+ * rent_history には (unit_id, effective_date) の一意制約があるので、先に重なりを消す。
+ */
+export async function saveRentHistoryPlan(unitId: string, plan: RentHistoryPlan): Promise<void> {
+  for (const id of plan.removes) await rentHistoryRepo.remove(id)
+  for (const u of plan.updates) await rentHistoryRepo.update(u.id, u.patch)
+  for (const c of plan.creates) await rentHistoryRepo.create({ unit_id: unitId, ...c })
 }
 
 /** 部屋のIDだけ分かっているとき（台帳・取込から呼ぶ） */

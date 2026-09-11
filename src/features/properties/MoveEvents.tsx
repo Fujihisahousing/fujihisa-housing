@@ -18,7 +18,8 @@ import {
   moveEventsRepo, moveOutLedgerRepo, unitsRepo, rentHistoryRepo,
 } from '../../lib/repositories'
 import { effectiveRentKyoeki } from '../../lib/calc'
-import { resyncUnit } from '../../lib/resync'
+import { resyncUnit, saveRentHistoryPlan } from '../../lib/resync'
+import { planRentHistoryEdit, type RentValues } from '../../lib/rentHistoryPlan'
 import { unitCompare } from '../../lib/sortUnits'
 import { yen, formatDate } from '../../lib/format'
 import { TENANT_TYPES, PAYMENT_METHODS, USE_TYPES } from '../../types'
@@ -1076,24 +1077,43 @@ export function dueMoveIns(events: MoveEvent[], today: string): MoveEvent[] {
  *  賃料が変わるなら、満額を始める月から効く履歴も足す（月初の日付＝その月分から）。 */
 export async function applyMoveIn(e: MoveEvent, u: Unit): Promise<void> {
   const patch = (e.unit_patch ?? {}) as Partial<Unit>
-  const newRent = Number(patch.rent) || 0
-  const newKyoeki = Number(patch.kyoeki) || 0
+  const oldValues: RentValues = {
+    rent: Number(u.rent) || 0,
+    kyoeki: Number(u.kyoeki) || 0,
+    parking: u.parking ?? null,
+  }
+  // 予約に入っている項目のうち、今と違うものだけを履歴に当てる。以前は予約に賃料が
+  // 無くても 0 円と比べて「変わった」とみなし、0 円の履歴を作ることがあった。
+  // 駐輪駐車の変更も見る（見ていなかったので、駐車場を借りた月が履歴に残らなかった）。
+  const changed: Partial<RentValues> = {}
+  if ('rent' in patch && (Number(patch.rent) || 0) !== oldValues.rent) changed.rent = Number(patch.rent) || 0
+  if ('kyoeki' in patch && (Number(patch.kyoeki) || 0) !== oldValues.kyoeki) changed.kyoeki = Number(patch.kyoeki) || 0
+  if ('parking' in patch && (patch.parking ?? null) !== oldValues.parking) changed.parking = patch.parking ?? null
+
   await unitsRepo.update(u.id, {
     ...patch,
     status: '入居',
     notes: stripMoveInNote(u.notes) || null,
   })
-  const changed = newRent !== (Number(u.rent) || 0) || newKyoeki !== (Number(u.kyoeki) || 0)
-  if (changed && e.first_full_ym) {
-    await rentHistoryRepo.create({
-      unit_id: u.id,
-      effective_date: `${e.first_full_ym}-01`,
-      rent: newRent,
-      kyoeki: newKyoeki,
-      parking: patch.parking ?? null,
-    })
+  if (Object.keys(changed).length > 0 && e.first_full_ym) {
+    // 部屋の編集と同じ規則で書く（lib/rentHistoryPlan.ts）。満額を始める月より前に
+    // 履歴が無ければ前の額の行も置くので、入居前の月まで新しい賃料にならない。
+    const history = await rentHistoryRepo.listByUnit(u.id)
+    await saveRentHistoryPlan(
+      u.id,
+      planRentHistoryEdit({
+        history,
+        fallback: oldValues,
+        changed,
+        startDate: `${e.first_full_ym}-01`,
+        endDate: null,
+      }),
+    )
   }
   await moveEventsRepo.save({ id: e.id, unit_id: e.unit_id, kind: e.kind, applied_at: new Date().toISOString() })
+  // 入居の反映で状況・契約者・賃料が変わるので、入金状況の記録も作り直す
+  // （画面を開いたときの自動反映 applyDueMoveIns からも通る）
+  await resyncUnit({ id: u.id, property_id: u.property_id })
 }
 
 /** 入居日が来た予約をまとめて部屋へ反映する。画面を開いたときに呼ぶ。
