@@ -6,6 +6,7 @@ import { calcRentRoll, isDisposedForRentRoll } from '../../lib/calc'
 import { unitCompare, isGroupBreak } from '../../lib/sortUnits'
 import { statusBadgeClass } from '../../lib/status'
 import { applyDueMoveIns } from '../properties/MoveEvents'
+import { resyncUnitIds } from '../../lib/resync'
 import { yen, percent, formatDate, maxRoomDigits, padRoom, areaM2 } from '../../lib/format'
 import { useAppStore } from '../../state/useAppStore'
 import { UNIT_STATUSES, type MoveEvent, type Property, type Unit } from '../../types'
@@ -144,6 +145,8 @@ export function RentRoll({ properties }: { properties: Property[] }) {
       setUnits((prev) => prev.map((u) => (u.id === id ? { ...u, ...patch } : u)))
       try {
         await unitsRepo.update(id, patch)
+        // 状況が変わると入金状況の請求（空室か入居か）が変わるので、記録も作り直す
+        if ('status' in patch) await resyncUnitIds([id])
       } catch (e) {
         alert('保存に失敗しました：' + (e instanceof Error ? e.message : ''))
         void load()

@@ -5,6 +5,7 @@ import { Loader2, Lock, UserPlus, LogOut, ArrowLeft } from 'lucide-react'
 import { Modal } from '../../components/common/Modal'
 import { useAuth } from '../../auth/AuthProvider'
 import { leasesRepo, unitsRepo } from '../../lib/repositories'
+import { resyncUnit } from '../../lib/resync'
 import { formatDate, today } from '../../lib/format'
 import type { Lease, Unit } from '../../types'
 
@@ -218,6 +219,8 @@ function MoveInForm({ unit, onBack, onDone }: { unit: Unit; onBack: () => void; 
         move_in: f.move_in,
       })
       await unitsRepo.update(unit.id, { status: '入居' })
+      // 状況が変わると入金状況の請求（空室か入居か）が変わるので、記録も作り直す
+      await resyncUnit({ id: unit.id, property_id: unit.property_id })
       onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存に失敗しました。')
@@ -311,6 +314,7 @@ function MoveOutForm({
         restoration_cost: f.restoration_cost,
       })
       await unitsRepo.update(unit.id, { status: '空室' })
+      await resyncUnit({ id: unit.id, property_id: unit.property_id })
       onDone()
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存に失敗しました。')

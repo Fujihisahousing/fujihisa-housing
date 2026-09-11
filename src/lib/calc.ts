@@ -1089,8 +1089,10 @@ export function calcArrearsList(
     if (txMap) for (const i of txMap.keys()) idxSet.add(i)
 
     const months: ArrearsMonthDetail[] = []
-    let tenant = u.tenant ?? ''
-    let guarantor = u.guarantor ?? ''
+    // 契約者名・保証会社は、滞納しているいちばん新しい月の記録から採る。部屋の現在値を
+    // 優先していたため、前の入居者の滞納が今の入居者の名前で出ていた。記録に無ければ部屋の値
+    let tenant = ''
+    let guarantor = ''
     for (const idx of Array.from(idxSet).sort((a, b) => a - b)) {
       if (idx > selIdx || !gracePassed(idx)) continue
       const y = Math.floor(idx / 12)
@@ -1103,16 +1105,20 @@ export function calcArrearsList(
         if (isSettled(rec.judgement)) continue
         billed = rec.billed != null ? n(rec.billed) : billedAmount(eff, u)
         paid = rec.paid != null ? n(rec.paid) : 0
-        if (!tenant && rec.tenant) tenant = rec.tenant
-        if (!guarantor && rec.guarantor) guarantor = rec.guarantor
       } else {
         if (!isOccupied(u)) continue // 記録の無い空室月は数えない
         billed = billedAmount(eff, u)
         paid = txMap?.get(idx) ?? 0
       }
       const shortfall = Math.max(0, billed - paid)
-      if (shortfall > 0) months.push({ year: y, month: mo, shortfall })
+      if (shortfall > 0) {
+        months.push({ year: y, month: mo, shortfall })
+        if (rec?.tenant) tenant = rec.tenant
+        if (rec?.guarantor) guarantor = rec.guarantor
+      }
     }
+    if (!tenant) tenant = u.tenant ?? ''
+    if (!guarantor) guarantor = u.guarantor ?? ''
 
     // 選択月の記録に滞納月数の手入力があれば、それを月数として採用する。
     // 明細（月ごとの不足額）と合計滞納額は実データのままにする＝上書きするのは件数だけ。
