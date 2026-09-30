@@ -465,6 +465,28 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
     }
   }
 
+  /** 入居確認済みにする／取り消す。入居日を過ぎても一覧に残り続けるので、
+   *  確かめた入居は手で一覧から外す（ユーザー指定 2026-09-30）。請求には関係しない。 */
+  async function setConfirmed(confirmed: boolean) {
+    if (!form?.id || !form.unit_id) return
+    setSaving(true)
+    setError(null)
+    try {
+      await moveEventsRepo.save({
+        id: form.id,
+        unit_id: form.unit_id,
+        kind,
+        confirmed_at: confirmed ? new Date().toISOString() : null,
+      })
+      setForm(null)
+      await onChanged()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '保存に失敗しました。')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function remove(id: string) {
     if (!window.confirm('この記録を削除しますか？（入金状況の請求額も作り直されます）')) return
     const target = rows.find((e) => e.id === id)
@@ -483,15 +505,15 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
     )
   }
 
-  // 退去は退去日が入った時点で「済み」。一覧には予定だけを出し、済みは過去案件に落とす。
+  // 退去は退去日が入った時点で「済み」、入居は「入居確認済み」を押した時点で「済み」。
+  // 一覧には予定だけを出し、済みは過去案件に落とす。
   // ここは loading の早期リターンより後ろなので useMemo にしてはいけない
   // （フックの数がレンダーごとに変わって画面が落ちる）。ただの絞り込みなので素で書く。
-  const pending = isMoveIn ? rows : rows.filter((e) => !e.actual_date)
-  const past = isMoveIn
-    ? []
-    : rows
-        .filter((e) => e.actual_date)
-        .sort((a, b) => String(b.actual_date).localeCompare(String(a.actual_date)))
+  const isDone = (e: MoveEvent) => (isMoveIn ? Boolean(e.confirmed_at) : Boolean(e.actual_date))
+  const pending = rows.filter((e) => !isDone(e))
+  const past = rows
+    .filter(isDone)
+    .sort((a, b) => String(b.actual_date).localeCompare(String(a.actual_date)))
 
   const renderRow = (e: MoveEvent) => {
             const u = unitById.get(e.unit_id)
@@ -584,6 +606,8 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
           error={error}
           onCancel={() => setForm(null)}
           onSave={() => void save()}
+          confirmed={Boolean(rows.find((e) => e.id === form.id)?.confirmed_at)}
+          onConfirm={(v) => void setConfirmed(v)}
         />
       )}
 
@@ -592,7 +616,7 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
       {pending.length === 0 ? (
         <p className="text-center text-slate-400 text-xs py-6">
           {isMoveIn
-            ? '入居の記録はありません。入居日と日割り家賃を登録すると、その月の請求額に反映されます。'
+            ? '入居の予定はありません。入居日と日割り家賃を登録すると、日割りは翌月分の請求額に上乗せされます。'
             : '予定の退去はありません。退去予告を受けた時点で登録してください。'}
         </p>
       ) : (
@@ -604,7 +628,7 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
       {past.length > 0 && (
         <details className="rounded-lg border border-slate-200 bg-slate-50/60">
           <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-500">
-            過去案件（退去日入力済み・{past.length}件）
+            過去案件（{isMoveIn ? '入居確認済み' : '退去日入力済み'}・{past.length}件）
           </summary>
           <div className="bg-white divide-y divide-slate-100 border-t border-slate-200">
             {past.map(renderRow)}
@@ -620,7 +644,7 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
 // ---------------------------------------------------------------------
 function MoveForm({
   kind, form, setForm, units, properties, onUnitChange, onDateChange, onScheduledChange,
-  isAdmin, monthlyOf, saving, error, onCancel, onSave,
+  isAdmin, monthlyOf, saving, error, onCancel, onSave, confirmed, onConfirm,
 }: {
   kind: MoveKind
   form: Form
@@ -636,6 +660,9 @@ function MoveForm({
   error: string | null
   onCancel: () => void
   onSave: () => void
+  /** 入居：入居確認済みか。登録済みの入居を開いたときだけ意味を持つ */
+  confirmed: boolean
+  onConfirm: (confirmed: boolean) => void
 }) {
   const isMoveIn = kind === '入居'
   const set = (k: keyof Form) => (v: string) =>
@@ -755,6 +782,7 @@ function MoveForm({
           </div>
           <p className="text-[11px] text-slate-500">
             月は入居日から自動で決まります（日割り＝入居月／満額＝翌月）。
+            日割りは入居月には請求せず、翌月分の家賃に上乗せして請求します。
             1日入居のときだけ日割りが無くなり、その月から満額になります。
           </p>
 
@@ -927,6 +955,23 @@ function MoveForm({
         >
           {saving ? '保存中…' : '保存する'}
         </button>
+        {/* 入居日を過ぎた入居だけ。押すと一覧から外れて過去案件に回る（取り消しもここから） */}
+        {isMoveIn && form.id && (confirmed || isDue(form.actual_date, todayStr())) && (
+          <button
+            onClick={() => {
+              if (confirmed || window.confirm('入居確認済みにして、入居の一覧から外しますか？')) onConfirm(!confirmed)
+            }}
+            disabled={saving}
+            className={
+              'rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-60 ' +
+              (confirmed
+                ? 'border border-slate-300 text-slate-600 hover:bg-slate-50'
+                : 'bg-emerald-600 text-white hover:bg-emerald-700')
+            }
+          >
+            {confirmed ? '入居確認を取り消す' : '入居確認済み'}
+          </button>
+        )}
         <button
           onClick={onCancel}
           className="rounded-xl border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"

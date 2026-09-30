@@ -232,6 +232,8 @@ export interface MoveEvent {
   unit_patch?: Record<string, unknown> | null
   /** units へ反映した日時。null なら未反映 */
   applied_at?: string | null
+  /** 入居：入居を確かめた日時。入れると入居タブの一覧から外れ、過去案件に回る */
+  confirmed_at?: string | null
   memo?: string | null
   created_at?: string
 }
