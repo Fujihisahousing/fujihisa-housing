@@ -16,6 +16,7 @@ import {
   isPaidCategory,
 } from './calc'
 import { readWaterTag, writeWaterTag } from './invoiceWater'
+import { anyMoveNotes, hasMoveNotes, writeMoveNotes, type MoveNotes } from './moveNotes'
 import type { MoveEvent, PaymentRecord, RentHistory, Transaction, Unit } from '../types'
 
 const n = (v: unknown) => Number(v ?? 0) || 0
@@ -41,10 +42,21 @@ interface Period {
   toIdx: number | null
   tenant: string | null
   kana: string | null
-  /** 日割りを計上する月と、その額（入居月だけの例外） */
+  /** 入居月（日割りの月）と日割りの額。日割りは入居月には請求せず、翌月の家賃に上乗せする */
   proratedIdx: number | null
   proratedAmount: number | null
+  /** 入居日（備考の「〇月〇日入居」に使う） */
+  inDate: string | null
+  /** 期間を閉じた退去の日付（実際の退去日、無ければ予定日）。備考の「〇月〇日退去予定」に使う */
+  outDate: string | null
+  outScheduled: boolean
 }
+
+/** 退去イベントから、備考に書く退去日を取り出す */
+const outInfo = (e?: MoveEvent) => ({
+  outDate: e ? (e.actual_date ?? e.scheduled_date ?? null) : null,
+  outScheduled: e ? !e.actual_date : false,
+})
 
 /** 入居イベントの開始月＝日割り月（あれば）、無ければ満額開始月 */
 const moveInStart = (e: MoveEvent) =>
@@ -82,6 +94,8 @@ export function periodsOf(unit: Unit, moves: MoveEvent[]): Period[] {
           kana: unit.tenant_kana ?? out?.tenant_kana ?? null,
           proratedIdx: null,
           proratedAmount: null,
+          inDate: null,
+          ...outInfo(out),
         },
       ]
     }
@@ -94,12 +108,14 @@ export function periodsOf(unit: Unit, moves: MoveEvent[]): Period[] {
       const fromIdx = moveInStart(e)!
       // その入居より後ろで、まだ使っていない最初の退去がこの期間の終わり
       let toIdx: number | null = null
+      let out: MoveEvent | undefined
       for (let i = 0; i < outs.length; i++) {
         if (used.has(i)) continue
         const end = moveOutEnd(outs[i])!
         if (end >= fromIdx) {
           used.add(i)
           toIdx = end
+          out = outs[i]
           break
         }
       }
@@ -110,6 +126,8 @@ export function periodsOf(unit: Unit, moves: MoveEvent[]): Period[] {
         kana: e.tenant_kana ?? null,
         proratedIdx: idxOfYm(e.prorated_ym),
         proratedAmount: e.prorated_amount != null ? n(e.prorated_amount) : null,
+        inDate: e.actual_date ?? null,
+        ...outInfo(out),
       }
     })
   // どの入居にも対応しない退去＝入退去シートを使う前から住んでいた人の退去。
@@ -135,6 +153,8 @@ function outMonthOnly(e: MoveEvent): Period {
     kana: e.tenant_kana ?? null,
     proratedIdx: null,
     proratedAmount: null,
+    inDate: null,
+    ...outInfo(e),
   }
 }
 
@@ -204,8 +224,14 @@ export interface Derived {
   kana: string | null
   tenantType: string | null
   guarantor: string | null
-  /** 契約額（賃料＋共益費＋駐輪駐車）。入居月は日割り、空室月は0 */
+  /** 契約額（賃料＋共益費＋駐輪駐車）。入居月は0で翌月に日割りを上乗せ、空室月は0 */
   contract: number
+  /** 契約額に上乗せした前の月の日割り（入居の翌月だけ） */
+  prorated: number
+  /** 入居月で、請求を翌月に回した月か（請求0でも未入金にしない） */
+  proratedMonth: boolean
+  /** 備考に自動で書く入退去の文言 */
+  notes: MoveNotes
   /** メモの目印から拾った水道代。請求額にはこれを足す */
   water: number
   billed: number
@@ -214,12 +240,40 @@ export interface Derived {
   judgement: string
 }
 
-/** その月に効いていた契約額。入居月の日割りと空室月の0をここで吸収する */
+/** その月の日割りの上乗せ額。入居の翌月だけ、入居月の日割り（未入力なら0）を返す */
+function proratedAddOf(period: Period | null, idx: number): number {
+  if (!period || period.proratedIdx == null || period.proratedIdx + 1 !== idx) return 0
+  return period.proratedAmount ?? 0
+}
+
+/**
+ * その月に効いていた契約額。空室月は0。
+ * 入居月（日割りの月）は請求せず0、翌月に日割りを上乗せする（ユーザー指定 2026-09-30：
+ * 日割りは翌月の家賃と一緒に入金してもらう運用）。
+ */
 function contractOf(ctx: UnitContext, idx: number, period: Period | null): number {
   if (!period) return 0
-  if (period.proratedIdx === idx && period.proratedAmount != null) return period.proratedAmount
+  if (period.proratedIdx === idx) return 0
   const eff = effectiveRentKyoeki(ctx.unit, ctx.history, yearOfIdx(idx), monthOfIdx(idx))
-  return billedAmount(eff, ctx.unit)
+  return billedAmount(eff, ctx.unit) + proratedAddOf(period, idx)
+}
+
+/** その月の備考に書く入退去の文言。退去月は退去日、入居月は入居日と上乗せ先の月 */
+function notesOf(ctx: UnitContext, idx: number, period: Period | null): MoveNotes {
+  const notes: MoveNotes = {}
+  if (period && period.toIdx === idx && period.outDate) {
+    notes.outDate = period.outDate
+    notes.outScheduled = period.outScheduled
+  }
+  // 入居月は前の入居者の退去月と重なることがある（その月は退去する人の行になる）ので、
+  // その月の期間ではなく、全部の期間から入居月が当たるものを探す
+  const moveIn = ctx.periods.find((p) => p.proratedIdx === idx && p.inDate)
+  if (moveIn) {
+    notes.inDate = moveIn.inDate
+    notes.proratedToMonth = monthOfIdx(idx + 1)
+  }
+  notes.prorated = proratedAddOf(period, idx)
+  return notes
 }
 
 /** 指定月をマスタから組み立てる */
@@ -258,12 +312,24 @@ export function deriveMonth(ctx: UnitContext, idx: number): Derived {
     tenantType: occupied ? fromUnit(ctx.unit.tenant_type, rec?.tenant_type) : null,
     guarantor,
     contract,
+    prorated: known ? proratedAddOf(period, idx) : 0,
+    proratedMonth: period != null && period.proratedIdx === idx,
+    notes: known ? notesOf(ctx, idx, period) : {},
     water,
     billed,
     paid,
     paidOn,
-    judgement: occupied ? deriveJudgement(true, billed, paid, Boolean(guarantor)) : '空室',
+    judgement: occupied ? occupiedJudgement(billed, paid, Boolean(guarantor), period!.proratedIdx === idx) : '空室',
   }
+}
+
+/**
+ * 入居中の月の判定。入居月（日割りを翌月に回した月）は請求が0なので、
+ * そのまま導くと「未入金」になる。払うものが無い月なので入金済として扱う。
+ */
+function occupiedJudgement(billed: number, paid: number, guarantor: boolean, proratedMonth: boolean): string {
+  if (proratedMonth && billed <= 0) return guarantor ? '保証会社入金済' : '入金済'
+  return deriveJudgement(true, billed, paid, guarantor)
 }
 
 /** 手で直した値の入れ物。payment_records.overrides に入る */
@@ -316,13 +382,36 @@ export function mergeMonth(
   idx: number,
 ): { record: PaymentRecord; changed: boolean; known: boolean } {
   const rec = ctx.recByIdx.get(idx)
-  const d = deriveMonth(ctx, idx)
+  let d = deriveMonth(ctx, idx)
   const ov: Overrides = { ...overridesOf(rec) }
 
   // 記帳から作り直せない入金額は手入力とみなして上書きに移す（初回の引き継ぎ）
   if (!('paid' in ov) && d.paid === 0 && rec && n(rec.paid) > 0) {
     ov.paid = n(rec.paid)
     if (rec.paid_on) ov.paid_on = rec.paid_on
+  }
+
+  // 入居開始日も入退去シートも無い部屋でも、前の月に住んで払っていれば、この月も同じ人が
+  // 住んでいる。空の記録（契約者名なし・請求額0）を「分からない月」として残すと空室に
+  // なっていた（大庭町・東大阪松原・五月田町・ルネス701 2026年10月）。
+  const prev = ctx.recByIdx.get(idx - 1)
+  let guarantorKind: boolean | null = null
+  if (!d.known && !('judgement' in ov) && prev && isLivedIn(prev) && isBlankMonth(rec, ov)) {
+    const eff = effectiveRentKyoeki(ctx.unit, ctx.history, yearOfIdx(idx), monthOfIdx(idx))
+    const contract = billedAmount(eff, ctx.unit)
+    // 保証会社経由かどうかは前の月の判定に揃える（前の月と表記が変わらないように）
+    guarantorKind = String(prev.judgement).startsWith('保証会社')
+    d = {
+      ...d,
+      known: true,
+      occupied: true,
+      tenant: prev.tenant ?? null,
+      kana: prev.kana ?? null,
+      tenantType: prev.tenant_type ?? null,
+      guarantor: prev.guarantor ?? null,
+      contract,
+      billed: contract + d.water,
+    }
   }
 
   // 請求額の初回引き継ぎ。この仕組みを入れる前の記録は、請求額の内訳がどこにも
@@ -378,9 +467,16 @@ export function mergeMonth(
       ? (ov.judgement as string)
       : d.known
         ? d.occupied
-          ? deriveJudgement(true, billed, paid, Boolean(guarantor))
+          ? occupiedJudgement(billed, paid, guarantorKind ?? Boolean(guarantor), d.proratedMonth)
           : '空室'
         : keptJudgement(rec?.judgement ?? d.judgement, billed, paid)
+
+  // 退去月の「〇月〇日退去予定」、入居月の「〇月〇日入居（日割りは〇月分に上乗せ）」、
+  // 翌月の日割りの目印を備考に付ける。付けるものも付いているものも無い月は触らない
+  // （空白の整え直しだけで記録を書き換えないため）
+  if (d.known && (anyMoveNotes(d.notes) || hasMoveNotes(memo))) {
+    memo = writeMoveNotes(memo, d.notes)
+  }
 
   const record: PaymentRecord = {
     property_id: ctx.unit.property_id,
@@ -421,6 +517,23 @@ export function mergeMonth(
   return { record, changed: !same, known: d.known }
 }
 
+/** 人が住んで請求していた月の記録か */
+function isLivedIn(rec: PaymentRecord): boolean {
+  return !!rec.tenant && !!rec.judgement && rec.judgement !== '空室'
+}
+
+/**
+ * 中身の無い記録か。手入力で入金額だけ入った月・記帳から先にできた月がこうなる。
+ * 本当に空室だった月（入金も無い）とは、入金の有無で見分ける。
+ */
+function isBlankMonth(rec: PaymentRecord | undefined, ov: Overrides): boolean {
+  if (!rec) return true
+  if (rec.tenant || n(rec.billed) > 0) return false
+  if (rec.judgement == null) return true
+  const paid = 'paid' in ov ? n(ov.paid) : n(rec.paid)
+  return rec.judgement === '空室' && paid > 0
+}
+
 /**
  * 占有状況が分からない月の判定。記録の判定を残すが、入居していた月（空室以外）で
  * 請求額・入金額と食い違うときだけ金額から導き直す。保証会社経由かどうかは記録の判定から採る。
@@ -447,6 +560,11 @@ export function monthsInScope(ctx: UnitContext, todayIdx: number): number[] {
       const from = Math.max(p.fromIdx, lo)
       const to = Math.min(p.toIdx ?? todayIdx, todayIdx)
       for (let i = from; i <= to; i++) set.add(i)
+      // 入金状況は前家賃の翌月まで出すので、退去月・入居月・日割りを上乗せする月は
+      // 翌月でも作る（備考の「〇月〇日退去予定」と上乗せ後の請求額を出すため）
+      for (const i of [p.toIdx, p.proratedIdx, p.proratedIdx != null ? p.proratedIdx + 1 : null]) {
+        if (i != null && i >= lo && i <= todayIdx + 1) set.add(i)
+      }
     }
   }
   return Array.from(set).sort((a, b) => a - b)

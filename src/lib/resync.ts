@@ -100,6 +100,8 @@ export async function resyncProperty(
       if (isNew && record.billed === 0 && record.paid === 0) continue
       if (!changed) continue
       await paymentRecordsRepo.upsert(record)
+      // 次の月が「前の月に住んでいたか」を見るので、書いた内容を手元にも反映する
+      ctx.recByIdx.set(idx, record)
       updated++
     }
   }

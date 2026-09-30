@@ -1,5 +1,6 @@
 // 集計ロジック（レントロール・利回り・収支表・入金状況）。UI から分離（SOW 設計方針）。
 import { CAT_RENT, CAT_KYOEKI, CAT_PARKING, CAT_UTILITY } from '../types'
+import { readProratedTag } from './moveNotes'
 import type { MoveEvent, PaymentRecord, Property, RentHistory, Transaction, Unit } from '../types'
 
 const n = (v: number | null | undefined) => Number(v ?? 0) || 0
@@ -643,7 +644,9 @@ export function incomeTransactions(
 
     // その月に効いていた契約額の内訳。履歴が無ければ部屋の現在値に落ちる
     const eff = u ? effectiveRentKyoeki(u, rentHistoryByUnit?.get(u.id), rec.year, rec.month) : null
-    const rentBase = eff ? n(eff.rent) + n(eff.kyoeki) : 0
+    // 入居の翌月は前の月の日割りを上乗せして請求しているので、その分も家賃に数える
+    // （数えないと「賃料＋共益費」を超えた日割りが光熱費に落ちる）
+    const rentBase = eff ? n(eff.rent) + n(eff.kyoeki) + readProratedTag(rec.memo) : 0
     const pk = eff ? parkingYen(eff.parking || u!.parking) : 0
     // 賃料が0の部屋（停止中・契約額が台帳に無い部屋）は差し引く土台が無いので、光熱費には
     // 分けない。分けると請求額の全額が光熱費に落ちる（阿波座2F）。
