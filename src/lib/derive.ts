@@ -55,7 +55,8 @@ const moveOutEnd = (e: MoveEvent) =>
 
 /**
  * 入退去シートから入居期間を組み立てる。入退去シートが無い部屋は、
- * 「いま入居中で入居開始日がある」ときだけ1本の期間として扱う。
+ * 「いま入居中で入居開始日がある」ときだけ1本の期間として扱う（退去があればそこで閉じる）。
+ * 入居の控えが無い退去は、退去月だけを期間にする（outMonthOnly）。
  * どちらでもない部屋（入退去シートも入居開始日も無い空室など）は期間が決められず、
  * その月は既存の記録をそのまま残す（過去の控えを壊さないため）。
  */
@@ -70,21 +71,25 @@ export function periodsOf(unit: Unit, moves: MoveEvent[]): Period[] {
   if (ins.length === 0) {
     const start = idxOfYm(unit.contract_start)
     const occupied = unit.status === '入居' || unit.status === '退予'
-    if (!occupied || start == null) return []
-    return [
-      {
-        fromIdx: start,
-        toIdx: null,
-        tenant: unit.tenant ?? null,
-        kana: unit.tenant_kana ?? null,
-        proratedIdx: null,
-        proratedAmount: null,
-      },
-    ]
+    // 入居日より後の最初の退去で期間を閉じる（退去月までは満額もらっている）
+    const out = start != null ? outs.find((e) => moveOutEnd(e)! >= start) : undefined
+    if (occupied && start != null) {
+      return [
+        {
+          fromIdx: start,
+          toIdx: out ? moveOutEnd(out)! : null,
+          tenant: unit.tenant ?? out?.tenant ?? null,
+          kana: unit.tenant_kana ?? out?.tenant_kana ?? null,
+          proratedIdx: null,
+          proratedAmount: null,
+        },
+      ]
+    }
+    return outs.map(outMonthOnly)
   }
 
   const used = new Set<number>()
-  return ins
+  const periods = ins
     .map((e) => {
       const fromIdx = moveInStart(e)!
       // その入居より後ろで、まだ使っていない最初の退去がこの期間の終わり
@@ -107,7 +112,30 @@ export function periodsOf(unit: Unit, moves: MoveEvent[]): Period[] {
         proratedAmount: e.prorated_amount != null ? n(e.prorated_amount) : null,
       }
     })
-    .sort((a, b) => a.fromIdx - b.fromIdx)
+  // どの入居にも対応しない退去＝入退去シートを使う前から住んでいた人の退去。
+  // 拾わないと退去月が「空室」になっていた（堂島1503 2026年8月：次の入居だけ登録済み）
+  // 最初の入居より後ろの余った退去（二重登録など）は、入居期間の外なので拾わない
+  const firstIn = moveInStart(ins[0])!
+  outs.forEach((e, i) => {
+    if (!used.has(i) && moveOutEnd(e)! < firstIn) periods.push(outMonthOnly(e))
+  })
+  return periods.sort((a, b) => a.fromIdx - b.fromIdx)
+}
+
+/**
+ * 入居の控えが無い退去から、退去月だけの期間を作る。それより前の月は入居日が
+ * 分からないので期間に入れない（記録の値をそのまま残す）。
+ */
+function outMonthOnly(e: MoveEvent): Period {
+  const end = moveOutEnd(e)!
+  return {
+    fromIdx: end,
+    toIdx: end,
+    tenant: e.tenant ?? null,
+    kana: e.tenant_kana ?? null,
+    proratedIdx: null,
+    proratedAmount: null,
+  }
 }
 
 /** その部屋について、占有状況が分かる最も古い月。これより前は既存の記録を触らない */
