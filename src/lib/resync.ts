@@ -151,11 +151,17 @@ export async function resyncUnitIds(unitIds: string[]): Promise<ResyncResult> {
  * （＝「手で直しても全部が同期する」）。
  *
  * 値に null を渡すと、その項目の手動上書きを外して自動導出に戻す。
+ *
+ * seed は記録がまだ無い月に使う土台（画面に出ていた契約者名・請求額・判定）。
+ * 入居開始日も入退去シートも無い部屋は作り直しで占有状況が決められず記録の値を残すので、
+ * 土台が無いと空の記録が「空室」として残り、入金額を入れた月だけ行が消えていた
+ * （大庭町・東大阪松原・五月田町・ルネス701 2026年10月）。
  */
 export async function setOverride(
   base: Pick<PaymentRecord, 'property_id' | 'room' | 'year' | 'month'>,
   patch: Partial<Record<OverridableField, unknown>>,
   unit?: Pick<Unit, 'id' | 'property_id'> | null,
+  seed?: Partial<PaymentRecord>,
 ): Promise<void> {
   const current = await paymentRecordsRepo.get(base.property_id, base.room, base.year, base.month)
   const ov = { ...overridesOf(current) }
@@ -164,7 +170,7 @@ export async function setOverride(
     else ov[key] = value
   }
   await paymentRecordsRepo.upsert({
-    ...(current ?? base),
+    ...(current ?? { ...seed, ...base }),
     ...base,
     overrides: ov,
   })

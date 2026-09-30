@@ -352,7 +352,7 @@ export function mergeMonth(
         ? d.occupied
           ? deriveJudgement(true, billed, paid, Boolean(guarantor))
           : '空室'
-        : (rec?.judgement ?? d.judgement)
+        : keptJudgement(rec?.judgement ?? d.judgement, billed, paid)
 
   const record: PaymentRecord = {
     property_id: ctx.unit.property_id,
@@ -391,6 +391,19 @@ export function mergeMonth(
     JSON.stringify(overridesOf(rec)) === JSON.stringify(ov)
 
   return { record, changed: !same, known: d.known }
+}
+
+/**
+ * 占有状況が分からない月の判定。記録の判定を残すが、入居していた月（空室以外）で
+ * 請求額・入金額と食い違うときだけ金額から導き直す。保証会社経由かどうかは記録の判定から採る。
+ * 入居開始日も入退去シートも無い部屋（戸建て・ルネス701など）で入金額を手入力しても
+ * 「未入金」のまま残っていたため（2026年10月）。
+ * 入金額が0の月は触らない。入金額を入れずに判定だけ「入金済」にした昔の記録がある
+ * （守口203・階段下 2023年7月）ので、導き直すと未入金に化けて滞納一覧に出てしまう。
+ */
+function keptJudgement(stored: string, billed: number, paid: number): string {
+  if (stored === '空室' || billed <= 0 || paid <= 0) return stored
+  return deriveJudgement(true, billed, paid, stored.startsWith('保証会社'))
 }
 
 /**

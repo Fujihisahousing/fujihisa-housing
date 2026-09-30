@@ -360,8 +360,19 @@ export function PaymentStatus({
   const applyOverride = useCallback(
     async (row: DisplayRow, patch: Record<string, unknown>, label: string) => {
       const { key, unit } = targetOf(row)
+      // 記録の無い月は、画面に出ていた値を土台にして記録を作る（記録がある月には使われない）
+      const seed = row.fromRecord
+        ? undefined
+        : {
+            tenant: row.tenantRaw || null,
+            tenant_type: row.tenantType || null,
+            kana: row.kana || null,
+            guarantor: row.guarantor || null,
+            billed: row.calcBilled,
+            judgement: row.judgement,
+          }
       try {
-        await setOverride(key, patch, unit)
+        await setOverride(key, patch, unit, seed)
         await load() // 月次・未入金一覧の両方に反映
       } catch (e) {
         alert(label + 'の保存に失敗しました：' + (e instanceof Error ? e.message : ''))
