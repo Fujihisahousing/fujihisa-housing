@@ -27,7 +27,7 @@ import {
   normRoom,
   readWaterTag,
 } from '../../lib/invoiceWater'
-import { parseInvoiceText, invoiceTotals, type ParsedInvoiceText } from '../../lib/invoiceText'
+import { parseInvoiceText, withTax, type ParsedInvoiceText } from '../../lib/invoiceText'
 import type { PaymentRecord, Property, Unit } from '../../types'
 
 /** 取り込む1件。号室×年月で1行 */
@@ -40,6 +40,11 @@ interface Line {
   room: string
   name: string
   unitId: string | null
+  /**
+   * PDFの請求書の請求金額（家賃込みの総額）。これがある行は、光熱費を
+   * 「請求金額 − 台帳の家賃・共益費・駐車駐輪」で出す（号室を選び直すと引き直す）
+   */
+  billedTotal?: number | null
 }
 
 /** PDFを読んだときの控え。読み取り結果を画面で見比べるために持つ */
@@ -48,9 +53,11 @@ interface PdfState {
   ocr: boolean
   lines: string[]
   parsed: ParsedInvoiceText
-  /** 明細が税抜で、消費税を足して取り込むか */
-  taxed: boolean
 }
+
+/** 請求金額から台帳の固定分（家賃＋共益費＋駐車駐輪）を引いた残り＝光熱費。部屋が未定なら0 */
+const utilityFromTotal = (total: number | null | undefined, unit: Unit | null | undefined) =>
+  total != null && unit ? Math.max(0, total - fixedAmount(unit)) : 0
 
 /** 一覧形式の見本CSV。列の並びと年月の書き方を間違えないための雛形 */
 function downloadTemplate() {
@@ -98,11 +105,12 @@ function unitOfRoom(room: string, us: Unit[]): string | null {
 
 /**
  * PDFの請求書の宛先の部屋を当てる。賃料の額が一致する部屋 → 宛名の一致 → 入居中が1部屋だけ の順。
- * OCRでは宛名の行が落ちることがあるので、賃料の額を先に見る（道頓堀3F：税抜428,376→税込471,213）。
+ * OCRでは宛名の行が落ちることがあるので、賃料の額を先に見る。請求書の賃料は税抜のことがあるので
+ * 税込に直した額でも突き合わせる（道頓堀3F：請求書428,376 → 台帳471,213）。
  */
-function unitOfInvoice(p: ParsedInvoiceText, rentIncl: number | null, us: Unit[]): string | null {
+function unitOfInvoice(p: ParsedInvoiceText, us: Unit[]): string | null {
   const occupied = us.filter(isOccupied)
-  for (const target of [rentIncl, p.rent]) {
+  for (const target of [p.rent, p.rent != null ? withTax(p.rent) : null]) {
     if (target == null) continue
     const hit = occupied.filter((u) => Math.abs(Number(u.rent ?? 0) + Number(u.kyoeki ?? 0) - target) <= 1)
     if (hit.length === 1) return hit[0].id
@@ -144,25 +152,28 @@ export function ImportUtility({
 
   const unitById = useMemo(() => new Map(units.map((u) => [u.id, u])), [units])
 
-  /** PDFの読み取り結果から取り込む行を作る。税の扱い・対象月・部屋を変えたら作り直す */
+  /** PDFの読み取り結果から取り込む行を作る。対象月を変えたら作り直す */
   const pdfLines = useCallback(
-    (
-      p: ParsedInvoiceText,
-      taxed: boolean,
-      ym: { year: number; month: number } | null,
-      unitId: string | null,
-    ): Line[] => {
+    (p: ParsedInvoiceText, ym: { year: number; month: number } | null, unitId: string | null): Line[] => {
       if (!ym) return []
-      if (p.items.length === 0) {
+      if (p.rooms.length > 0) {
         // 検針表の様式（号室ごとに金額が並ぶ）
         return mergeLines(
           p.rooms.map((r) => ({ ...ym, amount: r.amount, room: r.room, name: r.name, unitId: unitOfRoom(r.room, units) })),
         )
       }
-      // 1テナント宛ての請求書。水道・電気などの明細を税込にして合計する
-      const t = invoiceTotals(p, taxed)
-      const amount = Object.values(t.byLabel).reduce((s, v) => s + (v ?? 0), 0)
-      return [{ ...ym, amount, room: '', name: p.addressee, unitId }]
+      // 1テナント宛ての請求書。光熱費は明細から組み立てず、請求金額から家賃・共益費を引いた残り
+      const unit = unitId ? units.find((u) => u.id === unitId) : null
+      return [
+        {
+          ...ym,
+          amount: utilityFromTotal(p.total, unit),
+          room: '',
+          name: p.addressee,
+          unitId,
+          billedTotal: p.total,
+        },
+      ]
     },
     [units],
   )
@@ -184,7 +195,13 @@ export function ImportUtility({
         if (!active) return
         setUnits(us)
         setRecords(rec)
-        setLines((prev) => prev.map((l) => ({ ...l, unitId: l.room ? unitOfRoom(l.room, us) : l.unitId })))
+        setLines((prev) =>
+          prev.map((l) => {
+            const unitId = l.room ? unitOfRoom(l.room, us) : l.unitId
+            if (l.billedTotal == null) return { ...l, unitId }
+            return { ...l, unitId, amount: utilityFromTotal(l.billedTotal, us.find((u) => u.id === unitId)) }
+          }),
+        )
       } catch {
         if (!active) return
         setUnits([])
@@ -248,17 +265,15 @@ export function ImportUtility({
     const { readPdfText } = await import('../../lib/invoicePdf')
     const text = await readPdfText(file, setStatus)
     const parsed = parseInvoiceText(text.lines)
-    const taxed = parsed.tax != null
     // 対象月は請求書の「〇年〇月分」。書かれていなければ入金日から（検針表と同じ寄せ方）
     const ym = parsed.target ?? (parsed.pay ? invoiceTargetMonth(parsed.pay, offset) : null)
     setInvoicePay(parsed.target ? null : parsed.pay)
-    setPdf({ preview: text.preview, ocr: text.ocr, lines: text.lines, parsed, taxed })
-    const unitId = unitOfInvoice(parsed, invoiceTotals(parsed, taxed).rent, units)
-    setLines(pdfLines(parsed, taxed, ym, unitId))
-    if (parsed.items.length === 0 && parsed.rooms.length === 0) {
+    setPdf({ preview: text.preview, ocr: text.ocr, lines: text.lines, parsed })
+    setLines(pdfLines(parsed, ym, unitOfInvoice(parsed, units)))
+    if (parsed.total == null && parsed.rooms.length === 0) {
       setError(
-        '光熱費の明細が読み取れませんでした。「水道」「電気」「ガス」と金額（〇〇円）が同じ行にある請求書か確認してください。' +
-          (text.ocr ? 'スキャンが傾いていたり薄かったりすると読めないことがあります。' : ''),
+        '請求金額が読み取れませんでした。下の表の光熱費の欄に、請求金額から家賃・共益費を引いた額を入れてください。' +
+          (text.ocr ? '（スキャンが傾いていたり薄かったりすると読めないことがあります）' : ''),
       )
     } else if (!ym) {
       setError('請求書の対象月（「令和〇年〇月分」）が読み取れませんでした。下で対象月を選んでください。')
@@ -287,14 +302,16 @@ export function ImportUtility({
     }
   }
 
-  // PDFの取込で、税の扱い・対象月を選び直したら行を作り直す（部屋の選び直しは引き継ぐ）
+  // PDFの取込で対象月を選び直したら、その月に付け替える（部屋と金額はそのまま）
   const pdfYm = lines[0] ? { year: lines[0].year, month: lines[0].month } : (pdf?.parsed.target ?? null)
-  function rebuildPdf(next: { taxed?: boolean; ym?: { year: number; month: number } | null }) {
+  function setPdfYm(ym: { year: number; month: number } | null) {
     if (!pdf) return
-    const taxed = next.taxed ?? pdf.taxed
-    if (next.taxed != null) setPdf({ ...pdf, taxed })
-    const unitId = lines[0]?.unitId ?? unitOfInvoice(pdf.parsed, invoiceTotals(pdf.parsed, taxed).rent, units)
-    setLines(pdfLines(pdf.parsed, taxed, next.ym !== undefined ? next.ym : pdfYm, unitId))
+    if (!ym) return setLines([])
+    setLines((prev) =>
+      prev.length > 0
+        ? prev.map((l) => ({ ...l, ...ym }))
+        : pdfLines(pdf.parsed, ym, unitOfInvoice(pdf.parsed, units)),
+    )
   }
 
   // 号室×年月ごとにまとめる。請求額への足し込みはこの単位で行う
@@ -328,14 +345,23 @@ export function ImportUtility({
   const total = matched.reduce((s, g) => s + g.amount, 0)
   const months = Array.from(new Set(matched.map((g) => ymKey(g.year, g.month)))).sort()
   const rebased = matched.filter((g) => g.patch!.rebased).length
-  const pdfTotals = pdf ? invoiceTotals(pdf.parsed, pdf.taxed) : null
+  // PDFの請求書で、いま当てている部屋（引き算の内訳を出すため）
+  const pdfUnit = pdf && lines[0]?.billedTotal != null && lines[0].unitId ? unitById.get(lines[0].unitId) ?? null : null
 
   function setAmount(i: number, v: string) {
     const amount = Number(v.replace(/[^\d]/g, '')) || 0
     setLines((prev) => prev.map((l, k) => (k === i ? { ...l, amount } : l)))
   }
   function setGroupUnit(idx: number[], unitId: string) {
-    setLines((prev) => prev.map((l, k) => (idx.includes(k) ? { ...l, unitId: unitId || null } : l)))
+    setLines((prev) =>
+      prev.map((l, k) => {
+        if (!idx.includes(k)) return l
+        const next = { ...l, unitId: unitId || null }
+        // PDFの請求書は、選んだ部屋の家賃・共益費で引き直す
+        if (l.billedTotal != null) next.amount = utilityFromTotal(l.billedTotal, unitById.get(unitId))
+        return next
+      }),
+    )
   }
 
   async function save() {
@@ -411,9 +437,8 @@ export function ImportUtility({
           ① <b>一覧形式</b>（Excel・CSV）… <b>年月・号室・光熱費</b> の列（「水道代」「電気代」など費目別の列が並んでいれば合計します）。1ファイルで何か月ぶんでも入れられます。
           号室の列が無くても、入居中の部屋が1つだけの物件（阿波座など）はその部屋に当てます。
           <br />② <b>検針表</b>（ルネスの様式）… 号数・氏名・金額と入金日。1ファイル1か月ぶんで、入金日から反映先の月を決めます。
-          <br />③ <b>請求書のPDF</b>（道頓堀の様式）… 「水道」「電気」などの行を合計して光熱費とし、「令和〇年〇月分」を対象月にします。
-          <b>スキャンしたPDFは文字を自動で読み取る</b>ので、反映する前に請求書の画像と金額を見比べてください（表の金額は直せます）。
-          明細が税抜で「消費税」の行がある請求書は、10%を足して税込で取り込みます。
+          <br />③ <b>請求書のPDF</b>（道頓堀の様式）… <b>請求金額から台帳の家賃・共益費を引いた残りを光熱費</b>とし、「令和〇年〇月分」を対象月にします。
+          <b>スキャンしたPDFは文字を自動で読み取る</b>ので、反映する前に請求書の画像と請求金額を見比べてください（表の金額は直せます）。
         </p>
         <p>
           入金は総額で届くので、<b>固定分（賃料＋共益費＋駐車・駐輪）をきちんと払っている月は入金額にも同じだけ足します</b>。
@@ -507,51 +532,52 @@ export function ImportUtility({
                 </tr>
                 {pdf.parsed.rent != null && (
                   <tr>
-                    <td className="pr-4 py-0.5 text-slate-500 whitespace-nowrap">賃料・共益費</td>
+                    <td className="pr-4 py-0.5 text-slate-500 whitespace-nowrap">賃料・共益費（請求書）</td>
                     <td className="tabular-nums">
                       {yen(pdf.parsed.rent)}
-                      {pdf.taxed && pdfTotals?.rent != null && ` → 税込 ${yen(pdfTotals.rent)}`}
-                      <span className="ml-1 text-xs text-slate-400">（部屋を当てるのに使うだけで、取り込みません）</span>
+                      <span className="ml-1 text-xs text-slate-400">（部屋を当てるのに使うだけで、計算には使いません）</span>
                     </td>
                   </tr>
                 )}
-                {pdf.parsed.items.map((it, i) => (
-                  <tr key={i}>
-                    <td className="pr-4 py-0.5 text-slate-500 whitespace-nowrap">{it.label}</td>
-                    <td className="tabular-nums">
-                      {yen(it.amount)} <span className="text-xs text-slate-400 break-all">「{it.text}」</span>
-                    </td>
-                  </tr>
-                ))}
-                {pdf.parsed.tax != null && (
-                  <tr>
-                    <td className="pr-4 py-0.5 text-slate-500 whitespace-nowrap">消費税</td>
-                    <td className="tabular-nums">{yen(pdf.parsed.tax)}</td>
-                  </tr>
+                {pdf.parsed.rooms.length === 0 && (
+                  <>
+                    <tr>
+                      <td className="pr-4 py-0.5 text-slate-500 whitespace-nowrap">請求金額</td>
+                      <td className="tabular-nums font-medium">
+                        {pdf.parsed.total != null ? yen(pdf.parsed.total) : <span className="text-rose-700">（読み取れず）</span>}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="pr-4 py-0.5 text-slate-500 whitespace-nowrap">− 家賃・共益費（台帳）</td>
+                      <td className="tabular-nums">
+                        {pdfUnit ? (
+                          <>
+                            {yen(fixedAmount(pdfUnit))}
+                            <span className="ml-1 text-xs text-slate-400">
+                              {String(pdfUnit.room ?? '')} {pdfUnit.tenant ?? ''}（駐車・駐輪があれば含む）
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-rose-700">下の表で号室を選んでください</span>
+                        )}
+                      </td>
+                    </tr>
+                    <tr className="border-t border-slate-200">
+                      <td className="pr-4 py-0.5 text-slate-500 whitespace-nowrap">＝ 光熱費</td>
+                      <td className="tabular-nums font-bold text-slate-900">
+                        {pdfUnit && pdf.parsed.total != null ? yen(utilityFromTotal(pdf.parsed.total, pdfUnit)) : '—'}
+                      </td>
+                    </tr>
+                  </>
                 )}
               </tbody>
             </table>
-            {pdf.parsed.items.length > 0 && (
-              <label className="flex items-center gap-1.5 text-xs">
-                <input type="checkbox" checked={pdf.taxed} onChange={(e) => rebuildPdf({ taxed: e.target.checked })} />
-                明細は税抜（消費税10%を足して取り込む）
-              </label>
-            )}
-            {pdfTotals && pdfTotals.subtotalOk != null && (
-              <Check ok={pdfTotals.subtotalOk}>
-                {pdfTotals.subtotalOk
-                  ? '明細の合計が小計と一致'
-                  : `明細の合計が小計 ${yen(pdf.parsed.subtotal!)} と合いません（読み落としか読み違いがあります）`}
+            {pdfUnit && pdf.parsed.total != null && pdf.parsed.total <= fixedAmount(pdfUnit) && (
+              <Check ok={false}>
+                請求金額が台帳の家賃・共益費以下です。請求金額の読み違いか、号室の当て違いがないか確認してください。
               </Check>
             )}
-            {pdfTotals && pdfTotals.totalOk != null && (
-              <Check ok={pdfTotals.totalOk}>
-                {pdfTotals.totalOk
-                  ? `賃料＋光熱費（税込）${yen(pdfTotals.computedTotal)} が総合計と一致`
-                  : `賃料＋光熱費（税込）${yen(pdfTotals.computedTotal)} が総合計 ${yen(pdf.parsed.total!)} と合いません`}
-              </Check>
-            )}
-            {pdf.parsed.items.length > 0 && (
+            {pdf.parsed.rooms.length === 0 && (
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">対象月</label>
                 <input
@@ -559,7 +585,7 @@ export function ImportUtility({
                   value={pdfYm ? ymKey(pdfYm.year, pdfYm.month) : ''}
                   onChange={(e) => {
                     const m = e.target.value.match(/^(\d{4})-(\d{2})$/)
-                    rebuildPdf({ ym: m ? { year: Number(m[1]), month: Number(m[2]) } : null })
+                    setPdfYm(m ? { year: Number(m[1]), month: Number(m[2]) } : null)
                   }}
                   className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm bg-white"
                 />
