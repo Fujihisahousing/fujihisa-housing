@@ -528,13 +528,13 @@ export function PaymentStatus({
         >
           <Upload className="w-4 h-4" /> 通帳から取込（入力タブ）
         </button>
-        {/* 水道代も入力タブ（水道代を取込）に集約した。通帳取込と同じく案内だけにする */}
+        {/* 光熱費も入力タブ（光熱費を取込）に集約した。通帳取込と同じく案内だけにする */}
         <button
           onClick={() => setActiveView('entry')}
           className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
-          title="入力タブの「水道代を取込」へ移動します"
+          title="入力タブの「光熱費を取込」へ移動します"
         >
-          <FileSpreadsheet className="w-4 h-4" /> 水道代を取込（入力タブ）
+          <FileSpreadsheet className="w-4 h-4" /> 光熱費を取込（入力タブ）
         </button>
         <button
           onClick={() => setMode((m) => (m === 'arrears' ? 'monthly' : 'arrears'))}

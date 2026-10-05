@@ -140,15 +140,16 @@ export function parseInvoiceSheet(grid: unknown[][]): ParsedInvoice {
 /**
  * 月次記録の備考に残す目印。同じ請求書を何度取り込んでも二重に足さないために使うのと、
  * 請求額に上乗せしている光熱費がいくらなのかを備考欄でそのまま確認できるようにするため。
- * 備考には `[水道 1617] [電気 69094]` のように生のテキストで入る。
+ * 備考には `[光熱費 78336]` のように生のテキストで入る。
  *
- * ラベルは費目ごとに分かれていて、水道と電気の両方を上乗せしている物件（道頓堀）では
- * 2つ並ぶ。昔の記録から引き継いだ分は内訳が分からないので `光熱費` にまとめる。
- * 読み取りは並んでいる目印を全部足す。書き込みは同じラベルの目印だけを貼り替えるので、
- * 水道代を取り込んでも電気代の目印は消えない。
+ * 収支表の収入は光熱費1本なので、取り込みは費目を分けず `光熱費` 1つにまとめる。
+ * 昔の取り込みで入った `[水道 2171] [電気 76165]`（道頓堀）や `[水道 1617]`（ルネス）も
+ * 光熱費として読む。取り込み直すと、それらは消して `[光熱費 …]` 1つに置き換える。
  */
 const UTILITY_LABELS = ['水道', '電気', 'ガス', '光熱費'] as const
 export type UtilityLabel = (typeof UTILITY_LABELS)[number]
+/** 請求書の明細の行が光熱費かどうかを見分けるときの区分（取り込むときは光熱費1つにまとめる） */
+export type ImportLabel = '水道' | '電気' | 'ガス'
 
 /** `[水道 1617]` を拾う正規表現。ラベルごとに作る */
 const tagRe = (label: string) => new RegExp('\\[' + label + '\\s*(-?\\d+)\\]', 'g')
@@ -177,48 +178,57 @@ export function writeWaterTag(
   return base ? `${base} ${tag}` : tag
 }
 
-/** その部屋の固定分（賃料＋共益費＋駐輪駐車）。水道代を足す前の土台 */
+/** 光熱費の目印を全部消して `[光熱費 金額]` 1つにする（元の文言は残す） */
+export function writeUtilityTag(memo: string | null | undefined, amount: number): string {
+  let base = String(memo ?? '')
+  for (const label of UTILITY_LABELS) base = base.replace(tagRe(label), '')
+  base = base.replace(/\s{2,}/g, ' ').trim()
+  const tag = `[光熱費 ${amount}]`
+  return base ? `${base} ${tag}` : tag
+}
+
+/** その部屋の固定分（賃料＋共益費＋駐輪駐車）。光熱費を足す前の土台 */
 export const fixedAmount = (u: Unit) => n(u.rent) + n(u.kyoeki) + parkingYen(u.parking)
 
-export interface WaterPatch {
+export interface UtilityPatch {
   billed: number
   paid: number
   memo: string
-  /** 入金額に水道代を足したか。未入金・一部入金の月には足さない */
+  /** 入金額に光熱費を足したか。未入金・一部入金の月には足さない */
   paidRaised: boolean
-  /** 請求額の土台を固定分に引き直したか（既に水道代ぶんが乗っていた月） */
+  /** 請求額の土台を固定分に引き直したか（既に光熱費ぶんが乗っていた月） */
   rebased: boolean
 }
 
 /**
- * 1件ぶんの足し込みを計算する。前回の目印ぶんを一度戻してから足すので、
- * 同じ請求書を取り込み直しても二重にならない。
+ * 1部屋・1か月ぶんの足し込みを計算する。前回の目印ぶん（費目を問わず全部）を一度戻してから
+ * 足すので、同じ請求書を取り込み直しても二重にならない。
  *
- * 入金額は「固定分をきちんと払っている月」だけ水道代を足す。
+ * 入金額は「固定分をきちんと払っている月」だけ光熱費を足す。
  * 未入金・一部入金の月に足すと、受け取っていないお金を受け取ったことにしてしまうため。
- * 通帳取込で既に水道代ぶんまで入っている月（入金額が請求額＋水道代に届いている月）も
- * 触らない。ここを見ないと、記帳から入った水道代の上にもう一度足して二重になる。
+ * 通帳取込で既に光熱費ぶんまで入っている月（入金額が請求額＋光熱費に届いている月）も
+ * 触らない。ここを見ないと、記帳から入った光熱費の上にもう一度足して二重になる。
  */
-export function waterPatch(
+export function utilityPatch(
   unit: Unit,
   rec: { billed?: number | null; paid?: number | null; memo?: string | null } | undefined,
-  water: number,
-): WaterPatch {
+  amount: number,
+): UtilityPatch {
   const prev = readWaterTag(rec?.memo)
   const fixed = fixedAmount(unit)
   let baseBilled = rec?.billed != null ? n(rec.billed) - prev : fixed
   // 目印が無いのに請求額が固定分を上回っている月は、通帳の総額をそのまま請求額にしていて
-  // 既に水道代ぶんが乗っている（阿波座1F：家賃600,000に対し請求額603,835）。
+  // 既に光熱費ぶんが乗っている（阿波座1F：家賃600,000に対し請求額603,835）。
   // そのまま足すと二重になるので、土台を固定分に引き直す。
   const rebased = prev === 0 && fixed > 0 && baseBilled > fixed
   if (rebased) baseBilled = fixed
   const basePaid = rec?.paid != null ? n(rec.paid) - prev : 0
-  const goal = baseBilled + water
+  const goal = baseBilled + amount
   const raise = basePaid > 0 && basePaid >= baseBilled && basePaid < goal
   return {
     billed: goal,
     paid: raise ? goal : basePaid,
-    memo: writeWaterTag(rec?.memo, water),
+    memo: writeUtilityTag(rec?.memo, amount),
     paidRaised: raise,
     rebased,
   }
@@ -284,11 +294,23 @@ export interface WaterListRow {
   room: string
   name: string
   amount: number
+  /** 見出しから費目が分かった列（「電気代」など）。「金額」の列なら undefined＝画面で選んだ費目 */
+  label?: ImportLabel
+}
+
+/** 見出しの文字から費目を当てる。水道・電気・ガスのどれでもなければ null */
+export function labelOfHead(v: string): ImportLabel | null {
+  if (/水道|上水|下水/.test(v)) return '水道'
+  if (/電気|電灯|動力/.test(v)) return '電気'
+  if (/ガス/.test(v)) return 'ガス'
+  return null
 }
 
 /**
- * 一覧形式のシートを読む。見出し行は「年月」「号室（号数・部屋）」「水道代（金額）」を
- * 含む行として探す。氏名の列は任意（あれば控えとして表に出す）。
+ * 一覧形式のシートを読む。見出し行は「年月」「号室（号数・部屋）」と金額の列
+ * （「水道代」「電気代」「ガス代」「光熱費」「金額」）を含む行として探す。
+ * 水道代と電気代のように費目別の列が並んでいれば、それぞれの費目として読む。
+ * 氏名の列は任意（あれば控えとして表に出す）。
  * 「年月」の列が見つからなければ null を返す（＝検針表として読み直す合図）。
  */
 export function parseWaterListSheet(grid: unknown[][]): WaterListRow[] | null {
@@ -296,19 +318,24 @@ export function parseWaterListSheet(grid: unknown[][]): WaterListRow[] | null {
   let cYm = -1
   let cRoom = -1
   let cName = -1
-  let cAmount = -1
+  let amountCols: { col: number; label?: ImportLabel }[] = []
   for (let r = 0; r < Math.min(grid.length, 15); r++) {
     const row = (grid[r] ?? []).map(normHead)
     const iYm = row.findIndex((v) => /^(年月|対象月|請求月|月分)/.test(v))
     if (iYm < 0) continue
-    const iRoom = row.findIndex((v) => /^(号室|号数|部屋)/.test(v))
-    const iAmt = row.findIndex((v) => /(水道代|水道|金額)/.test(v))
-    if (iAmt < 0) continue
+    // 費目の分かる列を優先する。無ければ「光熱費」「金額」の列を1つ使う
+    const byLabel = row.flatMap((v, col) => {
+      const label = labelOfHead(v)
+      return label && col !== iYm ? [{ col, label }] : []
+    })
+    const plain = row.findIndex((v) => /(光熱費|金額)/.test(v))
+    const cols = byLabel.length > 0 ? byLabel : plain >= 0 ? [{ col: plain }] : []
+    if (cols.length === 0) continue
     head = r
     cYm = iYm
-    cRoom = iRoom
+    cRoom = row.findIndex((v) => /^(号室|号数|部屋)/.test(v))
     cName = row.findIndex((v) => /^(氏名|契約者|入居者)/.test(v))
-    cAmount = iAmt
+    amountCols = cols
     break
   }
   if (head < 0) return null
@@ -318,16 +345,14 @@ export function parseWaterListSheet(grid: unknown[][]): WaterListRow[] | null {
     const row = grid[r] ?? []
     const ym = parseYm(row[cYm])
     if (!ym) continue // 合計行や注記はここで落ちる
-    const amount = cellNumber(row[cAmount])
-    if (amount == null || amount <= 0) continue
     // 号室の列が無いファイル（1戸だけの物件）は空にしておき、画面側で号室を選ばせる
     const room = cRoom >= 0 ? normRoom(row[cRoom]) : ''
-    rows.push({
-      ...ym,
-      room,
-      name: cName >= 0 ? toHalf(String(row[cName] ?? '')).replace(/\s+/g, ' ').trim() : '',
-      amount,
-    })
+    const name = cName >= 0 ? toHalf(String(row[cName] ?? '')).replace(/\s+/g, ' ').trim() : ''
+    for (const { col, label } of amountCols) {
+      const amount = cellNumber(row[col])
+      if (amount == null || amount <= 0) continue
+      rows.push({ ...ym, room, name, amount, label })
+    }
   }
   return rows
 }

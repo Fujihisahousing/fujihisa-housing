@@ -9,7 +9,7 @@ import { BuildingEntry } from './components/entry/BuildingEntry'
 import { RepairEntry } from './components/entry/RepairEntry'
 import { ImportCsv } from './features/payments/ImportCsv'
 import { RecalcMonth } from './features/payments/RecalcMonth'
-import { ImportWater } from './features/payments/ImportWater'
+import { ImportUtility } from './features/payments/ImportUtility'
 import { LedgerView } from './features/ledger/LedgerView'
 import { PropertiesView } from './features/properties/PropertiesView'
 import { ReportsView } from './features/ReportsView'
@@ -83,7 +83,7 @@ const ENTRY_TABS: { key: EntryTab; label: string }[] = [
   { key: 'room', label: '部屋ごと' },
   { key: 'building', label: '建物まとめ' },
   { key: 'import', label: '通帳から取込' },
-  { key: 'water', label: '水道代を取込' },
+  { key: 'water', label: '光熱費を取込' },
   { key: 'repair', label: '修繕履歴' },
 ]
 
@@ -154,14 +154,14 @@ function EntryView({ properties }: { properties: Property[] }) {
             embedded
             onDone={onSaved}
           />
-          {/* 水道代の請求書を後から取り込んだときに、その月だけ振り分け直すための入口 */}
+          {/* 光熱費の請求書を後から取り込んだときに、その月だけ振り分け直すための入口 */}
           <RecalcMonth properties={properties} defaultPropertyId={activeProperty} onDone={onSaved} />
         </div>
       )}
       {tab === 'water' && (
-        // 水道代は家賃と別建てなので、請求額に足す取込をここに置く。
+        // 光熱費（水道・電気・ガス）は家賃と別建てなので、請求額に足す取込をここに置く。
         // 取り込んだ結果はこの画面の中に出るので、上の「記帳しました」は出さない。
-        <ImportWater properties={properties} defaultPropertyId={activeProperty} embedded onDone={() => {}} />
+        <ImportUtility properties={properties} defaultPropertyId={activeProperty} embedded onDone={() => {}} />
       )}
       {tab === 'repair' && (
         <RepairEntry properties={properties} defaultPropertyId={activeProperty} onSaved={onSaved} />
