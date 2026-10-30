@@ -34,6 +34,32 @@ export interface CompareRow {
   diff: number
   /** この行から階が変わる（＝行の上に区切り線を引く）。先頭行は false */
   floorBreak: boolean
+  /** 階ごとに交互に塗るための目印。先頭の階から 0,1,0,1… */
+  floorBand: 0 | 1
+}
+
+/** 1坪あたりの㎡数の逆数（1㎡＝0.3025坪） */
+const TSUBO_PER_M2 = 0.3025
+
+/** 単価（円）。面積が無い・金額が0なら null（空欄） */
+export function unitPrices(total: number, area: number | null | undefined) {
+  const a = n(area)
+  if (a <= 0 || total <= 0) return { tsubo: null, m2: null }
+  return { tsubo: Math.round(total / (a * TSUBO_PER_M2)), m2: Math.round(total / a) }
+}
+
+/** 合計行の単価＝面積のある部屋の合計額の総和 ÷ 面積の総和（面積で重みをつけた平均） */
+function averagePrices(rows: CompareRow[], pick: (r: CompareRow) => number) {
+  let sum = 0
+  let area = 0
+  for (const r of rows) {
+    const a = n(r.unit.area)
+    const t = pick(r)
+    if (a <= 0 || t <= 0) continue
+    sum += t
+    area += a
+  }
+  return unitPrices(sum, area)
 }
 
 /** 部屋と賃料履歴から比較表の行を組み立てる。CSS を読まないので単体で検証できる */
@@ -45,10 +71,13 @@ export function buildCompareRows(units: Unit[], history: RentHistory[]): Compare
     byUnit.get(h.unit_id)!.push(h)
   }
   const sorted = [...units].sort(unitCompare)
+  let band: 0 | 1 = 0
   return sorted.map((u, i) => {
     const base = effectiveRentKyoeki(u, byUnit.get(u.id), BASE_YEAR, BASE_MONTH)
     const nowRent = n(u.rent)
     const nowKyoeki = n(u.kyoeki)
+    const floorBreak = i > 0 && isGroupBreak(sorted[i - 1], u)
+    if (floorBreak) band = band === 0 ? 1 : 0
     return {
       unit: u,
       baseRent: n(base.rent),
@@ -56,7 +85,8 @@ export function buildCompareRows(units: Unit[], history: RentHistory[]): Compare
       nowRent,
       nowKyoeki,
       diff: nowRent + nowKyoeki - (n(base.rent) + n(base.kyoeki)),
-      floorBreak: i > 0 && isGroupBreak(sorted[i - 1], u),
+      floorBreak,
+      floorBand: band,
     }
   })
 }
@@ -141,6 +171,8 @@ export function RentComparisonSheet({
   const diffTotal = nowTotal - baseTotal
   const changed = rows.filter((r) => r.diff !== 0).length
   const roomWidth = maxRoomDigits(rows.map((r) => r.unit.room))
+  const baseAvg = averagePrices(rows, (r) => r.baseRent + r.baseKyoeki)
+  const nowAvg = averagePrices(rows, (r) => r.nowRent + r.nowKyoeki)
 
   return (
     <div className="rc-page">
@@ -165,24 +197,28 @@ export function RentComparisonSheet({
 
       <table className="rc-table">
         <colgroup>
-          {/* 元家賃：号室・賃料・共益費・合計 */}
-          <col style={{ width: '11%' }} />
-          <col style={{ width: '11%' }} />
-          <col style={{ width: '10%' }} />
-          <col style={{ width: '12%' }} />
-          {/* 現在：号室・賃料・共益費・合計・変動値 */}
-          <col style={{ width: '11%' }} />
-          <col style={{ width: '11%' }} />
-          <col style={{ width: '10%' }} />
-          <col style={{ width: '12%' }} />
-          <col style={{ width: '12%' }} />
+          {/* 元家賃：号室・賃料・共益費・合計・坪単価・㎡単価 */}
+          <col style={{ width: '8.5%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '8.5%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '6.5%' }} />
+          {/* 現在：号室・賃料・共益費・合計・変動値・坪単価・㎡単価 */}
+          <col style={{ width: '8.5%' }} />
+          <col style={{ width: '8%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '8.5%' }} />
+          <col style={{ width: '9%' }} />
+          <col style={{ width: '7%' }} />
+          <col style={{ width: '6.5%' }} />
         </colgroup>
         <thead>
           <tr className="rc-group">
-            <th className="rc-past" colSpan={4}>
+            <th className="rc-past" colSpan={6}>
               元家賃<small>{BASE_LABEL}</small>
             </th>
-            <th className="rc-now rc-split" colSpan={5}>
+            <th className="rc-now rc-split" colSpan={7}>
               現在<small>
                 {today.toLocaleDateString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit' })}
               </small>
@@ -193,11 +229,15 @@ export function RentComparisonSheet({
             <th>賃料</th>
             <th>共益費</th>
             <th>合計</th>
+            <th>坪単価</th>
+            <th>㎡単価</th>
             <th className="rc-split">号室</th>
             <th>賃料</th>
             <th>共益費</th>
             <th>合計</th>
             <th>変動値</th>
+            <th>坪単価</th>
+            <th>㎡単価</th>
           </tr>
         </thead>
         <tbody>
@@ -210,24 +250,43 @@ export function RentComparisonSheet({
             // 空室・停止など現在が課金対象でない部屋は号室を灰色にして区別する
             const idle = !(r.unit.status === '入居' || r.unit.status === '退予')
             const br = r.floorBreak ? ' is-fbreak' : ''
+            const baseSum = r.baseRent + r.baseKyoeki
+            const nowSum = r.nowRent + r.nowKyoeki
+            const bp = unitPrices(baseSum, r.unit.area)
+            const np = unitPrices(nowSum, r.unit.area)
+            // 階ごとに背景を交互に塗る（同じ階の部屋は同じ色）
+            const rowClass = [r.floorBreak ? 'is-fbreak' : '', r.floorBand ? 'is-band' : '']
+              .filter(Boolean)
+              .join(' ')
             return (
-              <tr key={r.unit.id} className={r.floorBreak ? 'is-fbreak' : undefined}>
+              <tr key={r.unit.id} className={rowClass || undefined}>
                 <td className={'rm' + br}>{label}</td>
                 <td className={'r' + br}>{yen(r.baseRent)}</td>
                 <td className={'r' + br}>{yen(r.baseKyoeki)}</td>
-                <td className={'r sum' + br}>{yen(r.baseRent + r.baseKyoeki)}</td>
+                <td className={'r sum' + br}>{yen(baseSum)}</td>
+                <td className={'r up' + br}>{yen(bp.tsubo ?? 0)}</td>
+                <td className={'r up' + br}>{yen(bp.m2 ?? 0)}</td>
                 <td className={'rm now rc-split' + br + (idle ? ' is-idle' : '')}>{label}</td>
                 <td className={'r now' + br}>{yen(r.nowRent)}</td>
                 <td className={'r now' + br}>{yen(r.nowKyoeki)}</td>
-                <td className={'r sum now' + br}>{yen(r.nowRent + r.nowKyoeki)}</td>
+                <td className={'r sum now' + br}>{yen(nowSum)}</td>
                 <td className={'r dv now' + br + (r.diff < 0 ? ' is-down' : '')}>{signed(r.diff)}</td>
+                <td className={'r up now' + br}>{yen(np.tsubo ?? 0)}</td>
+                <td className={'r up now' + br}>{yen(np.m2 ?? 0)}</td>
               </tr>
             )
           })}
         </tbody>
         <tfoot>
           {/* 月収計＝各室の合計の総和、年収計＝その12倍。変動値も同じ並びで出す */}
-          <TotalRow label="月収計" base={baseTotal} now={nowTotal} diff={diffTotal} />
+          <TotalRow
+            label="月収計"
+            base={baseTotal}
+            now={nowTotal}
+            diff={diffTotal}
+            baseAvg={baseAvg}
+            nowAvg={nowAvg}
+          />
           <TotalRow
             label="年収計"
             base={baseTotal * 12}
@@ -240,6 +299,7 @@ export function RentComparisonSheet({
 
       <p className="rc-note">
         元家賃＝{BASE_LABEL}の賃料履歴。現在＝部屋情報の賃料・共益費。変動値は合計（賃料＋共益費）の差額。年収計は月収計の12か月分。
+        坪単価・㎡単価は合計（賃料＋共益費）÷部屋の面積（1㎡＝0.3025坪、円未満四捨五入）。月収計の単価は全室の合計÷全室の面積。
       </p>
     </div>
   )
@@ -252,12 +312,17 @@ function TotalRow({
   now,
   diff,
   year,
+  baseAvg,
+  nowAvg,
 }: {
   label: string
   base: number
   now: number
   diff: number
   year?: boolean
+  /** 平均の単価。年収計では出さない（月額の単価なので） */
+  baseAvg?: { tsubo: number | null; m2: number | null }
+  nowAvg?: { tsubo: number | null; m2: number | null }
 }) {
   return (
     <tr className={year ? 'is-year' : undefined}>
@@ -265,11 +330,15 @@ function TotalRow({
       <td colSpan={3} className="r">
         {yen(base)}
       </td>
+      <td className="r up">{yen(baseAvg?.tsubo ?? 0)}</td>
+      <td className="r up">{yen(baseAvg?.m2 ?? 0)}</td>
       <td className="rc-split now">{label}</td>
       <td colSpan={3} className="r now">
         {yen(now)}
       </td>
       <td className={'r dv' + (diff < 0 ? ' is-down' : '')}>{signed(diff)}</td>
+      <td className="r up now">{yen(nowAvg?.tsubo ?? 0)}</td>
+      <td className="r up now">{yen(nowAvg?.m2 ?? 0)}</td>
     </tr>
   )
 }

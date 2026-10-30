@@ -140,16 +140,22 @@
   color: #334155;
   white-space: nowrap;
 }
-.rc-table tbody tr:nth-child(even) td {
-  background: #fafbfc;
+/* 階ごとに背景を交互に塗る（1行ごとの縞ではなく、同じ階の部屋は同じ色）。
+   is-band は buildCompareRows が階の変わり目ごとに付け外しする。 */
+.rc-table tbody tr.is-band td {
+  background: #e9edf2;
 }
 /* 現在のブロックは背景ごと色を変えて、元家賃と一目で見分けられるようにする。
-   縞模様（偶数行）より詳細度を高くしてあるので !important は要らない。 */
+   階の交互塗りも現在側は藍の濃淡で同じように付ける。 */
 .rc-table tbody td.now {
-  background: #eef2ff;
+  background: #f3f5ff;
 }
-.rc-table tbody tr:nth-child(even) td.now {
-  background: #e5eafc;
+.rc-table tbody tr.is-band td.now {
+  background: #e0e6fd;
+}
+/* 坪単価・㎡単価は補足の数字なので少し控えめにする */
+.rc-table td.up {
+  color: #475569;
 }
 .rc-table tr {
   break-inside: avoid;
