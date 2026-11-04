@@ -170,6 +170,8 @@ export function RoomEntry({
               <option key={u.id} value={u.id}>
                 {u.room}
                 {u.layout ? `（${u.layout}）` : ''}
+                {/* 誰の部屋か分かるよう入居者名も並べる（空室など未登録なら出さない） */}
+                {u.tenant?.trim() ? `　${u.tenant.trim()}` : ''}
               </option>
             ))}
           </select>
