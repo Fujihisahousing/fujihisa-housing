@@ -6,7 +6,7 @@ import { syncPaymentRecordsFromLedger } from '../../lib/syncLedger'
 import { ReflectionHint } from '../common/ReflectionHint'
 import { today } from '../../lib/format'
 import { yen } from '../../lib/format'
-import { CAT_RENT, CAT_KYOEKI, CAT_UTILITY } from '../../types'
+import { CAT_RENT, CAT_KYOEKI, CAT_PARKING, CAT_UTILITY } from '../../types'
 import type { Property, Transaction, Unit } from '../../types'
 
 type Mode = 'individual' | 'lump'
@@ -37,6 +37,7 @@ export function RoomEntry({
   const [keyMoney, setKeyMoney] = useState('')
   const [water, setWater] = useState('')
   const [electricity, setElectricity] = useState('')
+  const [bicycle, setBicycle] = useState('')
   const [other, setOther] = useState('')
   // まとめ入金
   const [lump, setLump] = useState('')
@@ -75,6 +76,7 @@ export function RoomEntry({
     setKeyMoney('')
     setWater('')
     setElectricity('')
+    setBicycle('')
     setOther('')
     setLump('')
     setError(null)
@@ -110,6 +112,9 @@ export function RoomEntry({
       if (n(keyMoney) > 0) rows.push({ ...base, category: '礼金', amount: n(keyMoney) })
       if (n(water) > 0) rows.push({ ...base, category: '水道代', amount: n(water) })
       if (n(electricity) > 0) rows.push({ ...base, category: '電気代', amount: n(electricity) })
+      // 駐輪場代は既存の費目「駐車・駐輪」で記帳する。収支表の「駐車・駐輪」行と、
+      // 入金状況の入金額（賃料・共益費・駐車・駐輪を足す）にそのまま入る。
+      if (n(bicycle) > 0) rows.push({ ...base, category: CAT_PARKING, amount: n(bicycle) })
       if (n(other) > 0) rows.push({ ...base, category: 'その他', amount: n(other) })
       if (rows.length === 0) return setError('金額を1つ以上入力してください。')
     } else {
@@ -130,6 +135,7 @@ export function RoomEntry({
       setKeyMoney('')
       setWater('')
       setElectricity('')
+      setBicycle('')
       setOther('')
       setLump('')
       if (mode === 'lump') setRent(String(contractRent + contractKyoeki || ''))
@@ -215,9 +221,18 @@ export function RoomEntry({
               <MoneyInput value={electricity} onChange={setElectricity} />
             </Field>
           </div>
-          <Field label="その他">
-            <MoneyInput value={other} onChange={setOther} />
-          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="駐輪場代">
+              <MoneyInput value={bicycle} onChange={setBicycle} />
+              {/* 契約の駐輪駐車欄を目安として出す（自動では入れない。家賃込みの部屋もあるため） */}
+              {unit?.parking?.trim() && (
+                <p className="mt-1 text-xs text-slate-500">契約：{unit.parking.trim()}</p>
+              )}
+            </Field>
+            <Field label="その他">
+              <MoneyInput value={other} onChange={setOther} />
+            </Field>
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
