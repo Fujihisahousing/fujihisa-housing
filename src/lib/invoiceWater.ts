@@ -204,10 +204,10 @@ export interface UtilityPatch {
  * 1部屋・1か月ぶんの足し込みを計算する。前回の目印ぶん（費目を問わず全部）を一度戻してから
  * 足すので、同じ請求書を取り込み直しても二重にならない。
  *
- * 入金額は「固定分をきちんと払っている月」だけ光熱費を足す。
- * 未入金・一部入金の月に足すと、受け取っていないお金を受け取ったことにしてしまうため。
- * 通帳取込で既に光熱費ぶんまで入っている月（入金額が請求額＋光熱費に届いている月）も
- * 触らない。ここを見ないと、記帳から入った光熱費の上にもう一度足して二重になる。
+ * 入金額には足さない（2026-10-28 ユーザー指定：検針票・請求書は請求額の話。収支表に入るのは
+ * 通帳取込・台帳の記帳・手入力だけ）。以前は家賃を払っている月の入金額にも足していたが、
+ * 入居者が水道代を翌月の家賃と一緒に払うと、通帳取込でその翌月の入金額にも入り、
+ * 収支表に2回載った（ルネス405・605）。入金額は記録の値をそのまま書き戻す。
  */
 export function utilityPatch(
   unit: Unit,
@@ -222,14 +222,12 @@ export function utilityPatch(
   // そのまま足すと二重になるので、土台を固定分に引き直す。
   const rebased = prev === 0 && fixed > 0 && baseBilled > fixed
   if (rebased) baseBilled = fixed
-  const basePaid = rec?.paid != null ? n(rec.paid) - prev : 0
   const goal = baseBilled + amount
-  const raise = basePaid > 0 && basePaid >= baseBilled && basePaid < goal
   return {
     billed: goal,
-    paid: raise ? goal : basePaid,
+    paid: rec?.paid != null ? n(rec.paid) : 0,
     memo: writeUtilityTag(rec?.memo, amount),
-    paidRaised: raise,
+    paidRaised: false,
     rebased,
   }
 }

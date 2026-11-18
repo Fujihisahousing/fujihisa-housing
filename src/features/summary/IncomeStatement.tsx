@@ -54,9 +54,9 @@ export function IncomeStatement({ propertyName }: { propertyName: string }) {
     void load()
   }, [load])
 
-  // 家賃収入は入金状況の月次記録の「請求額（契約金額）」で出す。請求額は部屋・賃料履歴・
-  // 入退去から自動で作り直されるので、マスタを直せばこの表まで連動する。
-  // 同じ家賃を台帳にも記帳している号室・月は、記録のほうを採って二重計上を避ける。
+  // 家賃収入は入金状況の月次記録の「入金額」で出す（通帳取込・台帳の記帳・手入力だけが入る）。
+  // 入金状況で再計算すれば、この表・管理表・物件概要書まで同じ数字になる。
+  // 同じ入金を台帳にも記帳している号室・月は、記録のほうを採って二重計上を避ける。
   // 変換の中身は管理表・物件概要書と食い違わないよう calc.ts に共通化してある。
   const allTxs = useMemo(
     () => incomeTransactions(txs, records, units, rentHistoryMapOf(rentHistory)),

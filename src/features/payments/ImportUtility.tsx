@@ -369,11 +369,9 @@ export function ImportUtility({
     setBusy(true)
     setError(null)
     try {
-      let raised = 0
       for (const { unit, year, month, rec, patch } of matched) {
         const u = unit!
         const guarantor = rec?.guarantor ?? u.guarantor ?? null
-        if (patch!.paidRaised) raised++
         const base: PaymentRecord = rec ?? {
           property_id: propertyId,
           room: String(u.room ?? ''),
@@ -404,8 +402,7 @@ export function ImportUtility({
       // 反映後の請求額を表に出し続けるため、記録を読み直す
       setRecords(await paymentRecordsRepo.list(propertyId))
       setDone(
-        `${months.length}か月ぶん・${matched.length}件・${yen(total)} を請求額に反映しました` +
-          `（入金額にも足したのは ${raised}件）。`,
+        `${months.length}か月ぶん・${matched.length}件・${yen(total)} を請求額に反映しました（入金額は変えていません）。`,
       )
       onDone()
     } catch (err) {
@@ -441,8 +438,8 @@ export function ImportUtility({
           <b>スキャンしたPDFは文字を自動で読み取る</b>ので、反映する前に請求書の画像と請求金額を見比べてください（表の金額は直せます）。
         </p>
         <p>
-          入金は総額で届くので、<b>固定分（賃料＋共益費＋駐車・駐輪）をきちんと払っている月は入金額にも同じだけ足します</b>。
-          未入金・一部入金の月は請求額だけ増やすので、不足額として出ます。
+          取り込むのは<b>請求額だけ</b>です。<b>入金額には足しません</b>（収支表に入るのは通帳取込・台帳の記帳・手入力だけ）。
+          光熱費が実際に入金されたら、通帳取込か入金額の手入力で入れてください。それまでは不足額として出ます。
           同じファイルを取り込み直しても二重にはなりません（備考に [光熱費 〇〇] の形で足した額を控えています。昔の [水道 〇〇] [電気 〇〇] も光熱費として読み、取り込み直すと置き換えます）。
           通帳の総額をそのまま請求額にしていた月は、<b>家賃を超えていた分を光熱費とみなして置き換えます</b>。
         </p>
