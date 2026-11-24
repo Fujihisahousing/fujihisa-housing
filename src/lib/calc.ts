@@ -643,8 +643,10 @@ export function incomeTransactions(
 
     // その月に効いていた契約額の内訳。履歴が無ければ部屋の現在値に落ちる
     const eff = u ? effectiveRentKyoeki(u, rentHistoryByUnit?.get(u.id), rec.year, rec.month) : null
-    // 入居の翌月は前の月の日割りを上乗せして請求しているので、その分も家賃に数える
-    // （数えないと「賃料＋共益費」を超えた日割りが光熱費に落ちる）
+    // 古い方式（2026-09-30〜11-24：入居の翌月に日割りを上乗せ）で作られた記録には備考に
+    // `[日割り N]` の目印が残っていることがある。その分も家賃に数える
+    // （数えないと「賃料＋共益費」を超えた日割りが光熱費に落ちる）。
+    // 今の方式（入居月に日割りを請求）では目印を付けないので、ここは0になる。
     const rentBase = eff ? n(eff.rent) + n(eff.kyoeki) + readProratedTag(rec.memo) : 0
     const pk = eff ? parkingYen(eff.parking || u!.parking) : 0
     // 賃料が0の部屋（停止中・契約額が台帳に無い部屋）は差し引く土台が無いので、光熱費には

@@ -42,7 +42,7 @@ interface Period {
   toIdx: number | null
   tenant: string | null
   kana: string | null
-  /** 入居月（日割りの月）と日割りの額。日割りは入居月には請求せず、翌月の家賃に上乗せする */
+  /** 入居月（日割りの月）と日割りの額。入居月は日割りだけを請求し、翌月から満額にする */
   proratedIdx: number | null
   proratedAmount: number | null
   /** 入居日（備考の「〇月〇日入居」に使う） */
@@ -169,6 +169,33 @@ export function knownFromIdx(unit: Unit, moves: MoveEvent[]): number | null {
   return Math.min(...anchors)
 }
 
+/**
+ * その月に部屋が埋まっていたかを、入退去シートと入居開始日から答える（画面の表示用）。
+ * 月次記録が無い月を入金状況に出すとき、部屋の現在値をそのまま出すと、退去と次の入居の
+ * あいだの空室の月に次の入居者の名前と満額の請求が出てしまう（堂島1503 2026年9・10月）。
+ *   known=false … 入退去シートにも入居開始日にも手掛かりが無い月（従来どおり現在値で出す）
+ *   occupied    … その月を含む入居期間があるか
+ *   tenant/kana … その期間の控えの名前（無ければ null）
+ *   latest      … いちばん新しい入居期間か（部屋の現在値を当ててよい期間か）
+ */
+export function occupancyAt(
+  unit: Unit,
+  moves: MoveEvent[],
+  idx: number,
+): { known: boolean; occupied: boolean; tenant: string | null; kana: string | null; latest: boolean } {
+  const periods = periodsOf(unit, moves)
+  const knownFrom = knownFromIdx(unit, moves)
+  const known = knownFrom != null && idx >= knownFrom
+  const period = periods.find((p) => idx >= p.fromIdx && (p.toIdx == null || idx <= p.toIdx)) ?? null
+  return {
+    known,
+    occupied: Boolean(period),
+    tenant: period?.tenant ?? null,
+    kana: period?.kana ?? null,
+    latest: period != null && period === periods[periods.length - 1],
+  }
+}
+
 export interface UnitContext {
   unit: Unit
   history: RentHistory[]
@@ -224,11 +251,11 @@ export interface Derived {
   kana: string | null
   tenantType: string | null
   guarantor: string | null
-  /** 契約額（賃料＋共益費＋駐輪駐車）。入居月は0で翌月に日割りを上乗せ、空室月は0 */
+  /** 契約額（賃料＋共益費＋駐輪駐車）。入居月は日割りの額、空室月は0 */
   contract: number
-  /** 契約額に上乗せした前の月の日割り（入居の翌月だけ） */
+  /** 入居月に請求する日割りの額（入居月だけ。それ以外の月は0） */
   prorated: number
-  /** 入居月で、請求を翌月に回した月か（請求0でも未入金にしない） */
+  /** 入居月（日割りを請求する月）か。日割りが未入力で請求0でも未入金にしない */
   proratedMonth: boolean
   /** 備考に自動で書く入退去の文言 */
   notes: MoveNotes
@@ -240,25 +267,27 @@ export interface Derived {
   judgement: string
 }
 
-/** その月の日割りの上乗せ額。入居の翌月だけ、入居月の日割り（未入力なら0）を返す */
-function proratedAddOf(period: Period | null, idx: number): number {
-  if (!period || period.proratedIdx == null || period.proratedIdx + 1 !== idx) return 0
+/** 入居月に請求する日割りの額。入居月でなければ0、入居月でも未入力なら0 */
+function proratedOf(period: Period | null, idx: number): number {
+  if (!period || period.proratedIdx !== idx) return 0
   return period.proratedAmount ?? 0
 }
 
 /**
  * その月に効いていた契約額。空室月は0。
- * 入居月（日割りの月）は請求せず0、翌月に日割りを上乗せする（ユーザー指定 2026-09-30：
- * 日割りは翌月の家賃と一緒に入金してもらう運用）。
+ * 入居月（日割りの月）は日割りの額だけを請求し、翌月から満額にする（ユーザー指定 2026-11-24）。
+ * 2026-09-30〜11-24 は「入居月は請求0、翌月の家賃に日割りを上乗せ」だったが、入居月の請求が
+ * 0円・翌月が満額＋日割りになり、実際の請求（入居月に日割り、翌月から満額）と合わなかった
+ * （守口703 2026年9・10月、堂島1503・新高302 2026年11・12月）。
  */
 function contractOf(ctx: UnitContext, idx: number, period: Period | null): number {
   if (!period) return 0
-  if (period.proratedIdx === idx) return 0
+  if (period.proratedIdx === idx) return proratedOf(period, idx)
   const eff = effectiveRentKyoeki(ctx.unit, ctx.history, yearOfIdx(idx), monthOfIdx(idx))
-  return billedAmount(eff, ctx.unit) + proratedAddOf(period, idx)
+  return billedAmount(eff, ctx.unit)
 }
 
-/** その月の備考に書く入退去の文言。退去月は退去日、入居月は入居日と上乗せ先の月 */
+/** その月の備考に書く入退去の文言。退去月は退去日、入居月は入居日 */
 function notesOf(ctx: UnitContext, idx: number, period: Period | null): MoveNotes {
   const notes: MoveNotes = {}
   if (period && period.toIdx === idx && period.outDate) {
@@ -268,11 +297,7 @@ function notesOf(ctx: UnitContext, idx: number, period: Period | null): MoveNote
   // 入居月は前の入居者の退去月と重なることがある（その月は退去する人の行になる）ので、
   // その月の期間ではなく、全部の期間から入居月が当たるものを探す
   const moveIn = ctx.periods.find((p) => p.proratedIdx === idx && p.inDate)
-  if (moveIn) {
-    notes.inDate = moveIn.inDate
-    notes.proratedToMonth = monthOfIdx(idx + 1)
-  }
-  notes.prorated = proratedAddOf(period, idx)
+  if (moveIn) notes.inDate = moveIn.inDate
   return notes
 }
 
@@ -312,7 +337,7 @@ export function deriveMonth(ctx: UnitContext, idx: number): Derived {
     tenantType: occupied ? fromUnit(ctx.unit.tenant_type, rec?.tenant_type) : null,
     guarantor,
     contract,
-    prorated: known ? proratedAddOf(period, idx) : 0,
+    prorated: known ? proratedOf(period, idx) : 0,
     proratedMonth: period != null && period.proratedIdx === idx,
     notes: known ? notesOf(ctx, idx, period) : {},
     water,
@@ -324,8 +349,9 @@ export function deriveMonth(ctx: UnitContext, idx: number): Derived {
 }
 
 /**
- * 入居中の月の判定。入居月（日割りを翌月に回した月）は請求が0なので、
- * そのまま導くと「未入金」になる。払うものが無い月なので入金済として扱う。
+ * 入居中の月の判定。入居月で日割りが未入力（請求0）の月は、そのまま導くと「未入金」に
+ * なる。払うものが決まっていない月なので入金済として扱う。日割りが入っていれば、
+ * ほかの月と同じく請求額と入金額から導く。
  */
 function occupiedJudgement(billed: number, paid: number, guarantor: boolean, proratedMonth: boolean): string {
   if (proratedMonth && billed <= 0) return guarantor ? '保証会社入金済' : '入金済'
@@ -471,9 +497,9 @@ export function mergeMonth(
           : '空室'
         : keptJudgement(rec?.judgement ?? d.judgement, billed, paid)
 
-  // 退去月の「〇月〇日退去予定」、入居月の「〇月〇日入居（日割りは〇月分に上乗せ）」、
-  // 翌月の日割りの目印を備考に付ける。付けるものも付いているものも無い月は触らない
-  // （空白の整え直しだけで記録を書き換えないため）
+  // 退去月の「〇月〇日退去予定」、入居月の「〇月〇日入居（日割り）」を備考に付ける。
+  // 古い方式の文言・目印（「日割りは〇月分に上乗せ」「[日割り N]」）が残っていればはがす。
+  // 付けるものも付いているものも無い月は触らない（空白の整え直しだけで記録を書き換えないため）
   if (d.known && (anyMoveNotes(d.notes) || hasMoveNotes(memo))) {
     memo = writeMoveNotes(memo, d.notes)
   }
@@ -560,8 +586,8 @@ export function monthsInScope(ctx: UnitContext, todayIdx: number): number[] {
       const from = Math.max(p.fromIdx, lo)
       const to = Math.min(p.toIdx ?? todayIdx, todayIdx)
       for (let i = from; i <= to; i++) set.add(i)
-      // 入金状況は前家賃の翌月まで出すので、退去月・入居月・日割りを上乗せする月は
-      // 翌月でも作る（備考の「〇月〇日退去予定」と上乗せ後の請求額を出すため）
+      // 入金状況は前家賃の翌月まで出すので、退去月・入居月・満額を始める月は
+      // 翌月でも作る（備考の「〇月〇日退去予定」と、入居月の日割り・翌月の満額を出すため）
       for (const i of [p.toIdx, p.proratedIdx, p.proratedIdx != null ? p.proratedIdx + 1 : null]) {
         if (i != null && i >= lo && i <= todayIdx + 1) set.add(i)
       }

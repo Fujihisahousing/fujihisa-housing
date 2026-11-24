@@ -19,7 +19,7 @@ import {
 } from '../../lib/repositories'
 import { effectiveRentKyoeki } from '../../lib/calc'
 import { resyncUnit, saveRentHistoryPlan } from '../../lib/resync'
-import { planRentHistoryEdit, type RentValues } from '../../lib/rentHistoryPlan'
+import { planRentHistoryEdit, valueAt, type RentValues } from '../../lib/rentHistoryPlan'
 import { unitCompare } from '../../lib/sortUnits'
 import { yen, formatDate } from '../../lib/format'
 import { TENANT_TYPES, PAYMENT_METHODS, USE_TYPES } from '../../types'
@@ -616,7 +616,7 @@ export function MoveEventsPanel({ kind, units, properties, history, events, ledg
       {pending.length === 0 ? (
         <p className="text-center text-slate-400 text-xs py-6">
           {isMoveIn
-            ? '入居の予定はありません。入居日と日割り家賃を登録すると、日割りは翌月分の請求額に上乗せされます。'
+            ? '入居の予定はありません。入居日と日割り家賃を登録すると、入居月は日割り、翌月から満額で請求されます。'
             : '予定の退去はありません。退去予告を受けた時点で登録してください。'}
         </p>
       ) : (
@@ -782,7 +782,7 @@ function MoveForm({
           </div>
           <p className="text-[11px] text-slate-500">
             月は入居日から自動で決まります（日割り＝入居月／満額＝翌月）。
-            日割りは入居月には請求せず、翌月分の家賃に上乗せして請求します。
+            入居月は日割りの額だけを請求し、翌月分から満額を請求します。
             1日入居のときだけ日割りが無くなり、その月から満額になります。
           </p>
 
@@ -1130,10 +1130,18 @@ export async function applyMoveIn(e: MoveEvent, u: Unit): Promise<void> {
   // 予約に入っている項目のうち、今と違うものだけを履歴に当てる。以前は予約に賃料が
   // 無くても 0 円と比べて「変わった」とみなし、0 円の履歴を作ることがあった。
   // 駐輪駐車の変更も見る（見ていなかったので、駐車場を借りた月が履歴に残らなかった）。
+  //
+  // 比べる相手は部屋の現在値ではなく「満額を始める月に効いている賃料履歴の額」。
+  // 請求額は履歴から出るので、部屋の現在値と履歴が食い違っている部屋で現在値と比べると
+  // 「変わっていない」と判定され、履歴が古い額のまま残って請求額が入居タブの額と合わなかった
+  // （堂島1503：履歴167,000／入居タブ166,000、新高302：履歴115,000／入居タブ116,000）。
+  // 履歴が1行も無い部屋は、これまでどおり部屋の現在値と比べる。
+  const history = await rentHistoryRepo.listByUnit(u.id)
+  const base = e.first_full_ym ? valueAt(history, `${e.first_full_ym}-01`, oldValues) : oldValues
   const changed: Partial<RentValues> = {}
-  if ('rent' in patch && (Number(patch.rent) || 0) !== oldValues.rent) changed.rent = Number(patch.rent) || 0
-  if ('kyoeki' in patch && (Number(patch.kyoeki) || 0) !== oldValues.kyoeki) changed.kyoeki = Number(patch.kyoeki) || 0
-  if ('parking' in patch && (patch.parking ?? null) !== oldValues.parking) changed.parking = patch.parking ?? null
+  if ('rent' in patch && (Number(patch.rent) || 0) !== base.rent) changed.rent = Number(patch.rent) || 0
+  if ('kyoeki' in patch && (Number(patch.kyoeki) || 0) !== base.kyoeki) changed.kyoeki = Number(patch.kyoeki) || 0
+  if ('parking' in patch && (patch.parking ?? null) !== base.parking) changed.parking = patch.parking ?? null
 
   await unitsRepo.update(u.id, {
     ...patch,
@@ -1143,7 +1151,6 @@ export async function applyMoveIn(e: MoveEvent, u: Unit): Promise<void> {
   if (Object.keys(changed).length > 0 && e.first_full_ym) {
     // 部屋の編集と同じ規則で書く（lib/rentHistoryPlan.ts）。満額を始める月より前に
     // 履歴が無ければ前の額の行も置くので、入居前の月まで新しい賃料にならない。
-    const history = await rentHistoryRepo.listByUnit(u.id)
     await saveRentHistoryPlan(
       u.id,
       planRentHistoryEdit({

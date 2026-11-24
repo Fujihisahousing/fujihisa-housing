@@ -7,7 +7,7 @@ import { ImportCsv } from './ImportCsv'
 import { transactionsRepo, unitsRepo, paymentNotesRepo, paymentRecordsRepo, rentHistoryRepo, arrearsNotesRepo, moveEventsRepo } from '../../lib/repositories'
 import { calcPaymentStatus, calcArrearsList, tenantViewFor, moveOutYmByUnit, type ArrearsUnitRow } from '../../lib/calc'
 import { clearOverrides, resyncProperty, resyncUnit, setOverride } from '../../lib/resync'
-import { monthIdx } from '../../lib/derive'
+import { monthIdx, occupancyAt } from '../../lib/derive'
 import { unitCompare } from '../../lib/sortUnits'
 import { exportPaymentStatusExcel } from '../../reports/exportExcel'
 import { yen, percent, today } from '../../lib/format'
@@ -197,9 +197,18 @@ export function PaymentStatus({
     return m
   }, [arrears])
 
-  // 部屋ごとの退去月と、表示している月。退去の前後で契約者の出しどころを切り替える
+  // 部屋ごとの退去月と、表示している月。退去月の契約者名に「（旧）」を付けるのに使う
   const moveOutYm = useMemo(() => moveOutYmByUnit(events), [events])
   const ym = `${year}-${String(month).padStart(2, '0')}`
+  // 部屋ごとの入退去。記録の無い月が「入居していた月か・空室の月か」を決めるのに使う
+  const eventsByUnit = useMemo(() => {
+    const m = new Map<string, MoveEvent[]>()
+    for (const e of events) {
+      if (!m.has(e.unit_id)) m.set(e.unit_id, [])
+      m.get(e.unit_id)!.push(e)
+    }
+    return m
+  }, [events])
 
   // 表示行：記録があれば記録、無ければ自動計算
   const displayRows: DisplayRow[] = useMemo(() => {
@@ -211,13 +220,17 @@ export function PaymentStatus({
       const manualArrears = rec?.arrears_months
       const arrearsMonths = manualArrears ?? arr?.months ?? 0
       const arrearsIsManual = manualArrears != null
-      // 退去月は旧入居者のまま「（旧）」を付け、翌月からは部屋の現在値に切り替える。
+      // 退去月は旧入居者の名前に「（旧）」を付ける（同じ月に次の人が入ることがあるため）。
       const view = tenantViewFor(
         u.status === '入居' || u.status === '退予',
         moveOutYm.get(u.id),
         ym,
       )
-      if (rec && !view.useUnit) {
+      // 記録がある月は、退去の後でも記録を出す。以前は退去月の翌月から記録を見ずに部屋の
+      // 現在値を出していたため、次の入居者が入ると、空室だった月や入居月（日割り）まで
+      // その人の名前と満額の請求・不足額になっていた（堂島1503 2026年9〜11月、新高302 10・11月）。
+      // 記録は入退去シートから作り直される（lib/derive.ts）ので、退去後の月も記録が正しい。
+      if (rec) {
         // 記録がある月は、その時点の値だけを使う（物件情報には一切フォールバックしない）。
         // → 物件情報の契約者名を変更しても過去の表示は変わらない。
         // ただし読み方(kana)だけは例外：記録に読み方が入っておらず、かつ契約者名が
@@ -260,19 +273,25 @@ export function PaymentStatus({
       //   ・退去日の翌月以降で今も空室 … 退去タブを使った部屋の退去後
       // 「停止」（募集停止）は入居したままのことがあるので、ここでは伏せない。
       // 退去月そのものは、その月の家賃を払った人なので「◯◯（旧）」のまま残す。
-      const hideUnit = u.status === '空室' || u.status === '入予' || view.vacant
+      //
+      // 入退去シート（か入居開始日）から「この月は誰も住んでいなかった」と分かる月は、
+      // 部屋がいま入居中でも空室として出す。退去と次の入居のあいだの月は請求も入金も無く
+      // 記録が作られないので、ここで止めないと次の入居者の名前と満額の請求が出てしまう。
+      const occ = occupancyAt(u, eventsByUnit.get(u.id) ?? [], monthIdx(year, month))
+      const vacant = view.vacant || (occ.known && !occ.occupied)
+      const hideUnit = u.status === '空室' || u.status === '入予' || vacant
       return {
         unit: u,
         tenant: hideUnit ? '' : u.tenant ?? '',
         tenantRaw: hideUnit ? '' : u.tenant ?? '',
-        vacant: view.vacant,
+        vacant,
         tenantType: hideUnit ? '' : u.tenant_type ?? '',
         kana: hideUnit ? '' : u.tenant_kana ?? '',
-        billed: view.vacant ? 0 : row.billed,
-        calcBilled: view.vacant ? 0 : row.billed,
-        paid: view.useUnit && view.vacant ? null : row.paid,
-        paidDate: view.useUnit && view.vacant ? null : row.paidDate,
-        judgement: view.vacant ? '空室' : row.judgement,
+        billed: vacant ? 0 : row.billed,
+        calcBilled: vacant ? 0 : row.billed,
+        paid: vacant ? null : row.paid,
+        paidDate: vacant ? null : row.paidDate,
+        judgement: vacant ? '空室' : row.judgement,
         guarantor: hideUnit ? '' : u.guarantor ?? '',
         memo: notes[u.id] ?? '',
         arrears: arrearsMonths,
@@ -280,7 +299,7 @@ export function PaymentStatus({
         fromRecord: false,
       }
     })
-  }, [r.rows, recIndex, arrearsByUnit, year, month, notes, moveOutYm, ym])
+  }, [r.rows, recIndex, arrearsByUnit, year, month, notes, moveOutYm, ym, eventsByUnit])
 
   // 集計（表示行ベース）
   const summary = useMemo(() => {
